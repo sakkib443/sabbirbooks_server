@@ -29,6 +29,14 @@ import { ClassScheduleRoutes } from './app/modules/classSchedule/classSchedule.r
 import { CertificateRoutes } from './app/modules/certificate/certificate.routes';
 import { QrResourceRoutes } from './app/modules/qrResource/qrResource.routes';
 import { OrderRoutes } from './app/modules/order/order.routes';
+import { AttendanceRoutes } from './app/modules/attendance/attendance.routes';
+import { ExamRoutes } from './app/modules/exam/exam.routes';
+import { AssignmentRoutes } from './app/modules/assignment/assignment.routes';
+import { NotificationRoutes } from './app/modules/notification/notification.routes';
+import { ReviewRoutes } from './app/modules/review/review.routes';
+import { BlogRoutes } from './app/modules/blog/blog.routes';
+import { NoticeRoutes } from './app/modules/notice/notice.route';
+import { PartnerRoutes } from './app/modules/partner/partner.route';
 
 const app: Application = express();
 
@@ -80,6 +88,14 @@ app.use('/api/classes', ClassScheduleRoutes);
 app.use('/api/certificate', CertificateRoutes);
 app.use('/api/qr', QrResourceRoutes);
 app.use('/api/orders', OrderRoutes);
+app.use('/api/attendance', AttendanceRoutes);
+app.use('/api/exams', ExamRoutes);
+app.use('/api/assignments', AssignmentRoutes);
+app.use('/api/notifications', NotificationRoutes);
+app.use('/api/reviews', ReviewRoutes);
+app.use('/api/blogs', BlogRoutes);
+app.use('/api/notices', NoticeRoutes);
+app.use('/api/partners', PartnerRoutes);
 
 // Serve locally-uploaded files (class materials, certificates, etc.)
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
