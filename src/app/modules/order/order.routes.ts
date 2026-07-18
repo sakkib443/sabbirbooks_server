@@ -4,6 +4,8 @@ import validateRequest from '../../middlewares/validateRequest';
 import {
   createOrderValidationSchema,
   updateOrderStatusValidationSchema,
+  submitManualPaymentValidationSchema,
+  updateOrderPaymentValidationSchema,
 } from './order.validation';
 import { authMiddleware, authorize } from '../../middlewares/auth';
 
@@ -26,6 +28,25 @@ router.get('/', authMiddleware, authorize('admin'), OrderController.getAllOrders
 router.post('/:id/pay/bkash', authMiddleware, OrderController.payWithBkash);
 router.post('/:id/pay/sslcommerz', authMiddleware, OrderController.payWithSslcommerz);
 router.post('/:id/pay/complete', authMiddleware, OrderController.completePayment);
+
+// Manual payment: buyer submits Send-Money details → order stays pending.
+router.post(
+  '/:id/pay/manual',
+  authMiddleware,
+  validateRequest(submitManualPaymentValidationSchema),
+  OrderController.submitManualPayment
+);
+
+// ─── Admin: verify manual payments ───────────────────────────
+router.post('/:id/approve', authMiddleware, authorize('admin'), OrderController.approveOrderPayment);
+router.post('/:id/reject', authMiddleware, authorize('admin'), OrderController.rejectOrderPayment);
+router.patch(
+  '/:id/payment',
+  authMiddleware,
+  authorize('admin'),
+  validateRequest(updateOrderPaymentValidationSchema),
+  OrderController.updateOrderPayment
+);
 
 // ─── Download a purchased digital book (owner or admin) ──────
 router.get('/:id/download/:bookId', authMiddleware, OrderController.downloadBook);

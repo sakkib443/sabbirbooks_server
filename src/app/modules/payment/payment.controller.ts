@@ -298,7 +298,13 @@ const sslDemoComplete = async (req: Request, res: Response) => {
 const submitManualPayment = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
-    const { courseId, amount, totalFee, paymentType, transactionId, senderNumber, notes, couponCode, couponDiscount } = req.body;
+    // `paymentType` is the wallet channel (bkash/rocket/nagad); older callers sent
+    // it as `bankName`, so accept either. `sentAt` = when the buyer sent the money.
+    const {
+      courseId, amount, totalFee, transactionId, senderNumber, notes, sentAt,
+      couponCode, couponDiscount,
+    } = req.body;
+    const paymentType = req.body.paymentType || req.body.bankName;
 
     if (!courseId || !amount || !transactionId) {
       return res.status(400).json({
@@ -329,6 +335,7 @@ const submitManualPayment = async (req: Request, res: Response) => {
           paymentType,
           senderNumber,
           notes,
+          sentAt: sentAt ? new Date(sentAt) : undefined,
           submittedAt: new Date(),
         },
       });

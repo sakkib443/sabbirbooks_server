@@ -5,6 +5,9 @@ import { Types } from 'mongoose';
 export type TOrderPaymentMethod = 'bkash' | 'sslcommerz' | 'manual' | 'free';
 export type TOrderPaymentStatus = 'pending' | 'paid' | 'failed';
 
+// For manual payments, which mobile-wallet the buyer used to Send Money.
+export type TOrderPaymentChannel = 'bkash' | 'rocket' | 'nagad';
+
 // printed → needs shipping; digital → instant download; mixed → at least one of each.
 export type TDeliveryType = 'printed' | 'digital' | 'mixed';
 
@@ -24,6 +27,15 @@ export interface IOrderPayment {
   status: TOrderPaymentStatus;
   transactionId?: string;
   paidAt?: Date;
+
+  // ── Manual payment (bKash/Rocket/Nagad Send Money) fields ──
+  // Present when method === 'manual'. The buyer submits these; the admin verifies
+  // against the wallet statement and approves (→ status 'paid') or rejects.
+  channel?: TOrderPaymentChannel; // which wallet the money was sent from
+  senderNumber?: string; // the number the buyer sent from
+  sentAt?: Date; // when the buyer says they sent it
+  note?: string; // optional buyer note
+  submittedAt?: Date; // when the manual details were submitted
 }
 
 // One purchased line. `price` is the effective UNIT price (offerPrice ?? price)

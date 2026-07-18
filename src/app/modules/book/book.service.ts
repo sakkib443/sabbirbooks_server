@@ -3,13 +3,34 @@ import { isValidObjectId } from 'mongoose';
 import { Book } from './book.model';
 import { IBook } from './book.interface';
 
-// CREATE → নতুন বই তৈরি করার সার্ভিস (id অটো সিরিয়ালি: শেষ id + 1)
+// URL-friendly slug from a title (falls back to a book-<id> stub).
+const slugify = (s: string): string =>
+  (s || '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/[\s_]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+
+// CREATE → নতুন বই তৈরি করার সার্ভিস (id + slug অটো — শুধু title দিলেই চলবে)
 const createBookServices = async (
   payload: Omit<IBook, 'id'>
 ): Promise<IBook> => {
+  const data: any = { ...payload };
+
   const lastBook = await Book.findOne().sort({ id: -1 });
   const nextId = lastBook ? lastBook.id + 1 : 1;
-  const newBook = await Book.create({ ...payload, id: nextId });
+  data.id = nextId;
+
+  // Auto slug from title when missing; append the id if that slug is taken.
+  if (!data.slug || !String(data.slug).trim()) {
+    const base = slugify(data.title) || `book-${nextId}`;
+    const exists = await Book.findOne({ slug: base });
+    data.slug = exists ? `${base}-${nextId}` : base;
+  }
+
+  const newBook = await Book.create(data);
   return newBook;
 };
 

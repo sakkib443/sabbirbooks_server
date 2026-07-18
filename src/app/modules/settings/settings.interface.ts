@@ -33,6 +33,14 @@ export interface ISiteSettings {
     youtubeUrl: string;
     linkedinUrl: string;
 
+    // Manual payment — receiving mobile-wallet numbers shown on checkout.
+    // Empty string = that wallet is hidden on the checkout page.
+    paymentBkashNumber: string;
+    paymentRocketNumber: string;
+    paymentNagadNumber: string;
+    // Optional extra instruction line shown under the numbers (e.g. "Send Money, not Payment").
+    paymentInstructions: string;
+
     createdAt?: Date;
     updatedAt?: Date;
 }

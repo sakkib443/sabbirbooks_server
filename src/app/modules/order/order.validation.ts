@@ -33,3 +33,28 @@ export const updateOrderStatusValidationSchema = z.object({
     status: z.enum(['processing', 'shipped', 'delivered', 'cancelled']),
   }),
 });
+
+// ─── Manual payment submit (owner) ───────────────────────────
+// Buyer sends Send-Money details; order stays pending for admin verification.
+export const submitManualPaymentValidationSchema = z.object({
+  body: z.object({
+    channel: z.enum(['bkash', 'rocket', 'nagad']),
+    transactionId: z.string().min(3, 'Transaction ID is required'),
+    senderNumber: z.string().min(6, 'Sender number is required'),
+    // ISO datetime string ("when did you send it?"); optional but recommended.
+    sentAt: z.string().optional(),
+    note: z.string().optional(),
+  }),
+});
+
+// ─── Admin edit of payment details ───────────────────────────
+export const updateOrderPaymentValidationSchema = z.object({
+  body: z.object({
+    channel: z.enum(['bkash', 'rocket', 'nagad']).optional(),
+    method: z.enum(['bkash', 'sslcommerz', 'manual', 'free']).optional(),
+    transactionId: z.string().optional(),
+    senderNumber: z.string().optional(),
+    sentAt: z.string().nullable().optional(),
+    note: z.string().optional(),
+  }),
+});

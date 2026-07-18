@@ -47,15 +47,15 @@ const createOrder = async (
       hasDigital = true;
     }
 
-    // Effective unit price = offer price if set, else base price.
-    const unitPrice = book.offerPrice != null ? book.offerPrice : book.price;
+    // Effective unit price = offer price if set, else base price (0 when unset).
+    const unitPrice = book.offerPrice != null ? book.offerPrice : (book.price ?? 0);
 
     items.push({
       book: book._id as any,
       title: book.title,
       price: unitPrice,
       quantity: qty,
-      format: book.format,
+      format: book.format ?? 'printed',
     });
   }
 
@@ -122,7 +122,10 @@ const getAllOrders = async (query?: {
   if (status && status !== 'all') filter.status = status;
 
   const total = await Order.countDocuments(filter);
+  // Populate the buyer so the admin view can show who placed the order — needed
+  // for digital orders which carry no shippingAddress contact details.
   const orders = await Order.find(filter)
+    .populate('user', 'firstName lastName email phoneNumber')
     .sort({ createdAt: -1 })
     .skip((page - 1) * limit)
     .limit(limit);
@@ -190,19 +193,11 @@ const payWithSslcommerz = async (id: string, userId: string) => {
   return result; // { GatewayPageURL, tran_id, ... }
 };
 
-// ─── COMPLETE payment (DEMO / gateway callback) ──────────────
-// Marks paid, decrements printed stock, bumps totalSold, and moves the order to
-// its post-payment state (printed/mixed → processing, digital → access-granted).
-const completePayment = async (
-  id: string,
-  userId: string,
-  body?: { method?: string; transactionId?: string }
-): Promise<IOrder> => {
-  const order = await Order.findOne({ _id: id, user: userId });
-  if (!order) throw new Error('Order not found');
-
+// Shared: mark an order paid, decrement printed stock (once), bump totalSold, and
+// move it to its post-payment state (digital → access-granted, else → processing).
+// Idempotent on stock: only runs the $inc on the FIRST transition to paid.
+const applyPaidSideEffects = async (order: any): Promise<void> => {
   if (order.payment.status !== 'paid') {
-    // Decrement stock + record the sale only on the first successful completion.
     for (const item of order.items) {
       if (item.format === 'printed') {
         await Book.findByIdAndUpdate(item.book, {
@@ -213,9 +208,22 @@ const completePayment = async (
       }
     }
   }
-
   order.payment.status = 'paid';
   order.payment.paidAt = new Date();
+  order.status = order.deliveryType === 'digital' ? 'access-granted' : 'processing';
+};
+
+// ─── COMPLETE payment (DEMO / gateway callback) ──────────────
+// Instant-paid path used by the demo bKash/SSLCommerz gateways.
+const completePayment = async (
+  id: string,
+  userId: string,
+  body?: { method?: string; transactionId?: string }
+): Promise<IOrder> => {
+  const order = await Order.findOne({ _id: id, user: userId });
+  if (!order) throw new Error('Order not found');
+
+  await applyPaidSideEffects(order);
   if (body?.method && ['bkash', 'sslcommerz', 'manual', 'free'].includes(body.method)) {
     order.payment.method = body.method as any;
   } else if (!order.payment.method) {
@@ -224,8 +232,92 @@ const completePayment = async (
   order.payment.transactionId =
     body?.transactionId || order.payment.transactionId || `TRX-${Date.now()}`;
 
-  order.status = order.deliveryType === 'digital' ? 'access-granted' : 'processing';
+  await order.save();
+  return order;
+};
 
+// ─── SUBMIT manual payment (owner) ───────────────────────────
+// Records the buyer's Send-Money details and leaves the order PENDING for an
+// admin to verify against the wallet statement. Never auto-marks paid.
+const submitManualPayment = async (
+  id: string,
+  userId: string,
+  body: {
+    channel: 'bkash' | 'rocket' | 'nagad';
+    transactionId: string;
+    senderNumber: string;
+    sentAt?: string;
+    note?: string;
+  }
+): Promise<IOrder> => {
+  const order = await Order.findOne({ _id: id, user: userId });
+  if (!order) throw new Error('Order not found');
+  if (order.payment.status === 'paid') throw new Error('Order is already paid');
+
+  order.payment.method = 'manual';
+  order.payment.channel = body.channel;
+  order.payment.transactionId = body.transactionId.trim();
+  order.payment.senderNumber = body.senderNumber.trim();
+  if (body.sentAt) order.payment.sentAt = new Date(body.sentAt);
+  if (body.note) order.payment.note = body.note.trim();
+  order.payment.status = 'pending';
+  order.payment.submittedAt = new Date();
+  order.status = 'pending'; // awaits admin approval
+  await order.save();
+  return order;
+};
+
+// ─── ADMIN: approve a payment → mark paid + grant access / start fulfillment ─
+const approveOrderPayment = async (id: string): Promise<IOrder> => {
+  if (!isValidObjectId(id)) throw new Error('Invalid order id');
+  const order = await Order.findById(id);
+  if (!order) throw new Error('Order not found');
+  if (order.payment.status === 'paid') throw new Error('Order is already paid');
+
+  await applyPaidSideEffects(order);
+  if (!order.payment.method) order.payment.method = 'manual';
+  await order.save();
+  return order;
+};
+
+// ─── ADMIN: reject a manual payment → mark failed + cancel the order ─────────
+const rejectOrderPayment = async (id: string, reason?: string): Promise<IOrder> => {
+  if (!isValidObjectId(id)) throw new Error('Invalid order id');
+  const order = await Order.findById(id);
+  if (!order) throw new Error('Order not found');
+  if (order.payment.status === 'paid') throw new Error('Cannot reject an already-paid order');
+
+  order.payment.status = 'failed';
+  if (reason) order.payment.note = reason;
+  order.status = 'cancelled';
+  await order.save();
+  return order;
+};
+
+// ─── ADMIN: edit payment details (correct a typo'd txn id, number, etc.) ─────
+const updateOrderPayment = async (
+  id: string,
+  body: {
+    channel?: 'bkash' | 'rocket' | 'nagad';
+    method?: 'bkash' | 'sslcommerz' | 'manual' | 'free';
+    transactionId?: string;
+    senderNumber?: string;
+    sentAt?: string | null;
+    note?: string;
+  }
+): Promise<IOrder> => {
+  if (!isValidObjectId(id)) throw new Error('Invalid order id');
+  const order = await Order.findById(id);
+  if (!order) throw new Error('Order not found');
+
+  const p = order.payment;
+  if (body.channel !== undefined) p.channel = body.channel;
+  if (body.method !== undefined) p.method = body.method;
+  if (body.transactionId !== undefined) p.transactionId = body.transactionId;
+  if (body.senderNumber !== undefined) p.senderNumber = body.senderNumber;
+  if (body.sentAt !== undefined) p.sentAt = body.sentAt ? new Date(body.sentAt) : undefined;
+  if (body.note !== undefined) p.note = body.note;
+  order.markModified('payment');
   await order.save();
   return order;
 };
@@ -268,5 +360,9 @@ export const OrderService = {
   payWithBkash,
   payWithSslcommerz,
   completePayment,
+  submitManualPayment,
+  approveOrderPayment,
+  rejectOrderPayment,
+  updateOrderPayment,
   getDownloadUrl,
 };

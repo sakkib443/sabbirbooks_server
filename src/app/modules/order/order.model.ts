@@ -17,6 +17,13 @@ const orderPaymentSchema = new Schema(
     },
     transactionId: { type: String },
     paidAt: { type: Date },
+
+    // Manual payment (bKash/Rocket/Nagad Send Money) — buyer-submitted, admin-verified
+    channel: { type: String, enum: ['bkash', 'rocket', 'nagad'] },
+    senderNumber: { type: String },
+    sentAt: { type: Date },
+    note: { type: String },
+    submittedAt: { type: Date },
   },
   { _id: false }
 );

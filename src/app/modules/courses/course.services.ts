@@ -4,12 +4,35 @@ import { ICourse } from './course.interface';
 
 
 
+// URL-friendly slug from a title (keeps it simple; falls back to a timestamp).
+const slugify = (s: string): string =>
+  (s || '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/[\s_]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+
 // CREATE → নতুন কোর্স তৈরি করার সার্ভিস
+// Only `title` is guaranteed; auto-fill id/slug so a course can be created with
+// minimal input (the rest of the fields are optional and editable later).
 const createCourseServices = async (payload: ICourse): Promise<ICourse> => {
+  const data: any = { ...payload };
 
+  // Auto numeric id (last + 1) when the client didn't supply one.
+  if (data.id === undefined || data.id === null || Number.isNaN(Number(data.id))) {
+    const last = await Course.findOne().sort({ id: -1 });
+    data.id = last?.id ? last.id + 1 : 1001;
+  }
 
-  // ৩. যদি mentor ও category উভয়টাই থাকে, তাহলে কোর্স তৈরি করা হবে
-  const newCourse = await Course.create(payload);
+  // Auto slug from title when missing/blank; keep it unique-ish with the id.
+  if (!data.slug || !String(data.slug).trim()) {
+    const base = slugify(data.title) || `course-${data.id}`;
+    data.slug = base;
+  }
+
+  const newCourse = await Course.create(data);
   return newCourse;
 };
 

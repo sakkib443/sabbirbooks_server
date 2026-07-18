@@ -37,6 +37,12 @@ const settingsSchema = new Schema<ISiteSettings>(
         facebookUrl: { type: String, default: 'https://www.facebook.com/aptechlearning' },
         youtubeUrl: { type: String, default: 'https://aptechlearning.com' },
         linkedinUrl: { type: String, default: 'https://aptechlearning.com' },
+
+        // Manual payment — receiving mobile-wallet numbers (empty = hidden on checkout)
+        paymentBkashNumber: { type: String, default: '' },
+        paymentRocketNumber: { type: String, default: '' },
+        paymentNagadNumber: { type: String, default: '' },
+        paymentInstructions: { type: String, default: '' },
     },
     { timestamps: true }
 );
