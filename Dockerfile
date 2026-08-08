@@ -17,7 +17,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json ./
-RUN npm ci
+# --include=dev is load-bearing: build platforms inject NODE_ENV=production,
+# which makes npm skip devDependencies — and tsc plus every @types package
+# lives there. Without it the build dies on TS7016.
+RUN npm ci --include=dev
 
 COPY tsconfig.json ./
 COPY src ./src
