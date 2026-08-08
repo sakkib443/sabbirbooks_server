@@ -33,11 +33,14 @@ ENV NODE_ENV=production \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 # Chromium + fonts for the PDF invoices in invoice.service.ts.
+# curl is here for the orchestrator's health check — the slim base ships
+# neither curl nor wget, so without it every health probe fails.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       chromium \
       fonts-liberation \
       fonts-dejavu-core \
       ca-certificates \
+      curl \
       dumb-init \
  && rm -rf /var/lib/apt/lists/*
 
