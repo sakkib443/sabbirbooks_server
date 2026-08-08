@@ -42,6 +42,17 @@ import { BookAccessRoutes } from './app/modules/bookAccess/bookAccess.routes';
 
 const app: Application = express();
 
+// ✅ Behind a reverse proxy (Coolify/Traefik terminates TLS, Vercel likewise).
+// Trust the first hop so X-Forwarded-Proto and X-Forwarded-For are honoured.
+// Without this:
+//   - req.protocol is always 'http', so upload URLs come back as http:// and
+//     the https site blocks them as mixed content;
+//   - req.ip is the proxy's address, so express-rate-limit buckets every
+//     visitor together and one busy reader rate-limits everyone.
+// Kept at 1, not `true`: trusting every hop lets a client spoof its own IP
+// through a forged X-Forwarded-For.
+app.set('trust proxy', 1);
+
 // ✅ Security: Helmet (HTTP headers)
 app.use(helmet());
 
