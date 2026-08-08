@@ -1,0 +1,117 @@
+{
+  "book": "Anatomy MAGIC VIVA",
+  "note": "questionCount null = আউটলাইনে সংখ্যা দেওয়া নেই (--Q বা ফাঁকা)। topics [] = অধ্যায়ের নিচে সরাসরি প্রশ্ন, কোনো টপিক নেই.",
+  "parts": [
+    {
+      "order": 1,
+      "title": "Board I",
+      "chapters": [
+        {
+          "no": "1", "title": "CNS and Eyeball",
+          "topics": [
+            { "no": "1.1", "title": "Cerebrum", "questionCount": 29 },
+            { "no": "1.2", "title": "Cerebellum", "questionCount": 8 },
+            { "no": "1.3", "title": "Thalamus (Diencephalon)", "questionCount": 1 },
+            { "no": "1.4", "title": "Brain Stem", "questionCount": 8 },
+            { "no": "1.5", "title": "Meninges of Brain", "questionCount": 4 },
+            { "no": "1.6", "title": "Cerebrospinal Fluid (CSF)", "questionCount": 3 },
+            { "no": "1.7", "title": "Ventricles", "questionCount": 2 },
+            { "no": "1.8", "title": "White Matter of Cerebrum", "questionCount": 2 },
+            { "no": "1.9", "title": "Spinal Cord", "questionCount": 10 },
+            { "no": "1.10", "title": "Eye Ball", "questionCount": 29 },
+            { "no": "1.11", "title": "Systemic Embryology", "questionCount": 7 },
+            { "no": "1.12", "title": "Explanatory Figures", "questionCount": 6 }
+          ]
+        },
+        {
+          "no": "2", "title": "Head and Neck",
+          "topics": [
+            { "no": "2.1", "title": "The Scalp", "questionCount": 7 },
+            { "no": "2.2", "title": "The Face", "questionCount": 9 },
+            { "no": "2.3", "title": "Lacrimal Apparatus", "questionCount": 1 },
+            { "no": "2.4", "title": "The Neck Region", "questionCount": 7 },
+            { "no": "2.5", "title": "Muscles", "questionCount": 2 },
+            { "no": "2.6", "title": "Glands of Head & Neck (Thyroid)", "questionCount": 5 },
+            { "no": "2.7", "title": "Interior of the Cranium (Base of Skull)", "questionCount": 9 },
+            { "no": "2.8", "title": "Venous Sinuses of Dura Mater", "questionCount": 7 },
+            { "no": "2.9", "title": "Orbit", "questionCount": 3 },
+            { "no": "2.10", "title": "Nose & Paranasal Sinuses", "questionCount": 5 },
+            { "no": "2.11", "title": "Tongue", "questionCount": 8 },
+            { "no": "2.12", "title": "The Ear", "questionCount": 12 },
+            { "no": "2.13", "title": "Tonsil", "questionCount": 3 },
+            { "no": "2.14", "title": "Hard Palate", "questionCount": 1 },
+            { "no": "2.15", "title": "Soft Palate", "questionCount": 1 },
+            { "no": "2.16", "title": "Pharynx", "questionCount": 9 },
+            { "no": "2.17", "title": "Larynx", "questionCount": 6 },
+            { "no": "2.18", "title": "Blood Vessels", "questionCount": 7 },
+            { "no": "2.19", "title": "Cranial Nerves", "questionCount": 17 },
+            { "no": "2.20", "title": "Bones & Joint", "questionCount": 38 },
+            { "no": "2.21", "title": "Development of the Head & Neck", "questionCount": 17 }
+          ]
+        },
+        {
+          "no": "3", "title": "Thorax",
+          "topics": [
+            { "no": "3.1", "title": "Skeleton of Thorax", "questionCount": 27 },
+            { "no": "3.2", "title": "Thoracic Wall", "questionCount": 5 },
+            { "no": "3.3", "title": "Mediastinum", "questionCount": 1 },
+            { "no": "3.4", "title": "Pleura", "questionCount": 6 },
+            { "no": "3.5", "title": "The Lungs", "questionCount": 12 },
+            { "no": "3.6", "title": "Trachea", "questionCount": 1 },
+            { "no": "3.7", "title": "Heart", "questionCount": 24 },
+            { "no": "3.8", "title": "Great Vessels", "questionCount": 6 },
+            { "no": "3.9", "title": "Thoracic Duct", "questionCount": 3 },
+            { "no": "3.10", "title": "Oesophagus", "questionCount": 3 },
+            { "no": "3.11", "title": "The Diaphragm", "questionCount": 7 },
+            { "no": "3.12", "title": "Explanatory Figure Reading", "questionCount": 3 }
+          ]
+        },
+        { "no": "4", "title": "Cell Biology and Genetics", "topics": [] },
+        {
+          "no": "5", "title": "General Histology",
+          "topics": [
+            { "no": "5.1", "title": "Epithelial Tissue", "questionCount": null },
+            { "no": "5.2", "title": "Nervous Tissue", "questionCount": null }
+          ]
+        },
+        {
+          "no": "6", "title": "General Anatomy",
+          "topics": [
+            { "no": "6.1", "title": "Angiology", "questionCount": null },
+            { "no": "6.2", "title": "Neurology", "questionCount": null }
+          ]
+        }
+      ]
+    },
+    {
+      "order": 2,
+      "title": "Board II",
+      "chapters": [
+        {
+          "no": "1", "title": "Regional Anatomy",
+          "topics": [
+            { "no": "1.1", "title": "Abdomen", "questionCount": null },
+            { "no": "1.2", "title": "Superior Extremity", "questionCount": null },
+            { "no": "1.3", "title": "Inferior Extremity", "questionCount": null }
+          ]
+        },
+        { "no": "2", "title": "General Embryology", "topics": [] },
+        {
+          "no": "3", "title": "General Histology",
+          "topics": [
+            { "no": "3.1", "title": "Connective Tissue", "questionCount": null },
+            { "no": "3.2", "title": "Muscular Tissue", "questionCount": null }
+          ]
+        },
+        {
+          "no": "4", "title": "General Anatomy",
+          "topics": [
+            { "no": "4.1", "title": "Osteology", "questionCount": null },
+            { "no": "4.2", "title": "Arthrology", "questionCount": null },
+            { "no": "4.3", "title": "Myology", "questionCount": null }
+          ]
+        }
+      ]
+    }
+  ]
+}

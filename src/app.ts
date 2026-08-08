@@ -37,6 +37,8 @@ import { ReviewRoutes } from './app/modules/review/review.routes';
 import { BlogRoutes } from './app/modules/blog/blog.routes';
 import { NoticeRoutes } from './app/modules/notice/notice.route';
 import { PartnerRoutes } from './app/modules/partner/partner.route';
+import { BookContentRoutes } from './app/modules/bookContent/bookContent.routes';
+import { BookAccessRoutes } from './app/modules/bookAccess/bookAccess.routes';
 
 const app: Application = express();
 
@@ -87,6 +89,10 @@ app.use('/api/batches', BatchRoutes);
 app.use('/api/classes', ClassScheduleRoutes);
 app.use('/api/certificate', CertificateRoutes);
 app.use('/api/qr', QrResourceRoutes);
+// Printed-book QR system: Book → Part → Chapter → Topic → Question.
+// Separate from /api/qr above, which is the older flat one-QR-per-question module.
+app.use('/api/book-content', BookContentRoutes);
+app.use('/api/book-access', BookAccessRoutes);
 app.use('/api/orders', OrderRoutes);
 app.use('/api/attendance', AttendanceRoutes);
 app.use('/api/exams', ExamRoutes);
