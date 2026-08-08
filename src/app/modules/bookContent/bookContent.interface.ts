@@ -55,8 +55,13 @@ export interface IBookTopic {
 export interface IQuestionVideo {
   title?: string;
   url: string;
-  provider: 'youtube' | 'vimeo' | 'cloudinary' | 'other';
+  // 'upload' means the file lives on our own disk under /uploads and must be
+  // played with a <video> tag; the rest are embedded in an iframe.
+  provider: 'youtube' | 'vimeo' | 'cloudinary' | 'upload' | 'other';
   durationSec?: number;
+  // Set for uploaded files so the reader can be offered a download.
+  fileName?: string;
+  fileSize?: number;
 }
 
 export interface IQuestionAttachment {

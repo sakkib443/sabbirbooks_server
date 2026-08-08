@@ -2,6 +2,7 @@ import express from 'express';
 import rateLimit from 'express-rate-limit';
 import { BookContentController } from './bookContent.controller';
 import { authMiddleware, authorize } from '../../middlewares/auth';
+import { uploadFileLocal } from '../../config/localUpload';
 
 const router = express.Router();
 
@@ -30,6 +31,9 @@ router.get('/next-unanswered/:bookId', ...admin, BookContentController.getNextUn
 router.get('/questions/topic/:topicId', ...admin, BookContentController.getQuestionsByTopic);
 
 router.patch('/reorder/:level', ...admin, BookContentController.reorder);
+
+// PDFs, images and short answer videos → local disk (the mounted volume).
+router.post('/upload', ...admin, uploadFileLocal.single('file'), BookContentController.uploadFile);
 
 for (const level of ['part', 'chapter', 'topic', 'question'] as const) {
   router.post(`/${level}s`, ...admin, BookContentController.makeCreate(level));

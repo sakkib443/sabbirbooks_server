@@ -38,6 +38,43 @@ const scan = async (req: Request, res: Response) => {
   }
 };
 
+/**
+ * POST /api/book-content/upload — PDFs, images and short answer videos.
+ *
+ * Files land on local disk (Cloudinary is not configured) under
+ * <cwd>/uploads/materials and are served back by the static handler in app.ts.
+ * In the container that path is the mounted volume, so uploads survive a
+ * redeploy — without it every answer's PDF would vanish on the next push.
+ */
+const uploadFile = async (req: Request, res: Response) => {
+  try {
+    const file = (req as any).file;
+    if (!file) return res.status(400).json({ success: false, message: 'No file uploaded' });
+
+    const base = `${req.protocol}://${req.get('host')}`;
+    const fileUrl = file.filename
+      ? `${base}/uploads/materials/${file.filename}`
+      : file.path || file.secure_url || file.url;
+
+    const originalName = file.originalname || 'file';
+    const ext = (originalName.split('.').pop() || '').toLowerCase();
+    const isVideo = /^(mp4|webm|mov|mkv|avi)$/.test(ext);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        fileUrl,
+        fileName: originalName,
+        fileType: ext,
+        size: file.size,
+        kind: isVideo ? 'video' : /^(png|jpe?g|webp|gif|svg)$/.test(ext) ? 'image' : 'document',
+      },
+    });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
 const getTree = async (req: Request, res: Response) => {
   try {
     const result = await BookContentService.getTree(req.params.bookId);
@@ -151,6 +188,7 @@ const makeDelete = (level: Level) => async (req: Request, res: Response) => {
 
 export const BookContentController = {
   scan,
+  uploadFile,
   getTree,
   getStats,
   getQrSheet,

@@ -91,10 +91,12 @@ const videoSchema = new Schema<IQuestionVideo>(
     url: { type: String, required: true, trim: true },
     provider: {
       type: String,
-      enum: ['youtube', 'vimeo', 'cloudinary', 'other'],
+      enum: ['youtube', 'vimeo', 'cloudinary', 'upload', 'other'],
       default: 'youtube',
     },
     durationSec: { type: Number },
+    fileName: { type: String },
+    fileSize: { type: Number },
   },
   { _id: true }
 );
