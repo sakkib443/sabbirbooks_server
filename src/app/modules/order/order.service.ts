@@ -1,11 +1,12 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { isValidObjectId } from 'mongoose';
 import { Order } from './order.model';
-import { IOrder, IShippingAddress, TDeliveryType } from './order.interface';
+import { IOrder, IShippingAddress, TDeliveryType, TDeliveryArea } from './order.interface';
 import { Book } from '../book/book.model';
 import { User } from '../user/user.model';
 import { BkashService } from '../payment/bkash.service';
 import { SslcommerzService } from '../payment/sslcommerz.service';
+import { SettingsService } from '../settings/settings.services';
 
 // Resolve a book by slug / numeric id / Mongo _id — same tolerant lookup the
 // book module exposes publicly (client may send either a slug or an _id).
@@ -16,15 +17,64 @@ const resolveBook = async (slugOrId: string) => {
   return Book.findOne({ $or: or });
 };
 
+/**
+ * What the courier fee for this order is, in taka.
+ *
+ * Read from site settings rather than hard-coded so the shop owner can change
+ * the rate without a deploy, and snapshotted onto the order so a later rate
+ * change never rewrites an existing customer's total. Digital-only orders ship
+ * nothing and are always free.
+ */
+const quoteDeliveryCharge = async (opts: {
+  hasPrinted: boolean;
+  area: TDeliveryArea;
+  subtotal: number;
+  isCod: boolean;
+}): Promise<number> => {
+  if (!opts.hasPrinted) return 0;
+
+  const s: any = await SettingsService.getSettingsService();
+
+  const freeAbove = Number(s?.freeDeliveryAbove) || 0;
+  if (freeAbove > 0 && opts.subtotal >= freeAbove) return 0;
+
+  const base =
+    opts.area === 'inside-dhaka'
+      ? Number(s?.deliveryChargeInsideDhaka)
+      : Number(s?.deliveryChargeOutsideDhaka);
+
+  // Number(undefined) is NaN, and NaN would poison the order total — fall back
+  // to the documented default rather than writing a broken number.
+  const charge = Number.isFinite(base) ? base : 120;
+  const codExtra = opts.isCod ? Number(s?.codExtraCharge) || 0 : 0;
+
+  return Math.max(0, Math.round(charge + codExtra));
+};
+
+/** Which payment methods the shop currently accepts. */
+const getEnabledPaymentMethods = async (): Promise<{ cod: boolean; online: boolean }> => {
+  const s: any = await SettingsService.getSettingsService();
+  const cod = s?.codEnabled !== false;
+  const online = s?.onlinePaymentEnabled !== false;
+  // Both off would leave the checkout with no button at all; COD needs no
+  // credentials, so it is the safe fallback.
+  return cod || online ? { cod, online } : { cod: true, online: false };
+};
+
 // ─── CREATE ORDER ────────────────────────────────────────────
 // Looks up each book, snapshots the effective unit price (offerPrice ?? price),
-// computes subtotal/total server-side, and enforces shipping + stock for printed
-// items. Returns a `pending` order awaiting payment.
+// computes subtotal/delivery/total server-side, and enforces shipping + stock
+// for printed items.
+//
+// The order is born `pending` either way. What differs is what happens next:
+//   manual → buyer submits a TrxID, admin verifies it
+//   cod    → admin confirms the order, then the courier collects the cash
 const createOrder = async (
   userId: string,
   payload: {
     items: { bookSlugOrId: string; quantity: number }[];
     shippingAddress?: IShippingAddress;
+    paymentMethod?: 'manual' | 'cod';
   }
 ): Promise<IOrder> => {
   const items: IOrder['items'] = [];
@@ -70,23 +120,83 @@ const createOrder = async (
     }
   }
 
+  const method = payload.paymentMethod === 'cod' ? 'cod' : 'manual';
+
+  // There is no parcel for a digital book, so nobody can hand over cash for it.
+  if (method === 'cod' && !hasPrinted) {
+    throw new Error('Cash on delivery is only available for printed books');
+  }
+
+  const enabled = await getEnabledPaymentMethods();
+  if (method === 'cod' && !enabled.cod) {
+    throw new Error('Cash on delivery is currently unavailable');
+  }
+  if (method === 'manual' && !enabled.online) {
+    throw new Error('Online payment is currently unavailable');
+  }
+
+  const area: TDeliveryArea =
+    payload.shippingAddress?.area === 'inside-dhaka' ? 'inside-dhaka' : 'outside-dhaka';
+
   const subtotal = items.reduce((sum, it) => sum + it.price * it.quantity, 0);
   const discount = 0;
-  const total = subtotal - discount;
+  const deliveryCharge = await quoteDeliveryCharge({
+    hasPrinted,
+    area,
+    subtotal: subtotal - discount,
+    isCod: method === 'cod',
+  });
+  const total = subtotal - discount + deliveryCharge;
 
   const order = await Order.create({
     user: userId,
     items,
     deliveryType,
-    shippingAddress: hasPrinted ? payload.shippingAddress : undefined,
+    shippingAddress: hasPrinted ? { ...payload.shippingAddress, area } : undefined,
     subtotal,
     discount,
+    deliveryCharge,
     total,
-    payment: { status: 'pending' },
+    // COD records its method up front — there is no later "pay" step to set it,
+    // and the admin queue filters on it.
+    payment: method === 'cod' ? { method: 'cod', status: 'pending' } : { status: 'pending' },
     status: 'pending',
   });
 
   return order;
+};
+
+/**
+ * What checkout needs before the buyer picks anything: which methods are on,
+ * and what delivery would cost each way. Public — no order exists yet.
+ */
+const getCheckoutOptions = async (subtotal = 0) => {
+  const s: any = await SettingsService.getSettingsService();
+  const enabled = await getEnabledPaymentMethods();
+
+  const quote = (area: TDeliveryArea) =>
+    quoteDeliveryCharge({ hasPrinted: true, area, subtotal, isCod: false });
+
+  const [insideDhaka, outsideDhaka] = await Promise.all([
+    quote('inside-dhaka'),
+    quote('outside-dhaka'),
+  ]);
+
+  return {
+    codEnabled: enabled.cod,
+    onlinePaymentEnabled: enabled.online,
+    deliveryCharge: { 'inside-dhaka': insideDhaka, 'outside-dhaka': outsideDhaka },
+    codExtraCharge: Number(s?.codExtraCharge) || 0,
+    freeDeliveryAbove: Number(s?.freeDeliveryAbove) || 0,
+    deliveryNote: s?.deliveryNote || '',
+    supportPhone: s?.orderSupportPhone || s?.phoneNumber || '',
+    wallets: {
+      bkash: s?.paymentBkashNumber || '',
+      rocket: s?.paymentRocketNumber || '',
+      nagad: s?.paymentNagadNumber || '',
+      instructions: s?.paymentInstructions || '',
+    },
+  };
 };
 
 // ─── GET my orders ───────────────────────────────────────────
@@ -134,10 +244,93 @@ const getAllOrders = async (query?: {
 };
 
 // ─── PATCH status (admin fulfillment) ────────────────────────
-const updateOrderStatus = async (id: string, status: string): Promise<IOrder> => {
+//
+// More than a field write. Moving an order along the ladder has consequences:
+//   processing → the order is confirmed; stock is reserved and (via
+//                bookAccess's PAID_ORDER_STATUSES) the buyer's QR content opens
+//   delivered  → a cash-on-delivery order is now actually paid
+//   cancelled  → reserved stock goes back on the shelf
+const updateOrderStatus = async (
+  id: string,
+  status: string,
+  extra?: { courierName?: string; trackingCode?: string; adminNote?: string }
+): Promise<IOrder> => {
   if (!isValidObjectId(id)) throw new Error('Invalid order id');
-  const order = await Order.findByIdAndUpdate(id, { status }, { new: true });
+  const order: any = await Order.findById(id);
   if (!order) throw new Error('Order not found');
+
+  const now = new Date();
+
+  if (extra?.courierName !== undefined) order.courierName = extra.courierName;
+  if (extra?.trackingCode !== undefined) order.trackingCode = extra.trackingCode;
+  if (extra?.adminNote !== undefined) order.adminNote = extra.adminNote;
+
+  switch (status) {
+    case 'processing': {
+      // Confirming the order — this is the gate that lets a COD buyer read the
+      // book's QR content, so it is deliberately a human decision.
+      await applyStockOnce(order);
+      if (!order.confirmedAt) order.confirmedAt = now;
+      order.status = 'processing';
+      break;
+    }
+
+    case 'shipped': {
+      await applyStockOnce(order);
+      if (!order.confirmedAt) order.confirmedAt = now;
+      order.shippedAt = now;
+      order.status = 'shipped';
+      break;
+    }
+
+    case 'delivered': {
+      await applyStockOnce(order);
+      if (!order.confirmedAt) order.confirmedAt = now;
+      if (!order.shippedAt) order.shippedAt = now;
+      order.deliveredAt = now;
+      order.status = 'delivered';
+
+      // Cash on delivery: handing over the parcel IS the payment. Prepaid
+      // orders were already marked paid and are left alone.
+      if (order.payment.status !== 'paid' && order.payment.method === 'cod') {
+        order.payment.status = 'paid';
+        order.payment.paidAt = now;
+        if (!order.payment.transactionId) {
+          order.payment.transactionId = `COD-${order.orderNumber}`;
+        }
+        order.markModified('payment');
+      }
+      break;
+    }
+
+    case 'cancelled': {
+      // Put reserved copies back, but only if we actually took them.
+      if (order.stockAdjusted === true) {
+        for (const item of order.items) {
+          if (item.format === 'printed') {
+            await Book.findByIdAndUpdate(item.book, {
+              $inc: { stock: item.quantity, totalSold: -item.quantity },
+            });
+          } else {
+            await Book.findByIdAndUpdate(item.book, { $inc: { totalSold: -item.quantity } });
+          }
+        }
+        order.stockAdjusted = false;
+      }
+      order.cancelledAt = now;
+      order.status = 'cancelled';
+      if (order.payment.status !== 'paid') {
+        order.payment.status = 'failed';
+        order.markModified('payment');
+      }
+      break;
+    }
+
+    default:
+      throw new Error(`Unsupported status: ${status}`);
+  }
+
+  await order.save();
   return order;
 };
 
@@ -193,24 +386,41 @@ const payWithSslcommerz = async (id: string, userId: string) => {
   return result; // { GatewayPageURL, tran_id, ... }
 };
 
-// Shared: mark an order paid, decrement printed stock (once), bump totalSold, and
-// move it to its post-payment state (digital → access-granted, else → processing).
-// Idempotent on stock: only runs the $inc on the FIRST transition to paid.
-const applyPaidSideEffects = async (order: any): Promise<void> => {
-  if (order.payment.status !== 'paid') {
-    for (const item of order.items) {
-      if (item.format === 'printed') {
-        await Book.findByIdAndUpdate(item.book, {
-          $inc: { stock: -item.quantity, totalSold: item.quantity },
-        });
-      } else {
-        await Book.findByIdAndUpdate(item.book, { $inc: { totalSold: item.quantity } });
-      }
+/**
+ * Take this order's copies off the shelf and count them as sold — exactly once.
+ *
+ * Guarded by the persisted `stockAdjusted` flag rather than by payment status,
+ * because a COD order reserves stock when the admin confirms it and only turns
+ * 'paid' at delivery; keying off payment status decremented the same copies on
+ * both transitions. Old orders have no flag, so `!== true` is the right test.
+ */
+const applyStockOnce = async (order: any): Promise<void> => {
+  if (order.stockAdjusted === true) return;
+
+  for (const item of order.items) {
+    if (item.format === 'printed') {
+      await Book.findByIdAndUpdate(item.book, {
+        $inc: { stock: -item.quantity, totalSold: item.quantity },
+      });
+    } else {
+      await Book.findByIdAndUpdate(item.book, { $inc: { totalSold: item.quantity } });
     }
   }
+  order.stockAdjusted = true;
+};
+
+// Shared: mark an order paid, decrement printed stock (once), bump totalSold, and
+// move it to its post-payment state (digital → access-granted, else → processing).
+const applyPaidSideEffects = async (order: any): Promise<void> => {
+  await applyStockOnce(order);
   order.payment.status = 'paid';
   order.payment.paidAt = new Date();
-  order.status = order.deliveryType === 'digital' ? 'access-granted' : 'processing';
+  // Delivered parcels stay delivered — settling the cash must not walk the
+  // status backwards to 'processing'.
+  if (order.status !== 'delivered' && order.status !== 'shipped') {
+    order.status = order.deliveryType === 'digital' ? 'access-granted' : 'processing';
+  }
+  if (!order.confirmedAt) order.confirmedAt = new Date();
 };
 
 // ─── COMPLETE payment (DEMO / gateway callback) ──────────────
@@ -274,6 +484,15 @@ const approveOrderPayment = async (id: string): Promise<IOrder> => {
   if (!order) throw new Error('Order not found');
   if (order.payment.status === 'paid') throw new Error('Order is already paid');
 
+  // A COD order has no money to verify yet — the cash arrives with the courier.
+  // Confirming it (status → processing) is the right action, and marking it paid
+  // here would leave the books saying we were paid for a parcel still in a van.
+  if (order.payment.method === 'cod') {
+    throw new Error(
+      'This is a cash-on-delivery order. Confirm it to start fulfillment; it is marked paid when you mark it delivered.'
+    );
+  }
+
   await applyPaidSideEffects(order);
   if (!order.payment.method) order.payment.method = 'manual';
   await order.save();
@@ -287,9 +506,27 @@ const rejectOrderPayment = async (id: string, reason?: string): Promise<IOrder> 
   if (!order) throw new Error('Order not found');
   if (order.payment.status === 'paid') throw new Error('Cannot reject an already-paid order');
 
+  // Anything already reserved goes back on the shelf. Today no path reaches
+  // here with stock taken (manual orders reserve on approval, and an approved
+  // order cannot be rejected), but a rejection that silently ate inventory
+  // would be a very quiet bug to carry.
+  if ((order as any).stockAdjusted === true) {
+    for (const item of order.items) {
+      if (item.format === 'printed') {
+        await Book.findByIdAndUpdate(item.book, {
+          $inc: { stock: item.quantity, totalSold: -item.quantity },
+        });
+      } else {
+        await Book.findByIdAndUpdate(item.book, { $inc: { totalSold: -item.quantity } });
+      }
+    }
+    (order as any).stockAdjusted = false;
+  }
+
   order.payment.status = 'failed';
   if (reason) order.payment.note = reason;
   order.status = 'cancelled';
+  (order as any).cancelledAt = new Date();
   await order.save();
   return order;
 };
@@ -353,6 +590,7 @@ const getDownloadUrl = async (
 
 export const OrderService = {
   createOrder,
+  getCheckoutOptions,
   getMyOrders,
   getOrderById,
   getAllOrders,

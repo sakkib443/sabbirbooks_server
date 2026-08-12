@@ -2,8 +2,11 @@ export interface ISiteSettings {
     // Brand / Identity
     brandName: string;
     brandNameBn: string;
+    brandTagline?: string;
+    brandTaglineBn?: string;
     websiteUrl: string;
     logo?: string;
+    favicon?: string;
 
     // Hero Section - English
     heroBadge: string;
@@ -40,6 +43,16 @@ export interface ISiteSettings {
     paymentNagadNumber: string;
     // Optional extra instruction line shown under the numbers (e.g. "Send Money, not Payment").
     paymentInstructions: string;
+
+    // Ordering & delivery (printed books)
+    codEnabled: boolean;
+    onlinePaymentEnabled: boolean;
+    deliveryChargeInsideDhaka: number;
+    deliveryChargeOutsideDhaka: number;
+    freeDeliveryAbove: number;
+    codExtraCharge: number;
+    deliveryNote: string;
+    orderSupportPhone: string;
 
     createdAt?: Date;
     updatedAt?: Date;

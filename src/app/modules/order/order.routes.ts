@@ -11,6 +11,11 @@ import { authMiddleware, authorize } from '../../middlewares/auth';
 
 const router = express.Router();
 
+// ─── Checkout options (public) ───────────────────────────────
+// Which payment methods are on + what delivery costs. Declared before '/:id'
+// so the wildcard route below never swallows it.
+router.get('/checkout-options', OrderController.getCheckoutOptions);
+
 // ─── Create + list own orders (any logged-in user) ───────────
 router.post(
   '/',

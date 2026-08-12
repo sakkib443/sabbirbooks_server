@@ -76,12 +76,14 @@ const loginUser = async (
     });
 
     // Device-limit: register/replace this device's session (evicts oldest if over limit).
+    // Staff roles are exempt — see UNLIMITED_DEVICE_ROLES.
     const { deviceId } = await SessionService.createSession({
       userId: String(adminUser._id),
       deviceId: device.deviceId,
       refreshToken,
       userAgent: device.userAgent,
       ip: device.ip,
+      role: 'superAdmin',
     });
 
     return {
@@ -128,6 +130,7 @@ const loginUser = async (
     refreshToken,
     userAgent: device.userAgent,
     ip: device.ip,
+    role: user.role,
   });
 
   return {

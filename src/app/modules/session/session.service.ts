@@ -7,6 +7,16 @@ import config from '../../config';
 // Max concurrent devices per user (default 2). Oldest is auto-evicted.
 const MAX_DEVICES = Number(config.device_limit) || 2;
 
+// Roles the device limit does NOT apply to.
+//
+// The limit exists to stop one student's login being shared with a batch of
+// friends. Staff are the opposite case: an admin legitimately works from a
+// desktop, a laptop and a phone, and every browser profile counts as its own
+// device — at a limit of 2 the third login silently evicted the first, and that
+// admin was thrown out to the login screen with no explanation. Nothing is
+// gained by rationing the account that can already grant itself anything.
+const UNLIMITED_DEVICE_ROLES = ['superAdmin', 'admin', 'trainingManager', 'mentor'];
+
 // Never store the raw refresh token — store a sha256 hash we can look up by.
 const hashToken = (token: string): string =>
   crypto.createHash('sha256').update(token).digest('hex');
@@ -23,6 +33,8 @@ interface CreateSessionInput {
   refreshToken: string;
   userAgent?: string;
   ip?: string;
+  // When this is a staff role the device limit is skipped entirely.
+  role?: string;
 }
 
 /**
@@ -50,7 +62,8 @@ const createSession = async (input: CreateSessionInput): Promise<{ deviceId: str
   }
 
   // New device → enforce the limit BEFORE inserting the new session.
-  const activeCount = await Session.countDocuments({ userId });
+  const unlimited = UNLIMITED_DEVICE_ROLES.includes(String(input.role || ''));
+  const activeCount = unlimited ? 0 : await Session.countDocuments({ userId });
   if (activeCount >= MAX_DEVICES) {
     const evictCount = activeCount - MAX_DEVICES + 1;
     const oldest = await Session.find({ userId })
@@ -121,6 +134,7 @@ const removeAllSessions = async (userId: string | Types.ObjectId): Promise<numbe
 
 export const SessionService = {
   MAX_DEVICES,
+  UNLIMITED_DEVICE_ROLES,
   hashToken,
   resolveDeviceId,
   createSession,

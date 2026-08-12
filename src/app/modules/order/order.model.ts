@@ -8,7 +8,7 @@ const orderPaymentSchema = new Schema(
   {
     method: {
       type: String,
-      enum: ['bkash', 'sslcommerz', 'manual', 'free'],
+      enum: ['bkash', 'sslcommerz', 'manual', 'cod', 'free'],
     },
     status: {
       type: String,
@@ -46,6 +46,11 @@ const shippingAddressSchema = new Schema(
     phone: { type: String, required: true },
     address: { type: String, required: true },
     city: { type: String, required: true },
+    area: {
+      type: String,
+      enum: ['inside-dhaka', 'outside-dhaka'],
+      default: 'outside-dhaka',
+    },
     note: { type: String },
   },
   { _id: false }
@@ -72,6 +77,9 @@ const orderSchema = new Schema<IOrder>(
     subtotal: { type: Number, required: true, min: 0 },
     discount: { type: Number, default: 0, min: 0 },
     couponCode: { type: String, uppercase: true, trim: true },
+    // Snapshot of the courier fee quoted at checkout. Old orders predate this
+    // field, so default 0 keeps their totals reading correctly.
+    deliveryCharge: { type: Number, default: 0, min: 0 },
     total: { type: Number, required: true, min: 0 },
     payment: { type: orderPaymentSchema, required: true, default: () => ({ status: 'pending' }) },
     status: {
@@ -87,11 +95,29 @@ const orderSchema = new Schema<IOrder>(
       ],
       default: 'pending',
     },
+
+    // Set the first time stock is taken off the shelf for this order. Payment
+    // status alone can no longer answer "have we already decremented?" — a COD
+    // order reserves stock at confirmation and only becomes 'paid' days later at
+    // delivery, which would otherwise decrement the same copies twice.
+    stockAdjusted: { type: Boolean, default: false },
+
+    // Fulfillment trail — stamped by the admin actions, read by the order
+    // timeline on both the admin page and the buyer's "my orders" list.
+    confirmedAt: { type: Date },
+    shippedAt: { type: Date },
+    deliveredAt: { type: Date },
+    cancelledAt: { type: Date },
+    courierName: { type: String, trim: true },
+    trackingCode: { type: String, trim: true },
+    adminNote: { type: String, trim: true },
   },
   { timestamps: true }
 );
 
 orderSchema.index({ user: 1, createdAt: -1 });
 orderSchema.index({ status: 1 });
+// The admin orders page filters by payment method (COD queue vs. wallet queue).
+orderSchema.index({ 'payment.method': 1, 'payment.status': 1 });
 
 export const Order = model<IOrder>('Order', orderSchema);

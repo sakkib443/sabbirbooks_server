@@ -13,6 +13,21 @@ const createOrder = async (req: Request, res: Response) => {
   }
 };
 
+// GET checkout options (public) — enabled payment methods + delivery charges.
+// Public because the checkout page needs it before the buyer has an order (and
+// it exposes nothing but the shop's own published rates).
+const getCheckoutOptions = async (req: Request, res: Response) => {
+  try {
+    const subtotal = req.query.subtotal ? Number(req.query.subtotal) : 0;
+    const options = await OrderService.getCheckoutOptions(
+      Number.isFinite(subtotal) ? subtotal : 0
+    );
+    res.status(200).json({ success: true, data: options });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 // GET my orders (auth)
 const getMyOrders = async (req: Request, res: Response) => {
   try {
@@ -58,7 +73,11 @@ const getAllOrders = async (req: Request, res: Response) => {
 // PATCH status (admin fulfillment)
 const updateOrderStatus = async (req: Request, res: Response) => {
   try {
-    const order = await OrderService.updateOrderStatus(req.params.id, req.body.status);
+    const order = await OrderService.updateOrderStatus(req.params.id, req.body.status, {
+      courierName: req.body.courierName,
+      trackingCode: req.body.trackingCode,
+      adminNote: req.body.adminNote,
+    });
     res.status(200).json({ success: true, message: 'Order status updated', data: order });
   } catch (error: any) {
     res.status(400).json({ success: false, message: error.message });
@@ -158,6 +177,7 @@ const downloadBook = async (req: Request, res: Response) => {
 
 export const OrderController = {
   createOrder,
+  getCheckoutOptions,
   getMyOrders,
   getOrderById,
   getAllOrders,

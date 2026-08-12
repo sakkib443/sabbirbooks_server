@@ -1,9 +1,15 @@
 import { Types } from 'mongoose';
 
-// Order payment methods — mirrors the enrollment payment sub-doc, minus 'cash'
-// (books are bought online, not at a counter).
-export type TOrderPaymentMethod = 'bkash' | 'sslcommerz' | 'manual' | 'free';
+// Order payment methods.
+//   manual → buyer Send-Money'd to our wallet and submitted a TrxID
+//   cod    → pays the courier in cash when the parcel arrives
+// 'cod' only ever applies to printed items; there is nothing to hand over for a
+// digital download, so the service rejects that combination.
+export type TOrderPaymentMethod = 'bkash' | 'sslcommerz' | 'manual' | 'cod' | 'free';
 export type TOrderPaymentStatus = 'pending' | 'paid' | 'failed';
+
+// Which courier zone the parcel goes to — drives the delivery charge.
+export type TDeliveryArea = 'inside-dhaka' | 'outside-dhaka';
 
 // For manual payments, which mobile-wallet the buyer used to Send Money.
 export type TOrderPaymentChannel = 'bkash' | 'rocket' | 'nagad';
@@ -11,6 +17,11 @@ export type TOrderPaymentChannel = 'bkash' | 'rocket' | 'nagad';
 // printed → needs shipping; digital → instant download; mixed → at least one of each.
 export type TDeliveryType = 'printed' | 'digital' | 'mixed';
 
+// The fulfillment ladder. A cash-on-delivery order sits at 'pending' until an
+// admin confirms it — that confirmation, not the order being placed, is what
+// starts fulfillment and opens the book's QR content (see bookAccess's
+// PAID_ORDER_STATUSES). Otherwise anyone could type a fake address and read the
+// whole book for free.
 export type TOrderStatus =
   | 'pending'
   | 'paid'
@@ -54,6 +65,9 @@ export interface IShippingAddress {
   phone: string;
   address: string;
   city: string;
+  // Courier zone; defaults to outside-dhaka (the more expensive of the two) so a
+  // client that forgets to send it can never under-charge us.
+  area?: TDeliveryArea;
   note?: string;
 }
 
@@ -66,9 +80,23 @@ export interface IOrder {
   subtotal: number;
   discount: number;
   couponCode?: string;
+  // Snapshotted at checkout from the site settings, so changing the rate later
+  // never rewrites what an existing customer was quoted.
+  deliveryCharge: number;
   total: number;
   payment: IOrderPayment;
   status: TOrderStatus;
+  // True once this order's copies have been taken out of stock. Guards the
+  // decrement against running twice on the COD confirm → deliver path.
+  stockAdjusted?: boolean;
+  // Admin bookkeeping for the fulfillment timeline shown on the orders page.
+  confirmedAt?: Date;
+  shippedAt?: Date;
+  deliveredAt?: Date;
+  cancelledAt?: Date;
+  courierName?: string;
+  trackingCode?: string;
+  adminNote?: string;
   createdAt?: Date;
   updatedAt?: Date;
 }

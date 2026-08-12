@@ -4,11 +4,21 @@ import { ISiteSettings } from './settings.interface';
 const settingsSchema = new Schema<ISiteSettings>(
     {
         // Brand / Identity
-        brandName: { type: String, default: 'Aptech Learning' },
-        brandNameBn: { type: String, default: 'অ্যাপটেক লার্নিং' },
-        websiteUrl: { type: String, default: 'https://aptechlearning.com' },
-        // Site logo — admin-uploaded URL; empty = use the built-in default logo
+        //
+        // These are what the Navbar, footer, browser tab title and checkout all
+        // read — the brand is data, not hard-coded strings, so renaming the site
+        // is a form submit rather than a redeploy.
+        brandName: { type: String, default: 'Magic Viva' },
+        brandNameBn: { type: String, default: 'ম্যাজিক ভাইভা' },
+        // Optional second word rendered in the accent colour ("Magic *Viva*").
+        // Leave blank to show brandName as one solid word.
+        brandTagline: { type: String, default: 'Medical Learning Platform' },
+        brandTaglineBn: { type: String, default: 'মেডিকেল শিক্ষার প্ল্যাটফর্ম' },
+        websiteUrl: { type: String, default: '' },
+        // Site logo — admin-uploaded URL; empty = use the built-in wordmark
         logo: { type: String, default: '' },
+        // Square mark used for the browser tab icon; falls back to `logo`.
+        favicon: { type: String, default: '' },
 
         // Hero Section - English
         heroBadge: { type: String, default: '🎓 A Leading Platform for Skills Development' },
@@ -43,6 +53,29 @@ const settingsSchema = new Schema<ISiteSettings>(
         paymentRocketNumber: { type: String, default: '' },
         paymentNagadNumber: { type: String, default: '' },
         paymentInstructions: { type: String, default: '' },
+
+        // ── Ordering & delivery ────────────────────────────────────────────
+        // Which payment methods the checkout offers. Turning both off would
+        // leave nothing to click, so the order service falls back to COD.
+        codEnabled: { type: Boolean, default: true },
+        onlinePaymentEnabled: { type: Boolean, default: true },
+
+        // Delivery charge for printed books, in taka. Two zones because Dhaka
+        // and outside-Dhaka courier rates differ; set them equal for a flat fee.
+        deliveryChargeInsideDhaka: { type: Number, default: 120 },
+        deliveryChargeOutsideDhaka: { type: Number, default: 120 },
+        // Order subtotal at or above which delivery is free. 0 = never free.
+        freeDeliveryAbove: { type: Number, default: 0 },
+        // Extra fee some sellers add for collecting cash. 0 = no surcharge.
+        codExtraCharge: { type: Number, default: 0 },
+
+        // Shown on the checkout page and the order confirmation.
+        deliveryNote: {
+            type: String,
+            default: 'ঢাকার ভেতরে ১-২ দিন, ঢাকার বাইরে ২-৪ কর্মদিবসের মধ্যে বই পৌঁছে যাবে।',
+        },
+        // Support number printed on the order confirmation screen.
+        orderSupportPhone: { type: String, default: '' },
     },
     { timestamps: true }
 );

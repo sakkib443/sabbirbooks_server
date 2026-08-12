@@ -9,11 +9,19 @@ export default {
   bcrypt_salt_rounds: process.env.BCRYPT_SALT_ROUNDS || '12',
 
   // JWT
+  //
+  // The access token used to default to 15m with no refresh call anywhere in the
+  // client, so the admin panel logged itself out a quarter of an hour into every
+  // session — mid-answer, losing unsaved work. The client now refreshes silently
+  // (see the client's authFetch), but the default is 12h anyway: a token this
+  // side of a working day means one dropped refresh cannot end the session, and
+  // a stolen token still dies the same day. Override per-environment with
+  // JWT_ACCESS_EXPIRES_IN if you want it tighter.
   jwt: {
     access_secret: process.env.JWT_ACCESS_SECRET as string,
-    access_expires_in: process.env.JWT_ACCESS_EXPIRES_IN || '15m',
+    access_expires_in: process.env.JWT_ACCESS_EXPIRES_IN || '12h',
     refresh_secret: process.env.JWT_REFRESH_SECRET as string,
-    refresh_expires_in: process.env.JWT_REFRESH_EXPIRES_IN || '7d',
+    refresh_expires_in: process.env.JWT_REFRESH_EXPIRES_IN || '30d',
   },
 
   // Cloudinary

@@ -54,7 +54,21 @@ const app: Application = express();
 app.set('trust proxy', 1);
 
 // ✅ Security: Helmet (HTTP headers)
-app.use(helmet());
+//
+// crossOriginResourcePolicy is relaxed to 'cross-origin' ON PURPOSE. Helmet's
+// default is 'same-origin', which makes the browser REFUSE every <img>, <video>
+// and <audio> the site loads from this server — and the client is a different
+// origin (web.example.com loading media from api.example.com). That default is
+// why answer images and uploaded videos rendered as blank boxes while the
+// answer TEXT (a CORS-enabled fetch, which CORP does not police) came through
+// fine. Everything under /uploads is content the buyer is entitled to see, and
+// the private endpoints are all Bearer-token gated, so serving it cross-origin
+// costs nothing.
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  })
+);
 
 // ✅ Security: CORS — reflects the request origin so localhost (dev) and the
 // deployed client (Vercel) both work. Auth is Bearer-token (not cookies), so
@@ -115,7 +129,23 @@ app.use('/api/notices', NoticeRoutes);
 app.use('/api/partners', PartnerRoutes);
 
 // Serve locally-uploaded files (class materials, certificates, etc.)
-app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+//
+// setHeaders re-states the cross-origin policy on the media itself rather than
+// relying on the app-wide helmet default surviving future edits: if this header
+// goes back to same-origin, every answer image and video silently breaks again.
+// Range requests (which <video> seeking needs) are handled by express.static.
+app.use(
+  '/uploads',
+  express.static(path.join(process.cwd(), 'uploads'), {
+    setHeaders: (res) => {
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      // Uploaded files are content-addressed by timestamp, so they never change
+      // under the same name — cache them hard.
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    },
+  })
+);
 
 // Global error handler
 app.use(globalErrorHandler);

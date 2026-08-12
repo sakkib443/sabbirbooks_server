@@ -6,6 +6,9 @@ const shippingAddressSchema = z.object({
   phone: z.string().min(1, 'Phone is required'),
   address: z.string().min(1, 'Address is required'),
   city: z.string().min(1, 'City is required'),
+  // Courier zone. Optional here and defaulted server-side to the dearer zone, so
+  // an old client that never sends it cannot under-pay the delivery charge.
+  area: z.enum(['inside-dhaka', 'outside-dhaka']).optional(),
   note: z.string().optional(),
 });
 
@@ -24,6 +27,10 @@ export const createOrderValidationSchema = z.object({
       )
       .min(1, 'At least one item is required'),
     shippingAddress: shippingAddressSchema.optional(),
+    // How the buyer intends to pay. 'manual' = Send Money now + submit a TrxID,
+    // 'cod' = pay the courier in cash. Defaults to manual (the pre-existing
+    // behaviour) when an older client omits it.
+    paymentMethod: z.enum(['manual', 'cod']).optional(),
   }),
 });
 
@@ -31,6 +38,10 @@ export const createOrderValidationSchema = z.object({
 export const updateOrderStatusValidationSchema = z.object({
   body: z.object({
     status: z.enum(['processing', 'shipped', 'delivered', 'cancelled']),
+    // Optional courier details captured at the same time as "shipped".
+    courierName: z.string().optional(),
+    trackingCode: z.string().optional(),
+    adminNote: z.string().optional(),
   }),
 });
 
@@ -51,7 +62,7 @@ export const submitManualPaymentValidationSchema = z.object({
 export const updateOrderPaymentValidationSchema = z.object({
   body: z.object({
     channel: z.enum(['bkash', 'rocket', 'nagad']).optional(),
-    method: z.enum(['bkash', 'sslcommerz', 'manual', 'free']).optional(),
+    method: z.enum(['bkash', 'sslcommerz', 'manual', 'cod', 'free']).optional(),
     transactionId: z.string().optional(),
     senderNumber: z.string().optional(),
     sentAt: z.string().nullable().optional(),
