@@ -65,6 +65,10 @@ const orderSchema = new Schema<IOrder>(
       default: () =>
         `ORD-${Date.now()}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
     },
+    // Human-friendly running number (#1, #2, …). Assigned from an atomic counter
+    // at create time (order.service). Not `required`/`unique` at the schema level:
+    // rows created before this field existed have none until the backfill runs.
+    orderSeq: { type: Number, index: true },
     user: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     items: { type: [orderItemSchema], required: true, validate: (v: unknown[]) => v.length > 0 },
     deliveryType: {

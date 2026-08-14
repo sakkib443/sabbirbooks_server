@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { isValidObjectId } from 'mongoose';
 import { Order } from './order.model';
+import { getNextSequence, ORDER_SEQ } from './counter.model';
 import { IOrder, IShippingAddress, TDeliveryType, TDeliveryArea } from './order.interface';
 import { Book } from '../book/book.model';
 import { User } from '../user/user.model';
@@ -149,8 +150,14 @@ const createOrder = async (
   });
   const total = subtotal - discount + deliveryCharge;
 
+  // Human-friendly running number. Seeded to the current order count on first use
+  // so an order placed before the backfill runs still sorts above the existing
+  // rows the backfill numbers 1..N.
+  const orderSeq = await getNextSequence(ORDER_SEQ, () => Order.countDocuments());
+
   const order = await Order.create({
     user: userId,
+    orderSeq,
     items,
     deliveryType,
     shippingAddress: hasPrinted ? { ...payload.shippingAddress, area } : undefined,

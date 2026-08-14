@@ -73,6 +73,10 @@ export interface IShippingAddress {
 
 export interface IOrder {
   orderNumber: string;
+  // Human-friendly running number (#1, #2, …) shown to admin and buyer. Assigned
+  // from an atomic counter at create time; existing rows are numbered by a
+  // one-time backfill (createdAt order). Optional so pre-backfill rows still type.
+  orderSeq?: number;
   user: Types.ObjectId;
   items: IOrderItem[];
   deliveryType: TDeliveryType;
