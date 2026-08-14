@@ -4,9 +4,16 @@
 // Docs: https://developer.bka.sh/docs
 
 import config from '../../config';
+import { bkashState, bkashUrls, serverUrl } from './gateway.config';
 
 // ── Demo Mode — simulates bKash flow without real API ────────
-const IS_DEMO = !config.bkash.app_key || config.bkash.app_key === 'demo';
+//
+// Evaluated per call, not once at import: the old module-level constant meant a
+// credential added to the environment needed a process restart to take effect,
+// and — worse — it only looked at app_key, so a partially filled .env switched
+// the live path on with `undefined` username/password. `bkashState()` requires
+// every credential the live calls actually send.
+const isDemo = (): boolean => !bkashState().configured;
 
 // ── Token Store (in-memory for demo) ─────────────────────────
 let cachedToken: { token: string; expiresAt: number } | null = null;
@@ -14,7 +21,7 @@ let cachedToken: { token: string; expiresAt: number } | null = null;
 // ── 1. Get Grant Token ───────────────────────────────────────
 const getToken = async (): Promise<string> => {
   // Demo mode
-  if (IS_DEMO) {
+  if (isDemo()) {
     return 'demo_bkash_token_' + Date.now();
   }
 
@@ -24,7 +31,7 @@ const getToken = async (): Promise<string> => {
   }
 
   // Real bKash API call (production)
-  const response = await fetch(config.bkash.grant_token_url!, {
+  const response = await fetch(bkashUrls().grantToken, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -59,7 +66,7 @@ const createPayment = async (payload: {
   const { amount, courseId, studentId, invoiceNumber } = payload;
 
   // Demo mode — return mock payment response
-  if (IS_DEMO) {
+  if (isDemo()) {
     const paymentID = `DEMO_PAY_${Date.now()}_${Math.random().toString(36).substring(7)}`;
     return {
       paymentID,
@@ -76,9 +83,14 @@ const createPayment = async (payload: {
 
   // Real bKash API call (production)
   const token = await getToken();
-  const callbackURL = `${config.client_url}/payment/bkash/callback`;
+  // Points at the SERVER, not the browser app. bKash returns the buyer here with
+  // the payment only AUTHORIZED — the capture is a second API call, and if that
+  // call lives in page JavaScript then a buyer who closes the tab on the redirect
+  // has their money held and no order paid. The server captures before it
+  // redirects onward, so finishing the payment no longer depends on the browser.
+  const callbackURL = `${serverUrl()}/api/payment/bkash/callback`;
 
-  const response = await fetch('https://tokenized.pay.bka.sh/v1.2.0-beta/tokenized/checkout/create', {
+  const response = await fetch(bkashUrls().create, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -102,7 +114,7 @@ const createPayment = async (payload: {
 // ── 3. Execute Payment (after user completes on bKash) ───────
 const executePayment = async (paymentID: string) => {
   // Demo mode
-  if (IS_DEMO) {
+  if (isDemo()) {
     return {
       paymentID,
       trxID: `DEMO_TRX_${Date.now()}`,
@@ -118,7 +130,7 @@ const executePayment = async (paymentID: string) => {
 
   // Real bKash API call
   const token = await getToken();
-  const response = await fetch('https://tokenized.pay.bka.sh/v1.2.0-beta/tokenized/checkout/execute', {
+  const response = await fetch(bkashUrls().execute, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -133,7 +145,7 @@ const executePayment = async (paymentID: string) => {
 
 // ── 4. Query Payment Status ──────────────────────────────────
 const queryPayment = async (paymentID: string) => {
-  if (IS_DEMO) {
+  if (isDemo()) {
     return {
       paymentID,
       transactionStatus: 'Completed',
@@ -143,7 +155,7 @@ const queryPayment = async (paymentID: string) => {
   }
 
   const token = await getToken();
-  const response = await fetch('https://tokenized.pay.bka.sh/v1.2.0-beta/tokenized/checkout/payment/status', {
+  const response = await fetch(bkashUrls().query, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

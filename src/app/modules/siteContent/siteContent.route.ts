@@ -1,10 +1,15 @@
 import express from 'express';
 import { SiteContentController } from './siteContent.controller';
-import { authMiddleware, authorize } from '../../middlewares/auth';
+import { authMiddleware, authorize, requireCapability } from '../../middlewares/auth';
 
 const router = express.Router();
 
-const adminOnly = [authMiddleware, authorize('admin', 'superAdmin', 'trainingManager')];
+// Website page copy is content — see book.routes.ts for the pattern.
+const adminOnly = [
+  authMiddleware,
+  authorize('admin', 'superAdmin', 'trainingManager', 'contentManager'),
+  requireCapability('content.write'),
+];
 
 // Admin: list pages that have content
 router.get('/', ...adminOnly, SiteContentController.listPages);

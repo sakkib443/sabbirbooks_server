@@ -4,11 +4,11 @@
 // Docs: https://developer.sslcommerz.com/doc/v4/
 
 import config from '../../config';
+import { serverUrl, sslcommerzHost, sslcommerzState } from './gateway.config';
 
-const IS_DEMO = !config.sslcommerz.store_id || config.sslcommerz.store_id === 'demo';
-const BASE_URL = config.sslcommerz.is_live
-  ? 'https://securepay.sslcommerz.com'
-  : 'https://sandbox.sslcommerz.com';
+// Per call rather than at import, and requires the store PASSWORD as well as the
+// id — a store_id with no password cannot complete a single live call.
+const isDemo = (): boolean => !sslcommerzState().configured;
 
 // ── 1. Init Payment Session ──────────────────────────────────
 const initSession = async (payload: {
@@ -27,7 +27,7 @@ const initSession = async (payload: {
   } = payload;
 
   // Demo mode
-  if (IS_DEMO) {
+  if (isDemo()) {
     const tranId = `DEMO_SSL_${Date.now()}_${Math.random().toString(36).substring(7)}`;
     return {
       status: 'SUCCESS',
@@ -45,10 +45,20 @@ const initSession = async (payload: {
   formData.append('total_amount', String(amount));
   formData.append('currency', 'BDT');
   formData.append('tran_id', invoiceNumber);
-  formData.append('success_url', `${config.client_url}/payment/sslcommerz/success`);
-  formData.append('fail_url', `${config.client_url}/payment/sslcommerz/fail`);
-  formData.append('cancel_url', `${config.client_url}/payment/sslcommerz/cancel`);
-  formData.append('ipn_url', `${config.client_url.replace('3000', '5000')}/api/payment/sslcommerz/ipn`);
+  // All four point at the SERVER. SSLCommerz delivers its result as a form POST,
+  // and a Next.js App Router page only answers GET — pointing these at the client
+  // meant the buyer's browser POSTed into a 405 and the order was never settled.
+  // The API takes the POST, settles, then 302s the browser to the client.
+  //
+  // The old ipn_url derived the API host by string-replacing '3000' with '5000'
+  // in the client URL, which only ever worked on a dev laptop: in production the
+  // client is a domain with no port in it, so the IPN was posted straight back at
+  // the storefront. SERVER_URL is now explicit.
+  const api = `${serverUrl()}/api/payment/sslcommerz`;
+  formData.append('success_url', `${api}/success`);
+  formData.append('fail_url', `${api}/fail`);
+  formData.append('cancel_url', `${api}/cancel`);
+  formData.append('ipn_url', `${api}/ipn`);
   formData.append('cus_name', studentName);
   formData.append('cus_email', studentEmail);
   formData.append('cus_phone', studentPhone || '01700000000');
@@ -62,7 +72,7 @@ const initSession = async (payload: {
   formData.append('value_a', courseId);
   formData.append('value_b', studentId);
 
-  const response = await fetch(`${BASE_URL}/gwprocess/v4`, {
+  const response = await fetch(`${sslcommerzHost()}/gwprocess/v4`, {
     method: 'POST',
     body: formData,
   });
@@ -72,7 +82,7 @@ const initSession = async (payload: {
 
 // ── 2. Validate Transaction ──────────────────────────────────
 const validateTransaction = async (valId: string) => {
-  if (IS_DEMO) {
+  if (isDemo()) {
     return {
       status: 'VALID',
       tran_id: valId,
@@ -84,7 +94,7 @@ const validateTransaction = async (valId: string) => {
     };
   }
 
-  const url = `${BASE_URL}/validator/api/validationserverAPI.php?val_id=${valId}&store_id=${config.sslcommerz.store_id}&store_passwd=${config.sslcommerz.store_pass}&format=json`;
+  const url = `${sslcommerzHost()}/validator/api/validationserverAPI.php?val_id=${valId}&store_id=${config.sslcommerz.store_id}&store_passwd=${config.sslcommerz.store_pass}&format=json`;
   const response = await fetch(url);
   return response.json();
 };

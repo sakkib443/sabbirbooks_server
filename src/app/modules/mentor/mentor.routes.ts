@@ -2,11 +2,16 @@ import express from 'express';
 import { MentorController } from './mentor.controller';
 import validateRequest from '../../middlewares/validateRequest';
 import { mentorValidationSchema } from './mentor.validation';
-import { authMiddleware, authorize } from '../../middlewares/auth';
+import { authMiddleware, authorize, requireCapability } from '../../middlewares/auth';
 
 const router = express.Router();
 
-const adminOnly = [authMiddleware, authorize('admin', 'superAdmin', 'trainingManager')];
+// Mentor profiles are public-facing content — see book.routes.ts for the pattern.
+const adminOnly = [
+  authMiddleware,
+  authorize('admin', 'superAdmin', 'trainingManager', 'contentManager'),
+  requireCapability('content.write'),
+];
 
 // Mentor self-profile (token-based)
 router.get('/me', authMiddleware, MentorController.getMyMentorProfile);

@@ -1,9 +1,12 @@
 import { Enrollment } from './enrollment.model';
 import { Course } from '../courses/course.model';
 import { User } from '../user/user.model';
-// PORT: notification module dropped — NotificationService (admin new-order alerts) disabled.
-// import { NotificationService } from '../notification/notification.service';
-// PORT: notification module dropped — EmailService (money-receipt emails) disabled.
+import { NotificationService } from '../notification/notification.service';
+// Money-receipt emails are switched OFF here deliberately — the email service
+// exists and works (notification/email.service.ts, demo-logs until SMTP is
+// configured); the call-site at approveEnrollment is left commented pending a
+// decision on whether this site sends receipts. The in-app notification
+// triggers in this file ARE live.
 // import { EmailService } from '../notification/email.service';
 
 // ─── Create Enrollment (after payment) ──────────────────────
@@ -43,15 +46,17 @@ const createEnrollment = async (payload: {
         ? `${(student as any).firstName || (student as any).name || 'Student'} ${(student as any).lastName || ''}`.trim()
         : 'Unknown Student';
       const courseName = (course as any)?.title || 'Unknown Course';
-      console.log(`📢 Sending admin notification: ${studentName} ordered ${courseName}`);
-      // PORT: notification module dropped — admin new-order alert disabled.
-      // await NotificationService.triggerNewOrderForAdmins(
-      //   studentName,
-      //   courseName,
-      //   payload.payment.amount,
-      //   payload.payment.method,
-      // );
-      console.log('✅ Admin notification sent successfully');
+      await NotificationService.triggerNewOrderForAdmins(
+        studentName,
+        courseName,
+        payload.payment.amount,
+        payload.payment.method,
+      );
+      // Logged AFTER the write, never before it. The previous version printed
+      // "✅ Admin notification sent successfully" around a commented-out body,
+      // so the logs reported a delivery that had not happened for every single
+      // enrollment. A log that lies is worse than no log.
+      console.log(`📢 Admin notification queued: ${studentName} → ${courseName}`);
     } catch (notifErr) {
       console.error('❌ Admin notification (new order) failed:', notifErr);
     }
@@ -297,7 +302,7 @@ const approveEnrollment = async (enrollmentId: string) => {
     $inc: { totalStudentsEnroll: 1 },
   });
 
-  // PORT: notification module dropped — admission/full money-receipt email (fire-and-forget) disabled.
+  // Receipt email intentionally off — see the note on the EmailService import.
   // // Fire-and-forget admission/full money-receipt email (never blocks approval)
   // void (async () => {
   //   try {

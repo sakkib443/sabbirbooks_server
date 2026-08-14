@@ -2,9 +2,15 @@ import express from 'express';
 import { CourseController } from './course.controller';
 import validateRequest from '../../middlewares/validateRequest';
 import { courseValidationSchema } from './course.validation';
-import { authMiddleware, authorize } from '../../middlewares/auth';
+import { authMiddleware, authorize, requireCapability } from '../../middlewares/auth';
 
 const router = express.Router();
+
+// Course records are content — see book.routes.ts for the pattern.
+const contentWrite = [
+  authorize('admin', 'trainingManager', 'contentManager'),
+  requireCapability('content.write'),
+];
 
 // Public routes
 router.get('/', CourseController.getAllCoursesController);
@@ -14,7 +20,7 @@ router.get('/:id', CourseController.getSingleCourseController);
 router.post(
   '/create-course',
   authMiddleware,
-  authorize('admin', 'trainingManager'),
+  ...contentWrite,
   validateRequest(courseValidationSchema),
   CourseController.createCourseController
 );
@@ -22,14 +28,14 @@ router.post(
 router.patch(
   '/:id',
   authMiddleware,
-  authorize('admin', 'trainingManager'),
+  ...contentWrite,
   CourseController.updateCourseController
 );
 
 router.delete(
   '/:id',
   authMiddleware,
-  authorize('admin', 'trainingManager'),
+  ...contentWrite,
   CourseController.deleteCourseController
 );
 

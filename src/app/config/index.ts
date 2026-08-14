@@ -24,6 +24,41 @@ export default {
     refresh_expires_in: process.env.JWT_REFRESH_EXPIRES_IN || '30d',
   },
 
+  // Google Sign-In (OpenID Connect)
+  //
+  // Get these from https://console.cloud.google.com/apis/credentials →
+  // "Create credentials" → "OAuth client ID" → Application type "Web
+  // application". Add the site origin (e.g. http://localhost:3001 in dev) under
+  // "Authorised JavaScript origins" — the browser widget will not render for an
+  // origin that is not listed.
+  //
+  // client_id doubles as the FEATURE FLAG. It is the `audience` every incoming
+  // ID token is verified against, so without it there is no safe way to accept
+  // one: the route answers 503 "not configured" and the client renders no
+  // button. Nothing crashes at boot when it is absent — that is the state this
+  // ships in.
+  //
+  // The SAME id must be set on the client as NEXT_PUBLIC_GOOGLE_CLIENT_ID. A
+  // mismatch means every token is minted for the wrong audience and rejected.
+  google: {
+    client_id: process.env.GOOGLE_CLIENT_ID || '',
+    // A SECOND accepted audience, for when more than one Google client id can
+    // legitimately mint tokens for this backend (a web client plus an Android
+    // one, or a migration between Cloud projects). Optional — leave it blank
+    // and the primary id is the only audience accepted.
+    //
+    // ⚠ This is a TRUST DECISION, not a convenience setting. Whoever controls
+    // the listed OAuth client can mint ID tokens this server will accept, so
+    // only ever put a client id YOU own here. It is an explicit allow-list read
+    // from the environment: no value from a request can ever widen it.
+    client_id_alt: process.env.GOOGLE_CLIENT_ID_ALT || '',
+    // Only used by the server-side authorization-code exchange, which this
+    // flow does NOT perform — Google Identity Services hands the browser a
+    // signed ID token directly and we verify that. Read here so a future code
+    // flow has one place to find it; leaving it blank changes nothing today.
+    client_secret: process.env.GOOGLE_CLIENT_SECRET || '',
+  },
+
   // Cloudinary
   cloudinary: {
     cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -56,10 +91,38 @@ export default {
     sendgrid_api_key: process.env.SENDGRID_API_KEY, // legacy, unused
   },
 
-  // SMS
+  // SMS — real sending switches on as soon as an API key exists (no source-level
+  // DEMO flag; see notification/sms.service.ts).
   sms: {
     api_key: process.env.BULKSMS_API_KEY,
     sender_id: process.env.BULKSMS_SENDER_ID || 'SabbirBook',
+  },
+
+  // Order alerts (WhatsApp + Telegram).
+  //
+  // Credentials live HERE and only here. GET /api/settings is public and returns
+  // the whole settings document, so a bot token stored there would be readable
+  // by anyone. Every field below is optional: unset means "log and skip", never
+  // a crash — see notification/orderAlert.service.ts.
+  alerts: {
+    shop_name: process.env.SHOP_NAME || 'Sabbir Books',
+    telegram: {
+      bot_token: process.env.TELEGRAM_BOT_TOKEN || '',
+      // Comma-separated — a personal chat and a staff group can both be listed.
+      admin_chat_ids: process.env.TELEGRAM_ADMIN_CHAT_ID || '',
+    },
+    whatsapp: {
+      phone_number_id: process.env.WHATSAPP_PHONE_NUMBER_ID || '',
+      access_token: process.env.WHATSAPP_ACCESS_TOKEN || '',
+      api_version: process.env.WHATSAPP_API_VERSION || 'v21.0',
+      // Admin's own WhatsApp number in international form (e.g. 8801XXXXXXXXX).
+      admin_to: process.env.WHATSAPP_ADMIN_TO || '',
+      // Business-initiated WhatsApp messages MUST use a template Meta approved.
+      template_buyer: process.env.WHATSAPP_TEMPLATE_ORDER_BUYER || 'order_received_bn',
+      template_admin: process.env.WHATSAPP_TEMPLATE_ORDER_ADMIN || 'new_order_admin_bn',
+      template_lang: process.env.WHATSAPP_TEMPLATE_LANG || 'bn',
+      default_country_code: process.env.WHATSAPP_DEFAULT_COUNTRY_CODE || '880',
+    },
   },
 
   // Client

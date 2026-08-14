@@ -3,6 +3,8 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import config from '../config';
+import { User } from '../modules/user/user.model';
+import { Capability, resolveCapabilities } from '../config/permissions';
 
 /**
  * JWT Authentication middleware.
@@ -56,5 +58,65 @@ export const authorize = (...allowedRoles: string[]) => {
       success: false,
       message: `Access denied: '${userRole}' role is not authorized for this action`,
     });
+  };
+};
+
+/**
+ * Capability-based Authorization middleware.
+ *
+ * Compose it AFTER authorize(): both must pass, so a capability can only ever
+ * narrow a route, never widen it.
+ *
+ *   router.get('/', authMiddleware, authorize('admin'), requireCapability('orders.read'), ...)
+ *
+ * Why it reads the database instead of the JWT:
+ *   - the access token carries only { _id, role, email }; adding capabilities to
+ *     it would mean a manager keeps a revoked permission until their token
+ *     expires, and re-signing tokens on every permission change is worse.
+ *   - the role in the token can also be stale after a role change, so the
+ *     DOCUMENT's role is the one that decides.
+ * The lookup is one indexed findById on admin-panel traffic only.
+ */
+export const requireCapability = (...required: Capability[]) => {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    const tokenUser = (req as any).user;
+
+    if (!tokenUser || !tokenUser._id) {
+      return res.status(403).json({ success: false, message: 'Access denied: not authenticated' });
+    }
+
+    // superAdmin keeps its unconditional bypass — unchanged from authorize().
+    if (tokenUser.role === 'superAdmin') return next();
+
+    let account: { role?: string; permissions?: unknown; status?: string; isDeleted?: boolean } | null;
+    try {
+      account = await User.findById(tokenUser._id)
+        .select('role permissions status isDeleted')
+        .lean<{ role?: string; permissions?: unknown; status?: string; isDeleted?: boolean }>();
+    } catch {
+      return res.status(500).json({ success: false, message: 'Could not verify permissions' });
+    }
+
+    if (!account || account.isDeleted || (account.status && account.status !== 'active')) {
+      return res.status(403).json({ success: false, message: 'Access denied: account is not active' });
+    }
+
+    // The master super admin is created on the fly by auth.service — honour the
+    // bypass from the document too, in case the token was minted before that.
+    if (account.role === 'superAdmin') return next();
+
+    const owned = resolveCapabilities(account.role, account.permissions);
+    const missing = required.filter((cap) => !owned.includes(cap));
+
+    if (missing.length > 0) {
+      return res.status(403).json({
+        success: false,
+        message: `Access denied: missing permission '${missing[0]}'`,
+        missing,
+      });
+    }
+
+    (req as any).capabilities = owned;
+    return next();
   };
 };

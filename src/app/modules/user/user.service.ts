@@ -2,12 +2,21 @@ import { User } from './user.model';
 import { IUser } from './user.interface';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
+import {
+  Capability,
+  isManagerRole,
+  resolveCapabilities,
+  sanitizePermissions,
+} from '../../config/permissions';
 
 /**
  * Generate a user id in format: bac-(YYYY)-NN
  * Example: bac-(2025)-01, bac-(2025)-02, etc.
+ *
+ * Exported so Google sign-in (auth.service.ts) mints ids from the same
+ * sequence as every other account, rather than inventing a second scheme.
  */
-async function generateUserId(): Promise<string> {
+export async function generateUserId(): Promise<string> {
   const year = new Date().getFullYear();
   const prefix = `bac-(${year})-`;
 
@@ -61,14 +70,22 @@ const createUserServices = async (payload: IUser): Promise<CreateUserResponse> =
   return { user: newUser, token };
 };
 
-// ── Create a STAFF account (admin / trainingManager) from the dashboard ──
+// ── Create a STAFF account (admin / trainingManager / contentManager) ──
 // requesterRole enforces: only a superAdmin may create an 'admin'.
 const createStaffServices = async (
-  payload: { firstName: string; lastName?: string; email: string; phoneNumber?: string; password: string; role: 'admin' | 'trainingManager' },
+  payload: {
+    firstName: string;
+    lastName?: string;
+    email: string;
+    phoneNumber?: string;
+    password: string;
+    role: 'admin' | 'trainingManager' | 'contentManager';
+    permissions?: unknown;
+  },
   requesterRole: string,
 ): Promise<{ user: IUser; credentials: { email: string; password: string; role: string } }> => {
-  if (!['admin', 'trainingManager'].includes(payload.role)) {
-    throw new Error('Staff role must be admin or trainingManager');
+  if (!['admin', 'trainingManager', 'contentManager'].includes(payload.role)) {
+    throw new Error('Staff role must be admin, trainingManager or contentManager');
   }
   if (payload.role === 'admin' && requesterRole !== 'superAdmin') {
     const e: any = new Error('Only a Super Admin can create admin accounts');
@@ -84,6 +101,13 @@ const createStaffServices = async (
     throw e;
   }
 
+  // Only a manager gets a stored permission list, and only when one was sent.
+  // Leaving it undefined means "use the role defaults" — see permissions.ts.
+  const permissions =
+    isManagerRole(payload.role) && payload.permissions !== undefined
+      ? sanitizePermissions(payload.permissions)
+      : undefined;
+
   const id = await generateUserId();
   const user = await User.create({
     id,
@@ -93,6 +117,7 @@ const createStaffServices = async (
     phoneNumber: payload.phoneNumber || '',
     password: payload.password, // hashed by the User pre-save hook
     role: payload.role,
+    ...(permissions ? { permissions } : {}),
     status: 'active',
     isDeleted: false,
     isPasswordChanged: false,
@@ -101,6 +126,32 @@ const createStaffServices = async (
 
   return { user, credentials: { email, password: payload.password, role: payload.role } };
 };
+
+// ── Replace a manager's capability list ──
+// The ONLY writer of the `permissions` field. Guarded by staff.manage at the
+// route, and by the caller checks in updateUserPermissionsController.
+const setUserPermissionsServices = async (
+  id: string,
+  permissions: unknown,
+): Promise<IUser | null> => {
+  const isValidObjectId = /^[a-f\d]{24}$/i.test(id);
+  const query = isValidObjectId
+    ? { $or: [{ _id: id }, { id: id }], isDeleted: false }
+    : { id: id, isDeleted: false };
+
+  const clean: Capability[] = sanitizePermissions(permissions);
+
+  const updated = await User.findOneAndUpdate(
+    query,
+    { permissions: clean },
+    { new: true },
+  ).select('-password');
+  return updated;
+};
+
+/** The capabilities a stored user actually resolves to — for /auth/me and the UI. */
+const capabilitiesFor = (user: { role?: unknown; permissions?: unknown } | null): Capability[] =>
+  resolveCapabilities(user?.role, user?.permissions);
 
 // ── Create a STUDENT account from the dashboard (admin / superAdmin / trainingManager) ──
 // Role is always forced to 'student'. Returns credentials to show once.
@@ -133,51 +184,17 @@ const createStudentServices = async (
   return { user, credentials: { email, password: payload.password, role: 'student' } };
 };
 
-// Google Login/Register
-const googleLoginServices = async (payload: {
-  firstName: string;
-  lastName?: string;
-  email: string;
-  image?: string;
-  googleId: string;
-}): Promise<CreateUserResponse> => {
-  // Check if user already exists
-  let user = await User.findOne({ email: payload.email, isDeleted: false });
-
-  if (user) {
-    // Update google info if needed
-    if (!user.googleId) {
-      user.googleId = payload.googleId;
-      user.authProvider = 'google';
-      if (payload.image) user.image = payload.image;
-      await user.save();
-    }
-  } else {
-    // Create new user
-    const id = await generateUserId();
-    user = await User.create({
-      id,
-      email: payload.email,
-      firstName: payload.firstName,
-      lastName: payload.lastName || '',
-      phoneNumber: '',
-      password: '',
-      role: 'student',
-      status: 'active',
-      image: payload.image || '',
-      googleId: payload.googleId,
-      authProvider: 'google',
-    });
-  }
-
-  const token = jwt.sign(
-    { _id: user._id, role: user.role, email: user.email },
-    process.env.JWT_ACCESS_SECRET || process.env.JWT_SECRET || 'default_secret',
-    { expiresIn: '7d' }
-  );
-
-  return { user, token };
-};
+// REMOVED 2026-08-14 — googleLoginServices().
+//
+// It trusted a { firstName, email, googleId } request body, found the account
+// by that email and signed a JWT carrying its real role, with 'default_secret'
+// as the fallback signing key and a hardcoded 7d expiry. Naming an address was
+// all it took to be handed that account, superAdmin included.
+//
+// Deleting rather than commenting out is the point: an exported helper that
+// still works is one route line away from being live again. The replacement is
+// AuthService.googleSignIn() in modules/auth/, which verifies a Google-signed
+// ID token before it will look up anything.
 
 const getAllUsersServices = async (): Promise<IUser[]> => {
   // Exclude password hash from the admin list response
@@ -212,6 +229,12 @@ const updateUserServices = async (id: string, payload: Partial<IUser>): Promise<
     data.password = await bcrypt.hash(data.password, 10);
   }
 
+  // `permissions` is NEVER writable through the generic user PATCH. That route
+  // is open to trainingManager (for student accounts), so honouring the field
+  // here would be a self-service escalation path. It has exactly one writer:
+  // PATCH /api/user/:id/permissions, behind the staff.manage capability.
+  delete (data as { permissions?: unknown }).permissions;
+
   const updatedUser = await User.findOneAndUpdate(
     query,
     data,
@@ -240,9 +263,10 @@ export const UserService = {
   createUserServices,
   createStaffServices,
   createStudentServices,
-  googleLoginServices,
   getAllUsersServices,
   getSingleUserServices,
   updateUserServices,
+  setUserPermissionsServices,
+  capabilitiesFor,
   deleteUserServices,
 };

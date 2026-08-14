@@ -1,6 +1,7 @@
 import { Schema, model } from 'mongoose';
 import { IUser } from './user.interface';
 import bcrypt from 'bcryptjs';
+import { CAPABILITY_KEYS, ROLES } from '../../config/permissions';
 
 const userSchema = new Schema<IUser>(
   {
@@ -15,8 +16,19 @@ const userSchema = new Schema<IUser>(
     isPasswordChanged: { type: Boolean, default: false },
     role: {
       type: String,
-      enum: ['superAdmin', 'admin', 'trainingManager', 'mentor', 'student'],
+      enum: [...ROLES],
       required: true,
+    },
+    // Per-user capability overrides — see app/config/permissions.ts.
+    //
+    // `default: undefined` is load-bearing: it keeps the field ABSENT on every
+    // existing document, and resolveCapabilities() reads "absent" as "use the
+    // role's defaults". A default of [] would instead read as "no permissions
+    // at all" and lock out all 7 live accounts on the next deploy.
+    permissions: {
+      type: [String],
+      enum: [...CAPABILITY_KEYS],
+      default: undefined,
     },
     status: {
       type: String,

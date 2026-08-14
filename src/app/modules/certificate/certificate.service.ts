@@ -3,8 +3,7 @@ import { ICertificate } from './certificate.interface';
 import { Batch } from '../batch/batch.model';
 import { Enrollment } from '../enrollment/enrollment.model';
 import { User } from '../user/user.model';
-// PORT NOTE: notification module DROPPED — import commented out.
-// import { NotificationService } from '../notification/notification.service';
+import { NotificationService } from '../notification/notification.service';
 // PORT NOTE: attendance module NOT ported yet — import commented out.
 // import { Attendance } from '../attendance/attendance.model';
 // PORT NOTE: exam module NOT ported yet — import commented out.
@@ -388,13 +387,12 @@ const toggleCertificateEligibility = async (
                 existing.activatedAt = new Date();
                 await existing.save();
 
-                // Send notification
-                // PORT NOTE: notification module DROPPED — notification call commented out.
-                // try {
-                //     await NotificationService.triggerCertificateReady(studentId, courseName);
-                // } catch (e) {
-                //     console.error('Certificate notification failed:', e);
-                // }
+                // Send notification — never let it block reactivation.
+                try {
+                    await NotificationService.triggerCertificateReady(studentId, courseName);
+                } catch (e) {
+                    console.error('Certificate notification failed:', e);
+                }
                 return existing;
             }
             return existing; // Already active
@@ -421,13 +419,12 @@ const toggleCertificateEligibility = async (
             isDeleted: false,
         });
 
-        // Send notification to student
-        // PORT NOTE: notification module DROPPED — notification call commented out.
-        // try {
-        //     await NotificationService.triggerCertificateReady(studentId, courseName);
-        // } catch (e) {
-        //     console.error('Certificate notification failed:', e);
-        // }
+        // Send notification to student — never let it block issuing.
+        try {
+            await NotificationService.triggerCertificateReady(studentId, courseName);
+        } catch (e) {
+            console.error('Certificate notification failed:', e);
+        }
 
         return cert;
     } else {

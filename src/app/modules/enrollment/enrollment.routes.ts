@@ -1,8 +1,17 @@
 import express from 'express';
 import { EnrollmentController } from './enrollment.controller';
-import { authMiddleware, authorize } from '../../middlewares/auth';
+import { authMiddleware, authorize, requireCapability } from '../../middlewares/auth';
 
 const router = express.Router();
+
+// Enrollments carry who joined which course and what they paid. The role list is
+// unchanged; `training.manage` is added so an admin can revoke it in the matrix.
+// A contentManager is in neither list and therefore never sees any of it.
+const trainingWrite = [
+  authMiddleware,
+  authorize('admin', 'trainingManager'),
+  requireCapability('training.manage'),
+];
 
 // ── Student Routes ──────────────────────────────────────────
 router.post(
@@ -35,8 +44,7 @@ router.post(
 // ── Admin Routes ────────────────────────────────────────────
 router.get(
   '/all',
-  authMiddleware,
-  authorize('admin', 'trainingManager'),
+  ...trainingWrite,
   EnrollmentController.getAllEnrollments
 );
 
@@ -44,27 +52,25 @@ router.get(
   '/course/:courseId',
   authMiddleware,
   authorize('admin', 'trainingManager', 'mentor'),
+  requireCapability('training.manage'),
   EnrollmentController.getCourseEnrollments
 );
 
 router.post(
   '/admin-enroll',
-  authMiddleware,
-  authorize('admin', 'trainingManager'),
+  ...trainingWrite,
   EnrollmentController.adminEnroll
 );
 
 router.patch(
   '/cancel/:id',
-  authMiddleware,
-  authorize('admin', 'trainingManager'),
+  ...trainingWrite,
   EnrollmentController.cancelEnrollment
 );
 
 router.patch(
   '/approve/:id',
-  authMiddleware,
-  authorize('admin', 'trainingManager'),
+  ...trainingWrite,
   EnrollmentController.approveEnrollment
 );
 
@@ -77,24 +83,21 @@ router.get(
 
 router.get(
   '/stats',
-  authMiddleware,
-  authorize('admin', 'trainingManager'),
+  ...trainingWrite,
   EnrollmentController.getStats
 );
 
 // ── Admin: Transfer student to another course ───────────────
 router.patch(
   '/:id/transfer',
-  authMiddleware,
-  authorize('admin', 'trainingManager'),
+  ...trainingWrite,
   EnrollmentController.transferCourse
 );
 
 // ── Generic update (batchId, studentStatus, etc.) ───────────
 router.patch(
   '/:id',
-  authMiddleware,
-  authorize('admin', 'trainingManager'),
+  ...trainingWrite,
   EnrollmentController.updateEnrollment
 );
 

@@ -1,8 +1,16 @@
 import express from 'express';
 import { CertificateController } from './certificate.controller';
-import { authMiddleware, authorize } from '../../middlewares/auth';
+import { authMiddleware, authorize, requireCapability } from '../../middlewares/auth';
 
 const router = express.Router();
+
+// Certificates are a training operation. Role list unchanged; `training.manage`
+// added on top so an admin can revoke it from a manager in the matrix.
+const trainingWrite = [
+  authMiddleware,
+  authorize('admin', 'trainingManager'),
+  requireCapability('training.manage'),
+];
 
 // Public: Verify certificate (NO auth needed)
 router.get('/verify/:certId', CertificateController.verify);
@@ -12,20 +20,20 @@ router.get('/search', CertificateController.search);
 router.get('/my', authMiddleware, CertificateController.myCertificates);
 
 // Batch-based certification (Admin + Training Manager)
-router.get('/batches', authMiddleware, authorize('admin', 'trainingManager'), CertificateController.getCertBatches);
-router.get('/batch-students/:batchId', authMiddleware, authorize('admin', 'trainingManager'), CertificateController.getBatchStudents);
-router.post('/toggle-eligibility', authMiddleware, authorize('admin', 'trainingManager'), CertificateController.toggleEligibility);
-router.post('/bulk-grant', authMiddleware, authorize('admin', 'trainingManager'), CertificateController.bulkGrant);
+router.get('/batches', ...trainingWrite, CertificateController.getCertBatches);
+router.get('/batch-students/:batchId', ...trainingWrite, CertificateController.getBatchStudents);
+router.post('/toggle-eligibility', ...trainingWrite, CertificateController.toggleEligibility);
+router.post('/bulk-grant', ...trainingWrite, CertificateController.bulkGrant);
 
 // Admin
-router.post('/', authMiddleware, authorize('admin', 'trainingManager'), CertificateController.create);
-router.get('/', authMiddleware, authorize('admin', 'trainingManager'), CertificateController.getAll);
-router.get('/pending', authMiddleware, authorize('admin', 'trainingManager'), CertificateController.getPending);
-router.get('/stats', authMiddleware, authorize('admin', 'trainingManager'), CertificateController.stats);
+router.post('/', ...trainingWrite, CertificateController.create);
+router.get('/', ...trainingWrite, CertificateController.getAll);
+router.get('/pending', ...trainingWrite, CertificateController.getPending);
+router.get('/stats', ...trainingWrite, CertificateController.stats);
 router.get('/:certId', authMiddleware, CertificateController.getById);
-router.patch('/:certId', authMiddleware, authorize('admin', 'trainingManager'), CertificateController.update);
-router.patch('/:certId/activate', authMiddleware, authorize('admin', 'trainingManager'), CertificateController.activate);
-router.patch('/:certId/revoke', authMiddleware, authorize('admin', 'trainingManager'), CertificateController.revoke);
-router.delete('/:certId', authMiddleware, authorize('admin', 'trainingManager'), CertificateController.remove);
+router.patch('/:certId', ...trainingWrite, CertificateController.update);
+router.patch('/:certId/activate', ...trainingWrite, CertificateController.activate);
+router.patch('/:certId/revoke', ...trainingWrite, CertificateController.revoke);
+router.delete('/:certId', ...trainingWrite, CertificateController.remove);
 
 export const CertificateRoutes = router;

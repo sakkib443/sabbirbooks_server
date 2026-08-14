@@ -180,7 +180,118 @@ const createChapter = async (payload: Record<string, unknown>) => BookChapter.cr
 const createTopic = async (payload: Record<string, unknown>) =>
   BookTopic.create({ ...payload, qrCode: generateQrCode() });
 
-const createQuestion = async (payload: Record<string, unknown>) => BookQuestion.create(payload);
+// ─── Question serials ───────────────────────────────────────
+//
+// `questionNo` is free text — the serial as printed in the book, which may be
+// "12", "১২" or "১২ক". `order` is the number the list is actually sorted by.
+// Holding the two together is the whole job of createQuestion below.
+
+const BN_ZERO = 0x09e6;
+
+/** Bengali digits folded to ASCII so "১২" and "12" compare as one serial. */
+const asciiDigits = (value: unknown): string =>
+  String(value ?? '').replace(/[০-৯]/g, d => String(d.charCodeAt(0) - BN_ZERO));
+
+const sameSerial = (a: unknown, b: unknown) =>
+  asciiDigits(a).trim().toLowerCase() === asciiDigits(b).trim().toLowerCase();
+
+/**
+ * Leading integer of a serial, or null when it does not start with a digit.
+ *
+ * "১২ক" → 12. A suffixed serial still has a place in the run — it belongs right
+ * after 12 — so the leading number is what decides where it goes.
+ */
+const serialValue = (value: unknown): number | null => {
+  const match = /^\s*(\d+)/.exec(asciiDigits(value));
+  return match ? Number(match[1]) : null;
+};
+
+/** Bare number, no suffix — the only shape safe to renumber. */
+const isPlainSerial = (value: unknown) => /^\s*\d+\s*$/.test(asciiDigits(value));
+
+/** Renumbered serial, written back in the script the admin was already using. */
+const formatSerial = (n: number, source: string) =>
+  /[০-৯]/.test(source)
+    ? String(n).replace(/\d/g, d => String.fromCharCode(BN_ZERO + Number(d)))
+    : String(n);
+
+/**
+ * Create a question at the serial the admin typed.
+ *
+ * `questionNo` decides the position and `order` is derived from it; an `order`
+ * sent by the caller is ignored. Those two fields drifting apart is exactly why
+ * a re-added question used to reappear at the bottom of the topic.
+ *
+ *   serial already in use   → that question and every later one move down one,
+ *                             serials included, and the new one takes the slot
+ *   serial free but below   → drops into the gap and nothing else is renumbered,
+ *   an existing one           so re-adding a deleted question leaves the rest alone
+ *   serial past the end, or → appended
+ *   no leading digit ("ক")
+ *
+ * Suffixed serials ("১২ক") are positioned by their leading number but never
+ * renumbered by a shift: bumping it to "১৩ক" would invent a serial the printed
+ * book does not have.
+ */
+const createQuestion = async (payload: Record<string, unknown>) => {
+  const { topicId } = payload;
+  if (!topicId) throw new Error('topicId is required');
+
+  // createdAt breaks ties: the import left topics holding duplicate orders, and
+  // a shift computed from an unstable sort would move the wrong rows.
+  const siblings = await BookQuestion.find({ topicId, isDeleted: false })
+    .sort({ order: 1, createdAt: 1 })
+    .select('_id order questionNo')
+    .lean();
+
+  const questionNo = String(payload.questionNo ?? '').trim();
+  const taken = questionNo ? siblings.findIndex(s => sameSerial(s.questionNo, questionNo)) : -1;
+
+  let index = siblings.length;
+  if (taken !== -1) {
+    index = taken;
+  } else {
+    const value = serialValue(questionNo);
+    if (value !== null) {
+      const next = siblings.findIndex(s => {
+        const v = serialValue(s.questionNo);
+        return v !== null && v > value;
+      });
+      if (next !== -1) index = next;
+    }
+  }
+
+  const question = new BookQuestion({ ...payload, order: index + 1 });
+  // Validated before anything moves: a payload the model rejects would leave
+  // the topic renumbered around a question that never came into existence.
+  await question.validate();
+
+  // Positions are rewritten as absolute values rather than $inc-ed, so topics
+  // that came out of the import with sparse or duplicated `order` end up dense.
+  const writes = siblings.flatMap((s, i) => {
+    const order = (i < index ? i : i + 1) + 1;
+    const set: { order?: number; questionNo?: string } = {};
+    if (s.order !== order) set.order = order;
+
+    // Only a collision renumbers what the reader sees. Slotting into a gap left
+    // by a delete must leave the serials around it untouched.
+    const plain = isPlainSerial(s.questionNo) ? serialValue(s.questionNo) : null;
+    if (taken !== -1 && i >= index && plain !== null) {
+      const bumped = formatSerial(plain + 1, s.questionNo);
+      if (bumped !== s.questionNo) set.questionNo = bumped;
+    }
+
+    return Object.keys(set).length
+      ? [{ updateOne: { filter: { _id: s._id }, update: { $set: set } } }]
+      : [];
+  });
+
+  // One bulkWrite: a half-applied shift would leave two questions sitting on the
+  // same slot with nothing left to say which of them came first.
+  if (writes.length) await BookQuestion.bulkWrite(writes);
+
+  return question.save();
+};
 
 const updatePart = async (id: string, payload: Record<string, unknown>) =>
   BookPart.findByIdAndUpdate(id, payload, { new: true });
@@ -202,6 +313,9 @@ const updateQuestion = async (id: string, payload: Record<string, unknown>) =>
 const deletePart = async (id: string) => BookPart.findByIdAndUpdate(id, { isDeleted: true });
 const deleteChapter = async (id: string) => BookChapter.findByIdAndUpdate(id, { isDeleted: true });
 const deleteTopic = async (id: string) => BookTopic.findByIdAndUpdate(id, { isDeleted: true });
+// Deliberately leaves the serial gap behind: createQuestion drops a re-added
+// question straight back into it. Whether a delete should instead close the gap
+// and renumber the rest is still an open question with the admin.
 const deleteQuestion = async (id: string) =>
   BookQuestion.findByIdAndUpdate(id, { isDeleted: true });
 

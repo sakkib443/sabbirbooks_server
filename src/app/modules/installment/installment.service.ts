@@ -1,7 +1,13 @@
 import { Installment } from './installment.model';
 import { Enrollment } from '../enrollment/enrollment.model';
 import { Course } from '../courses/course.model';
-// PORT: notification module dropped — EmailService (money-receipt emails) disabled.
+// Money-receipt emails are switched OFF here — deliberately, not because
+// anything is missing. notification/email.service.ts exists and works (it
+// degrades to console logging until SMTP_USER/SMTP_PASS are set); the two
+// call-sites below are left commented because nobody has decided whether
+// installment receipts should go out by email on this site yet. The older
+// "notification module dropped" note on this line was stale: the module is
+// present and its in-app triggers are live again.
 // import { EmailService } from '../notification/email.service';
 
 // fee/offerPrice are stored as strings ("৳6,000"); extract the numeric value.
@@ -134,7 +140,7 @@ const payInstallment = async (installmentId: string, payload: {
     }
   }
 
-  // PORT: notification module dropped — money-receipt email (fire-and-forget) disabled.
+  // Receipt email intentionally off — see the note on the EmailService import.
   // // Fire-and-forget installment/full money-receipt email (never blocks payment)
   // void (async () => {
   //   try {
@@ -207,7 +213,7 @@ const payDue = async (
   });
   await markPaidIfSettled(enrollment._id);
 
-  // PORT: notification module dropped — money-receipt email (fire-and-forget) disabled.
+  // Receipt email intentionally off — see the note on the EmailService import.
   // // Fire-and-forget money-receipt email — same as payInstallment (never blocks payment)
   // void (async () => {
   //   try {

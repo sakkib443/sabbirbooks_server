@@ -1,17 +1,22 @@
 /**
  * SMS Service — BulkSMSBD Integration
  *
- * Currently in DEMO mode (logs to console).
- * To enable real SMS:
- * 1. Set BULKSMS_API_KEY in .env
- * 2. Set BULKSMS_SENDER_ID in .env
- * 3. Change DEMO_MODE to false
+ * Demo mode is DERIVED from configuration, not hard-coded. Set BULKSMS_API_KEY
+ * in .env and real SMS starts going out; leave it blank and every send logs to
+ * the console instead. Same pattern as payment/bkash.service.ts.
+ *
+ * It used to be `const DEMO_MODE = true` as a source literal, which meant SMS
+ * could not be switched on by deploying configuration — you had to edit and
+ * redeploy this file, and anyone reading .env would have concluded, wrongly,
+ * that filling in the key was enough.
  */
+import config from '../../config';
 
-const DEMO_MODE = true;
 const API_URL = 'https://bulksmsbd.net/api/smsapi';
-const API_KEY = process.env.BULKSMS_API_KEY || '';
-const SENDER_ID = process.env.BULKSMS_SENDER_ID || 'AptechLearn';
+const SENDER_ID = config.sms.sender_id;
+
+/** Read per call, not captured at import, so it can be flipped in a test. */
+const isDemo = (): boolean => !config.sms.api_key;
 
 // ─── SMS Templates ──────────────────────────────────────────
 
@@ -38,8 +43,8 @@ const templates = {
 // ─── Send SMS ───────────────────────────────────────────────
 
 const sendSMS = async (phoneNumber: string, message: string) => {
-  if (DEMO_MODE) {
-    console.log(`📱 [DEMO SMS] To: ${phoneNumber} | Message: ${message}`);
+  if (isDemo()) {
+    console.log(`📱 [DEMO SMS — BULKSMS_API_KEY unset] To: ${phoneNumber} | Message: ${message}`);
     return { success: true, demo: true };
   }
 
@@ -48,7 +53,7 @@ const sendSMS = async (phoneNumber: string, message: string) => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        api_key: API_KEY,
+        api_key: config.sms.api_key,
         senderid: SENDER_ID,
         number: phoneNumber,
         message,
@@ -78,6 +83,7 @@ const sendClassReminderSMS = (phone: string, name: string, className: string, ti
 const sendCertificateSMS = (phone: string, name: string, course: string) => sendSMS(phone, templates.certificateReady(name, course));
 
 export const SmsService = {
+  isDemo,
   sendSMS, sendBulkSMS,
   sendWelcomeSMS, sendPaymentSMS, sendClassReminderSMS,
   sendCertificateSMS,

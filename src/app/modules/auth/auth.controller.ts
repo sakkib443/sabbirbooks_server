@@ -4,6 +4,7 @@ import { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import { UserService } from '../user/user.service';
 import { SessionService } from '../session/session.service';
+import { resolveCapabilities } from '../../config/permissions';
 
 // Pull the device context off the request headers.
 // Client MUST send a stable per-device UUID as the `x-device-id` header.
@@ -39,21 +40,34 @@ export const registerController = async (req: Request, res: Response) => {
 };
 
 // ─── Get current user (token verify) ────────────────────────
+// This is also the SYNC POINT for authorization on the client: the browser never
+// works out capabilities itself, it reads the list the server resolved here.
+// ProtectedRoute calls this on every dashboard mount, so revoking a permission
+// takes effect on the next page load without waiting for a token to expire.
 export const getMeController = async (req: Request, res: Response) => {
   try {
-    const user = (req as any).user;
-    if (!user) {
+    const tokenUser = (req as any).user;
+    if (!tokenUser) {
       return res.status(401).json({ success: false, message: 'Invalid or expired token' });
     }
+
+    // Read role + permissions from the DOCUMENT, not the token: a token minted
+    // before a role change would otherwise report stale authority.
+    const account = await UserService.getSingleUserServices(String(tokenUser._id));
+
     res.status(200).json({
       success: true,
       data: {
-        _id: user._id,
-        email: user.email,
-        role: user.role,
-        firstName: user.firstName,
-        lastName: user.lastName,
-        name: user.name,
+        _id: tokenUser._id,
+        email: account?.email ?? tokenUser.email,
+        role: account?.role ?? tokenUser.role,
+        firstName: account?.firstName ?? tokenUser.firstName,
+        lastName: account?.lastName ?? tokenUser.lastName,
+        name: tokenUser.name,
+        permissions: account?.permissions,
+        capabilities: account
+          ? UserService.capabilitiesFor(account as any)
+          : resolveCapabilities(tokenUser.role),
       },
     });
   } catch (error: any) {

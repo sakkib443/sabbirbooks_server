@@ -156,6 +156,56 @@ const triggerNewOrderForAdmins = async (
   }
 };
 
+/**
+ * Book-order variant of the above. Separate from triggerNewOrderForAdmins
+ * because a book order has an order number and a shipping address where a
+ * course enrollment has neither, and the admin link points at a different page.
+ *
+ * `message` is pre-rendered by orderAlert.message.ts so the bell, Telegram and
+ * WhatsApp all describe the same order in the same words.
+ */
+const triggerNewBookOrderForAdmins = async (orderNumber: string, message: string) => {
+  try {
+    const adminIds = await getAdminUserIds();
+    if (adminIds.length === 0) {
+      console.warn(`[notification] no admin users found — in-app alert for ${orderNumber} skipped.`);
+      return { created: 0 };
+    }
+    await createBulk(
+      adminIds,
+      'enrollment',
+      `🛒 নতুন বই অর্ডার — ${orderNumber}`,
+      message,
+      '/dashboard/admin/orders'
+    );
+    return { created: adminIds.length };
+  } catch (e) {
+    console.error(`[notification] admin in-app alert failed for ${orderNumber}:`, e);
+    return { created: 0, error: e };
+  }
+};
+
+/** The buyer's own copy of the order confirmation, in the bell. */
+const triggerOrderPlacedForBuyer = async (
+  userId: string,
+  orderNumber: string,
+  message: string
+) => {
+  try {
+    await create(
+      userId,
+      'enrollment',
+      `✅ অর্ডার গৃহীত — ${orderNumber}`,
+      message,
+      '/dashboard/user/orders'
+    );
+    return { created: 1 };
+  } catch (e) {
+    console.error(`[notification] buyer in-app alert failed for ${orderNumber}:`, e);
+    return { created: 0, error: e };
+  }
+};
+
 const triggerNewRegistrationForAdmins = async (
   studentName: string,
   email: string,
@@ -189,5 +239,7 @@ export const NotificationService = {
   triggerSystemAnnouncement,
   // Admin triggers
   triggerNewOrderForAdmins,
+  triggerNewBookOrderForAdmins,
+  triggerOrderPlacedForBuyer,
   triggerNewRegistrationForAdmins,
 };

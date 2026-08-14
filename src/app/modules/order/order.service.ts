@@ -7,6 +7,7 @@ import { User } from '../user/user.model';
 import { BkashService } from '../payment/bkash.service';
 import { SslcommerzService } from '../payment/sslcommerz.service';
 import { SettingsService } from '../settings/settings.services';
+import { OrderAlertService } from '../notification/orderAlert.service';
 
 // Resolve a book by slug / numeric id / Mongo _id — same tolerant lookup the
 // book module exposes publicly (client may send either a slug or an _id).
@@ -163,6 +164,18 @@ const createOrder = async (
     status: 'pending',
   });
 
+  // Tell the admin and the buyer — in-app, Telegram (admin), WhatsApp (both).
+  //
+  // Deliberately NOT awaited. The order is already written and this response is
+  // what unblocks the buyer's checkout; making them wait on graph.facebook.com,
+  // or worse, 500ing their completed order because Telegram is down, would be a
+  // far worse failure than a message that did not arrive. dispatchNewOrderAlerts
+  // resolves in every case, so the .catch is only here so that a bug inside it
+  // can never become an unhandled rejection.
+  void OrderAlertService.dispatchNewOrderAlerts(order).catch((e) =>
+    console.error('[order-alert] dispatch threw (order unaffected):', e)
+  );
+
   return order;
 };
 
@@ -200,8 +213,15 @@ const getCheckoutOptions = async (subtotal = 0) => {
 };
 
 // ─── GET my orders ───────────────────────────────────────────
+// items.book is populated with three fields only — the buyer's order list shows
+// a cover thumbnail, and the line's title/price are already snapshotted on the
+// item itself, so pulling the whole Book document would be waste. Nothing reads
+// items[].book as a raw id off this endpoint (the download flow uses the order
+// returned by POST /orders), so widening it to an object is safe.
 const getMyOrders = async (userId: string): Promise<IOrder[]> => {
-  return Order.find({ user: userId }).sort({ createdAt: -1 });
+  return Order.find({ user: userId })
+    .populate('items.book', 'title slug coverImage')
+    .sort({ createdAt: -1 });
 };
 
 // ─── GET single (owner or admin) ─────────────────────────────

@@ -1,8 +1,15 @@
 import express from 'express';
 import { ReviewController } from './review.controller';
-import { authMiddleware, authorize } from '../../middlewares/auth';
+import { authMiddleware, authorize, requireCapability } from '../../middlewares/auth';
 
 const router = express.Router();
+
+// Approving/deleting a testimonial is content moderation — see book.routes.ts.
+const contentWrite = [
+  authMiddleware,
+  authorize('admin', 'trainingManager', 'contentManager'),
+  requireCapability('content.write'),
+];
 
 // Public: submit a review (with optional base64 image)
 router.post('/create', ReviewController.createReviewController);
@@ -16,16 +23,14 @@ router.get('/all', ReviewController.getAllReviewsController);
 // Admin: update status / fields
 router.patch(
     '/:id',
-    authMiddleware,
-    authorize('admin', 'trainingManager'),
+    ...contentWrite,
     ReviewController.updateReviewController
 );
 
 // Admin: delete
 router.delete(
     '/:id',
-    authMiddleware,
-    authorize('admin', 'trainingManager'),
+    ...contentWrite,
     ReviewController.deleteReviewController
 );
 

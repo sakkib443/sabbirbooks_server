@@ -224,8 +224,7 @@ const sendToStudents = async (classId: string) => {
   // Create notifications ONLY for students enrolled in THIS specific batch
   try {
     const { Enrollment } = await import('../enrollment/enrollment.model');
-    // PORT NOTE: notification module DROPPED — dynamic import commented out.
-    // const { Notification } = await import('../notification/notification.model');
+    const { Notification } = await import('../notification/notification.model');
 
     // Query with raw ObjectId (not populated object)
     const enrollments = await Enrollment.find({
@@ -241,16 +240,19 @@ const sendToStudents = async (classId: string) => {
       userId: e.studentId,
       title: `📚 New Class Material: ${rawCls.title}`,
       message: `New material has been uploaded for ${batchName}${batchCode ? ` (${batchCode})` : ''}. Check your batch materials.`,
-      type: 'info',
+      // 'info' is NOT in the Notification schema's enum, so every insert here
+      // would have failed validation the moment this call-site was re-enabled.
+      // 'class' is the enum member this material-uploaded alert belongs to.
+      type: 'class',
       isRead: false,
     }));
 
-    // PORT NOTE: notification module DROPPED — Notification.insertMany call-site commented out.
-    // if (notifications.length > 0) {
-    //   await Notification.insertMany(notifications);
-    // }
-
-    console.log(`✅ Sent notifications to ${notifications.length} students in batch ${batchCode}`);
+    if (notifications.length > 0) {
+      await Notification.insertMany(notifications);
+      console.log(`✅ Sent notifications to ${notifications.length} students in batch ${batchCode}`);
+    } else {
+      console.log(`ℹ️ No active students in batch ${batchCode} — no notifications sent.`);
+    }
   } catch (e) {
     console.error('Notification send failed:', e);
   }

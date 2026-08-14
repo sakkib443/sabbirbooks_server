@@ -5,26 +5,29 @@ import {
   createQrResourceValidationSchema,
   updateQrResourceValidationSchema,
 } from './qrResource.validation';
-import { authMiddleware, authorize } from '../../middlewares/auth';
+import { authMiddleware, authorize, requireCapability } from '../../middlewares/auth';
 
 const router = express.Router();
+
+// QR resources are content — see book.routes.ts for the pattern.
+const contentWrite = [authorize('admin', 'contentManager'), requireCapability('content.write')];
 
 // ─── Admin protected routes (auth + admin role; superAdmin always allowed) ────
 // Registered BEFORE the public single-segment '/:slug' so the public catch-all
 // never shadows the admin list ('/') or the '/admin/:id' editing lookup.
-router.get('/', authMiddleware, authorize('admin'), QrResourceController.getAllQrResourcesController);
+router.get('/', authMiddleware, ...contentWrite, QrResourceController.getAllQrResourcesController);
 
 router.get(
   '/admin/:id',
   authMiddleware,
-  authorize('admin'),
+  ...contentWrite,
   QrResourceController.getQrResourceByIdController
 );
 
 router.post(
   '/',
   authMiddleware,
-  authorize('admin'),
+  ...contentWrite,
   validateRequest(createQrResourceValidationSchema),
   QrResourceController.createQrResourceController
 );
@@ -32,7 +35,7 @@ router.post(
 router.patch(
   '/:id',
   authMiddleware,
-  authorize('admin'),
+  ...contentWrite,
   validateRequest(updateQrResourceValidationSchema),
   QrResourceController.updateQrResourceController
 );
@@ -40,7 +43,7 @@ router.patch(
 router.delete(
   '/:id',
   authMiddleware,
-  authorize('admin'),
+  ...contentWrite,
   QrResourceController.deleteQrResourceController
 );
 

@@ -1,3 +1,5 @@
+import { Capability, Role } from '../../config/permissions';
+
 export interface IUser {
   id: string;
   email: string;
@@ -8,7 +10,13 @@ export interface IUser {
   gender?: 'male' | 'female' | 'other';
   password?: string;
   isPasswordChanged?: boolean;
-  role: 'superAdmin' | 'admin' | 'trainingManager' | 'mentor' | 'student';
+  role: Role;
+  /**
+   * Capability overrides. ABSENT (undefined) means "fall back to the role's
+   * defaults" — that is how every pre-existing account behaves. An explicit []
+   * means an admin has switched everything off.
+   */
+  permissions?: Capability[];
   status?: 'active' | 'blocked' | 'pending';
   isDeleted?: boolean;
   image?: string;

@@ -1,9 +1,19 @@
 import express from 'express';
 import { LessonController } from './lesson.controller';
 import { uploadFile, uploadVideo } from '../../config/cloudinary';
-import { authMiddleware, authorize } from '../../middlewares/auth';
+import { authMiddleware, authorize, requireCapability } from '../../middlewares/auth';
 
 const router = express.Router();
+
+// Lessons and their materials are content. Mentors keep the access they had.
+const contentWriteWithMentor = [
+  authorize('admin', 'trainingManager', 'contentManager', 'mentor'),
+  requireCapability('content.write'),
+];
+const contentWrite = [
+  authorize('admin', 'trainingManager', 'contentManager'),
+  requireCapability('content.write'),
+];
 
 // ── Public: Get lessons (limited info for non-enrolled) ─────
 router.get('/module/:moduleId', LessonController.getLessonsByModule);
@@ -14,21 +24,21 @@ router.get('/:id', LessonController.getSingleLesson);
 router.post(
   '/create',
   authMiddleware,
-  authorize('admin', 'trainingManager', 'mentor'),
+  ...contentWriteWithMentor,
   LessonController.createLesson
 );
 
 router.patch(
   '/:id',
   authMiddleware,
-  authorize('admin', 'trainingManager', 'mentor'),
+  ...contentWriteWithMentor,
   LessonController.updateLesson
 );
 
 router.delete(
   '/:id',
   authMiddleware,
-  authorize('admin', 'trainingManager'),
+  ...contentWrite,
   LessonController.deleteLesson
 );
 
@@ -36,7 +46,7 @@ router.delete(
 router.post(
   '/:id/materials',
   authMiddleware,
-  authorize('admin', 'trainingManager', 'mentor'),
+  ...contentWriteWithMentor,
   uploadFile.single('file'),
   LessonController.addMaterial
 );
@@ -44,7 +54,7 @@ router.post(
 router.delete(
   '/:id/materials/:materialId',
   authMiddleware,
-  authorize('admin', 'trainingManager', 'mentor'),
+  ...contentWriteWithMentor,
   LessonController.removeMaterial
 );
 

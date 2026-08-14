@@ -1,7 +1,7 @@
 import express from 'express';
 import rateLimit from 'express-rate-limit';
 import { BookContentController } from './bookContent.controller';
-import { authMiddleware, authorize } from '../../middlewares/auth';
+import { authMiddleware, authorize, requireCapability } from '../../middlewares/auth';
 import { uploadFileLocal } from '../../config/localUpload';
 
 const router = express.Router();
@@ -22,7 +22,13 @@ const scanLimiter = rateLimit({
 router.get('/scan/:qrCode', scanLimiter, authMiddleware, BookContentController.scan);
 
 // ─── Admin ──────────────────────────────────────────────────
-const admin = [authMiddleware, authorize('admin')];
+//
+// contentManager belongs here: this is the book's actual content — parts,
+// chapters, topics, questions, answers and their media. A content manager who
+// cannot touch it can barely manage content at all. The capability check sits
+// after authorize(), so it can only narrow: an admin whose content.write has
+// been switched off is refused too.
+const admin = [authMiddleware, authorize('admin', 'contentManager'), requireCapability('content.write')];
 
 router.get('/tree/:bookId', ...admin, BookContentController.getTree);
 router.get('/stats/:bookId', ...admin, BookContentController.getStats);

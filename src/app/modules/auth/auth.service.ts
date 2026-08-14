@@ -5,6 +5,10 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import config from '../../config';
 import { SessionService } from '../session/session.service';
+import { CAPABILITY_KEYS, resolveCapabilities } from '../../config/permissions';
+import { generateUserId } from '../user/user.service';
+import { verifyGoogleIdToken, GoogleAuthError } from './google.verify';
+import { decideGoogleAccount } from './google.account';
 
 // 🔑 MASTER SUPER ADMIN CREDENTIALS
 // (Ported from the reference server; credentials rebranded for Sabbir Book.
@@ -97,6 +101,9 @@ const loginUser = async (
         lastName: adminUser.lastName,
         role: 'superAdmin',
         status: 'active',
+        // The client stores this and the sidebar/route guard read it. superAdmin
+        // is unconditionally everything.
+        capabilities: [...CAPABILITY_KEYS],
       },
     };
   }
@@ -142,8 +149,104 @@ const loginUser = async (
       id: user.id,
       firstName: user.firstName,
       lastName: user.lastName,
+      email: user.email,
       role: user.role,
       status: user.status,
+      // Resolved server-side so the browser never has to work it out. Refreshed
+      // on every dashboard mount via GET /api/auth/me.
+      capabilities: resolveCapabilities(user.role, user.permissions),
+    },
+  };
+};
+
+// ─── Sign in with Google ────────────────────────────────────────────────────
+//
+// Replaces the retired /api/user/google-login. The shape of the returned object
+// is identical to loginUser()'s so the client can hand it to the same
+// persistSession() without a special case.
+//
+// Three things make this safe where the old endpoint was not:
+//   1. The identity comes out of verifyGoogleIdToken() — a Google-signed token,
+//      audience-checked, with email_verified proven. Nothing is read from the
+//      request body but the token string itself.
+//   2. The role comes out of decideGoogleAccount(), which writes the literal
+//      'student' on the create path and never touches role on the link path.
+//      A brand-new Google user cannot arrive as anything but a student.
+//   3. Tokens are minted by generateTokens() above, so they respect
+//      config.jwt (12h / 30d) and cannot fall back to a default secret, and
+//      the session goes through SessionService so the device limit applies
+//      exactly as it does to a password login.
+const googleSignIn = async (idToken: unknown, device: DeviceContext = {}) => {
+  const identity = await verifyGoogleIdToken(idToken);
+
+  // Look up by the Google subject FIRST: `sub` is stable and never reused,
+  // whereas an email address can be reassigned. The email fallback is what
+  // links a Google sign-in to an account that was created with a password, and
+  // it is only sound because the token's email_verified has already been
+  // proven — an unverified address never reaches this line.
+  //
+  // Neither query filters out isDeleted/blocked rows on purpose: hiding them
+  // would make the code believe the address is free and try to insert a
+  // duplicate, which the unique email index would reject with a confusing
+  // 11000. decideGoogleAccount() turns them into a clear 403 instead.
+  const existing =
+    (await User.findOne({ googleId: identity.googleId })) ||
+    (await User.findOne({ email: identity.email }));
+
+  const decision = decideGoogleAccount(existing, identity);
+
+  if (decision.kind === 'reject') {
+    const e: any = new Error(decision.message);
+    e.status = decision.status;
+    throw e;
+  }
+
+  let user = existing;
+
+  if (decision.kind === 'create') {
+    user = await User.create({ ...decision.draft, id: await generateUserId() });
+  } else if (user && Object.keys(decision.updates).length > 0) {
+    Object.assign(user, decision.updates);
+    // .save() runs the pre-save hook, which only touches a MODIFIED password —
+    // and `updates` never contains one, so no hash is recomputed here.
+    await user.save();
+  }
+
+  if (!user) {
+    // Unreachable: every non-reject branch above assigns one.
+    throw new Error('Google sign-in failed');
+  }
+
+  const { accessToken, refreshToken } = generateTokens({
+    _id: String(user._id),
+    role: user.role,
+    email: user.email,
+  });
+
+  const { deviceId } = await SessionService.createSession({
+    userId: String(user._id),
+    deviceId: device.deviceId,
+    refreshToken,
+    userAgent: device.userAgent,
+    ip: device.ip,
+    role: user.role,
+  });
+
+  return {
+    isNewUser: decision.kind === 'create',
+    token: accessToken, // backward compat, same as loginUser()
+    accessToken,
+    refreshToken,
+    deviceId,
+    user: {
+      id: user.id,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email,
+      role: user.role,
+      status: user.status,
+      image: user.image,
+      capabilities: resolveCapabilities(user.role, user.permissions),
     },
   };
 };
@@ -205,6 +308,11 @@ const changePassword = async (userId: string, currentPassword: string, newPasswo
 
 export const AuthService = {
   loginUser,
+  googleSignIn,
   refreshAccessToken,
   changePassword,
 };
+
+// Re-exported so the controller can tell a verification failure (which carries
+// its own status + code) from anything else, without importing the verifier.
+export { GoogleAuthError };

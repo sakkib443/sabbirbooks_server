@@ -1,10 +1,16 @@
 import express from 'express';
 import { BlogController } from './blog.controller';
-import { authMiddleware, authorize } from '../../middlewares/auth';
+import { authMiddleware, authorize, requireCapability } from '../../middlewares/auth';
 
 const router = express.Router();
 
-const adminOnly = [authMiddleware, authorize('admin', 'superAdmin', 'trainingManager')];
+// Blogs are content: the content-only manager is added, and every writer now
+// needs the `content.write` capability an admin can revoke.
+const adminOnly = [
+  authMiddleware,
+  authorize('admin', 'superAdmin', 'trainingManager', 'contentManager'),
+  requireCapability('content.write'),
+];
 
 // Create blog (admin) — also accept POST '/' as an alias
 router.post('/create', ...adminOnly, BlogController.createBlogController);
