@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { Request, Response } from 'express';
 import { isValidObjectId } from 'mongoose';
+import { publicBaseUrl } from '../../utils/publicBaseUrl';
 import { Partner } from './partner.model';
 
 const uid = (req: Request) => (req as any).user?._id || (req as any).user?.id;
@@ -54,7 +55,7 @@ export const uploadLogo = async (req: Request, res: Response) => {
   try {
     const file = (req as any).file;
     if (!file) return res.status(400).json({ success: false, message: 'No file uploaded' });
-    const base = `${req.protocol}://${req.get('host')}`;
+    const base = publicBaseUrl(req);
     const url = file.filename ? `${base}/uploads/materials/${file.filename}` : (file.path || file.url);
     res.status(200).json({ success: true, data: { url } });
   } catch (e: any) { res.status(500).json({ success: false, message: e.message }); }

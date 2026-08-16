@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { Request, Response } from 'express';
+import { publicBaseUrl } from '../../utils/publicBaseUrl';
 import { SettingsService } from './settings.services';
 
 // GET Site Settings
@@ -35,7 +36,7 @@ const uploadLogoController = async (req: Request, res: Response) => {
     try {
         const file = (req as any).file;
         if (!file) return res.status(400).json({ success: false, message: 'No file uploaded' });
-        const base = `${req.protocol}://${req.get('host')}`;
+        const base = publicBaseUrl(req);
         const url = file.filename ? `${base}/uploads/materials/${file.filename}` : (file.path || file.url);
         res.status(200).json({ success: true, data: { url } });
     } catch (error: any) {

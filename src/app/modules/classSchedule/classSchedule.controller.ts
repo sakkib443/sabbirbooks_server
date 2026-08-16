@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { Request, Response } from 'express';
+import { publicBaseUrl } from '../../utils/publicBaseUrl';
 import { ClassScheduleService } from './classSchedule.service';
 
 const create = async (req: Request, res: Response) => {
@@ -242,7 +243,7 @@ const uploadMaterial = async (req: Request, res: Response) => {
   try {
     const file = (req as any).file;
     if (!file) return res.status(400).json({ success: false, message: 'No file uploaded' });
-    const base = `${req.protocol}://${req.get('host')}`;
+    const base = publicBaseUrl(req);
     // Local disk storage → build a public URL from the saved filename; fall back to any cloud fields.
     const fileUrl = file.filename ? `${base}/uploads/materials/${file.filename}` : (file.path || file.secure_url || file.url);
     const originalName = file.originalname || 'file';

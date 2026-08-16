@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { Request, Response } from 'express';
 import { isValidObjectId } from 'mongoose';
+import { publicBaseUrl } from '../../utils/publicBaseUrl';
 import { Notice } from './notice.model';
 import { Enrollment } from '../enrollment/enrollment.model';
 
@@ -68,7 +69,7 @@ export const uploadAttachment = async (req: Request, res: Response) => {
   try {
     const file = (req as any).file;
     if (!file) return res.status(400).json({ success: false, message: 'No file uploaded' });
-    const base = `${req.protocol}://${req.get('host')}`;
+    const base = publicBaseUrl(req);
     const url = file.filename ? `${base}/uploads/materials/${file.filename}` : (file.path || file.url);
     const ext = (file.originalname || '').split('.').pop()?.toLowerCase() || '';
     const type = /^(png|jpe?g|webp|gif)$/.test(ext) ? 'image' : (ext === 'pdf' ? 'pdf' : 'file');
