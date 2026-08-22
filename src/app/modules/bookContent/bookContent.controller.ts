@@ -112,6 +112,19 @@ const getQuestionsByTopic = async (req: Request, res: Response) => {
   }
 };
 
+const getNextTopicForReader = async (req: Request, res: Response) => {
+  try {
+    const userId = (req as any).user?._id;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: 'Unauthorized access' });
+    }
+    const result = await BookContentService.getNextTopicForReader(req.params.topicId, userId);
+    res.status(200).json({ success: true, data: result });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
 const getNextUnanswered = async (req: Request, res: Response) => {
   try {
     const after = req.query.after ? Number(req.query.after) : undefined;
@@ -195,6 +208,7 @@ export const BookContentController = {
   getQrSheet,
   getQuestionsByTopic,
   getNextUnanswered,
+  getNextTopicForReader,
   reorder,
   makeCreate,
   makeUpdate,

@@ -48,6 +48,9 @@ const bookChapterSchema = new Schema<IBookChapter>(
     title: { type: String, required: true, trim: true },
     titleBn: { type: String, trim: true },
     order: { type: Number, required: true, default: 1 },
+    // A free chapter's topics skip the hasBookAccess check on scan, so a signed
+    // in visitor can preview one sample chapter without buying the book.
+    isFree: { type: Boolean, default: false },
     isPublished: { type: Boolean, default: true },
     isDeleted: { type: Boolean, default: false },
   },

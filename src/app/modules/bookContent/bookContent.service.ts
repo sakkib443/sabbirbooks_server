@@ -26,7 +26,15 @@ const scanTopic = async (qrCode: string, userId: string): Promise<ScanResult> =>
 
   if (!topic) return { ok: false, reason: 'not_found' };
 
-  const allowed = await BookAccessService.hasBookAccess(userId, topic.bookId);
+  // A free chapter lets any signed-in user read its topics without owning the
+  // book — the check happens BEFORE the paid-access probe so a locked user is
+  // not turned away from the sample.
+  const chapterForAccess = await BookChapter.findById(topic.chapterId)
+    .select('isFree')
+    .lean();
+  const isFreeChapter = Boolean(chapterForAccess?.isFree);
+
+  const allowed = isFreeChapter || (await BookAccessService.hasBookAccess(userId, topic.bookId));
   if (!allowed) {
     // Enough to render a "buy this book" card, and nothing from inside it.
     const book = await Book.findById(topic.bookId)
@@ -354,6 +362,106 @@ const reorder = async (level: ReorderLevel, items: { _id: string; order: number 
   return { updated: items.length };
 };
 
+/**
+ * Next topic in book order after the given one.
+ *
+ * Ordering is: same chapter → same part → same book. The reader hits this at
+ * the last question of a topic and follows the returned QR code to the next
+ * scannable page.
+ *
+ * Access is re-checked here even though the current topic was reached via
+ * scan: a locked user could otherwise walk out of a free chapter into a paid
+ * one just by hitting "next topic" over and over.
+ */
+const getNextTopicForReader = async (topicId: string, userId: string) => {
+  const current = await BookTopic.findById(topicId)
+    .select('bookId partId chapterId order')
+    .lean();
+  if (!current) return null;
+
+  // Same chapter, next in order.
+  let next = await BookTopic.findOne({
+    chapterId: current.chapterId,
+    order: { $gt: current.order },
+    isDeleted: false,
+    isPublished: true,
+  })
+    .sort({ order: 1 })
+    .lean();
+
+  // Overflow into the next chapter of the same part.
+  if (!next) {
+    const currentChapter = await BookChapter.findById(current.chapterId).select('order').lean();
+    const nextChapter = await BookChapter.findOne({
+      partId: current.partId,
+      order: { $gt: currentChapter?.order ?? 0 },
+      isDeleted: false,
+    })
+      .sort({ order: 1 })
+      .lean();
+
+    if (nextChapter) {
+      next = await BookTopic.findOne({
+        chapterId: nextChapter._id,
+        isDeleted: false,
+        isPublished: true,
+      })
+        .sort({ order: 1 })
+        .lean();
+    }
+  }
+
+  // Overflow into the next part.
+  if (!next) {
+    const currentPart = await BookPart.findById(current.partId).select('order').lean();
+    const nextPart = await BookPart.findOne({
+      bookId: current.bookId,
+      order: { $gt: currentPart?.order ?? 0 },
+      isDeleted: false,
+    })
+      .sort({ order: 1 })
+      .lean();
+
+    if (nextPart) {
+      const firstChapterInNextPart = await BookChapter.findOne({
+        partId: nextPart._id,
+        isDeleted: false,
+      })
+        .sort({ order: 1 })
+        .lean();
+      if (firstChapterInNextPart) {
+        next = await BookTopic.findOne({
+          chapterId: firstChapterInNextPart._id,
+          isDeleted: false,
+          isPublished: true,
+        })
+          .sort({ order: 1 })
+          .lean();
+      }
+    }
+  }
+
+  if (!next) return null;
+
+  const nextChapter = await BookChapter.findById(next.chapterId)
+    .select('isFree title chapterNo')
+    .lean();
+  const allowed =
+    Boolean(nextChapter?.isFree) ||
+    (await BookAccessService.hasBookAccess(userId, next.bookId));
+
+  return {
+    qrCode: next.qrCode,
+    topicTitle: next.title,
+    topicNo: next.topicNo,
+    chapterTitle: nextChapter?.title,
+    chapterNo: nextChapter?.chapterNo,
+    // The client uses this to decide whether to lead the user with the button
+    // (allowed) or with a padlock + "buy to continue" (not allowed).
+    allowed,
+  };
+};
+
 /** Next question still missing an answer — powers the admin "keep going" button. */
 const getNextUnanswered = async (bookId: string, afterOrder?: number) => {
   return BookQuestion.findOne({
@@ -387,4 +495,5 @@ export const BookContentService = {
   getTopicById,
   reorder,
   getNextUnanswered,
+  getNextTopicForReader,
 };

@@ -24,6 +24,9 @@ export interface IBookChapter {
   title: string;
   titleBn?: string;
   order: number;
+  // A free chapter's topics are readable by any signed-in user without owning
+  // the book. Used for a sample chapter so buyers can try before purchasing.
+  isFree: boolean;
   isPublished: boolean;
   isDeleted: boolean;
 }

@@ -21,6 +21,10 @@ const scanLimiter = rateLimit({
 // Login required: the printed book alone is not enough.
 router.get('/scan/:qrCode', scanLimiter, authMiddleware, BookContentController.scan);
 
+// "Next topic" navigation for the reader. Access is re-checked server side, so
+// a locked user cannot walk past a free chapter into paid content.
+router.get('/next-topic/:topicId', authMiddleware, BookContentController.getNextTopicForReader);
+
 // ─── Admin ──────────────────────────────────────────────────
 //
 // contentManager belongs here: this is the book's actual content — parts,
@@ -47,7 +51,11 @@ router.post('/upload', ...admin, uploadFileLocal.single('file'), BookContentCont
 for (const level of ['part', 'chapter', 'topic', 'question'] as const) {
   router.post(`/${level}s`, ...admin, BookContentController.makeCreate(level));
   router.patch(`/${level}s/:id`, ...admin, BookContentController.makeUpdate(level));
-  router.delete(`/${level}s/:id`, ...adminDelete, BookContentController.makeDelete(level));
 }
+
+// Only questions can be deleted. Parts, chapters and topics carry printed QR
+// codes (topics directly, parts and chapters transitively) — deleting any of
+// them would turn a real paper QR into a dead end, so the routes do not exist.
+router.delete('/questions/:id', ...adminDelete, BookContentController.makeDelete('question'));
 
 export const BookContentRoutes = router;
