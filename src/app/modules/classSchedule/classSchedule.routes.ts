@@ -9,14 +9,17 @@ const router = express.Router();
 // their access (mentor carries training.manage by default).
 const trainingWrite = [
   authMiddleware,
-  authorize('admin', 'trainingManager'),
+  authorize('admin', 'trainingManager', 'manager'),
   requireCapability('training.manage'),
 ];
 const trainingWriteWithMentor = [
   authMiddleware,
-  authorize('admin', 'trainingManager', 'mentor'),
+  authorize('admin', 'trainingManager', 'mentor', 'manager'),
   requireCapability('training.manage'),
 ];
+// Deleting additionally needs records.delete, which the add-and-edit
+// `manager` role deliberately does not have.
+const trainingWriteWithMentorDelete = [...trainingWriteWithMentor, requireCapability('records.delete')];
 
 // ── Student routes (BEFORE /:id) ─────────────────────────
 router.get('/student/schedule', authMiddleware, ClassScheduleController.studentSchedule);
@@ -37,7 +40,7 @@ router.get('/stats', ...trainingWrite, ClassScheduleController.stats);
 router.get('/:id', authMiddleware, ClassScheduleController.getOne);
 router.patch('/:id', ...trainingWriteWithMentor, ClassScheduleController.update);
 // mentor may delete too — the controller restricts a mentor to their OWN classes
-router.delete('/:id', ...trainingWriteWithMentor, ClassScheduleController.remove);
+router.delete('/:id', ...trainingWriteWithMentorDelete, ClassScheduleController.remove);
 
 // ── Mentor actions on specific class ─────────────────────
 router.patch('/:id/recording', authMiddleware, authorize('mentor', 'admin'), ClassScheduleController.uploadRecording);

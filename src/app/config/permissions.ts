@@ -39,6 +39,7 @@ export const ROLES = [
   'admin',
   'trainingManager',
   'contentManager',
+  'manager',
   'mentor',
   'student',
 ] as const;
@@ -46,7 +47,7 @@ export const ROLES = [
 export type Role = (typeof ROLES)[number];
 
 /**
- * The two kinds of manager.
+ * The three kinds of manager.
  *
  * `trainingManager` already existed and is the *operations* manager: it runs
  * batches, enrollments, certificates, class schedules and student accounts, and
@@ -56,9 +57,14 @@ export type Role = (typeof ROLES)[number];
  * and deletes every kind of content and can see nothing else — not who bought
  * what, not how much sold, not the site settings.
  *
- * Only these two roles have editable permissions.
+ * `manager` is the add-and-edit role: it creates and updates content and runs
+ * training operations, but cannot DELETE anything and cannot see orders,
+ * sales figures or personal details. It is the same shape as contentManager
+ * plus training, minus the delete capability.
+ *
+ * Only these three roles have editable permissions.
  */
-export const MANAGER_ROLES: Role[] = ['trainingManager', 'contentManager'];
+export const MANAGER_ROLES: Role[] = ['trainingManager', 'contentManager', 'manager'];
 
 // ── The capability vocabulary ──────────────────────────────────────────────
 // Deliberately coarse: one line per thing an admin would actually want to
@@ -66,10 +72,17 @@ export const MANAGER_ROLES: Role[] = ['trainingManager', 'contentManager'];
 export const CAPABILITIES = [
   {
     key: 'content.write',
-    label: 'Content — upload & delete',
+    label: 'Content — add & edit',
     group: 'Content',
     description:
-      'Create, edit and delete books, book content (QR topics), blogs, courses, lessons, categories, notices, partners, mentor profiles and site pages.',
+      'Create and edit books, book content (QR topics), blogs, courses, lessons, categories, notices, partners, mentor profiles and site pages. Deleting is a separate permission.',
+  },
+  {
+    key: 'records.delete',
+    label: 'Delete — content & records',
+    group: 'Content',
+    description:
+      'Permanently remove books, book content (QR topics), blogs, courses, lessons, categories, notices, partners, mentor profiles, batches, certificates and coupons. Without this a manager can still add and edit everything, but never delete.',
   },
   {
     key: 'training.manage',
@@ -155,17 +168,26 @@ export const ROLE_DEFAULT_CAPABILITIES: Record<Role, Capability[]> = {
   // operational dashboards. No orders, no settings, no staff.
   trainingManager: [
     'content.write',
+    'records.delete',
     'training.manage',
     'users.read',
     'users.write',
     'analytics.read',
   ],
-  // The content-only group: uploads and deletes content, sees nothing else.
-  contentManager: ['content.write'],
+  // The content-only group: adds, edits and deletes content, sees nothing else.
+  contentManager: ['content.write', 'records.delete'],
   // Describes what a mentor already does (lesson material, class schedules,
   // attendance/grading, their own batch analytics). authorize() still limits
   // them to the mentor routes.
-  mentor: ['content.write', 'training.manage', 'analytics.read'],
+  mentor: ['content.write', 'records.delete', 'training.manage', 'analytics.read'],
+  // The add-and-edit manager. Adds and updates content and training
+  // operations, and deliberately holds none of:
+  //   records.delete → cannot remove anything
+  //   orders.*       → cannot see who bought what, or how many orders came in
+  //   analytics.read → cannot see sales, revenue or any reporting
+  //   users.*        → cannot browse personal details
+  //   settings.write → cannot change the site
+  manager: ['content.write', 'training.manage'],
   student: [],
 };
 

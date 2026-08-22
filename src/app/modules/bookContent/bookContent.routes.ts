@@ -28,7 +28,10 @@ router.get('/scan/:qrCode', scanLimiter, authMiddleware, BookContentController.s
 // cannot touch it can barely manage content at all. The capability check sits
 // after authorize(), so it can only narrow: an admin whose content.write has
 // been switched off is refused too.
-const admin = [authMiddleware, authorize('admin', 'contentManager'), requireCapability('content.write')];
+const admin = [authMiddleware, authorize('admin', 'contentManager', 'manager'), requireCapability('content.write')];
+// Deleting additionally needs records.delete, which the add-and-edit
+// `manager` role deliberately does not have.
+const adminDelete = [...admin, requireCapability('records.delete')];
 
 router.get('/tree/:bookId', ...admin, BookContentController.getTree);
 router.get('/stats/:bookId', ...admin, BookContentController.getStats);
@@ -44,7 +47,7 @@ router.post('/upload', ...admin, uploadFileLocal.single('file'), BookContentCont
 for (const level of ['part', 'chapter', 'topic', 'question'] as const) {
   router.post(`/${level}s`, ...admin, BookContentController.makeCreate(level));
   router.patch(`/${level}s/:id`, ...admin, BookContentController.makeUpdate(level));
-  router.delete(`/${level}s/:id`, ...admin, BookContentController.makeDelete(level));
+  router.delete(`/${level}s/:id`, ...adminDelete, BookContentController.makeDelete(level));
 }
 
 export const BookContentRoutes = router;

@@ -7,7 +7,7 @@ const router = express.Router();
 // Installment plans are student payment records — a training operation.
 const trainingWrite = [
   authMiddleware,
-  authorize('admin', 'trainingManager'),
+  authorize('admin', 'trainingManager', 'manager'),
   requireCapability('training.manage'),
 ];
 

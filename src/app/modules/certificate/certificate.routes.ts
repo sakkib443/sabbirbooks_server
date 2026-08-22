@@ -8,9 +8,12 @@ const router = express.Router();
 // added on top so an admin can revoke it from a manager in the matrix.
 const trainingWrite = [
   authMiddleware,
-  authorize('admin', 'trainingManager'),
+  authorize('admin', 'trainingManager', 'manager'),
   requireCapability('training.manage'),
 ];
+// Deleting additionally needs records.delete, which the add-and-edit
+// `manager` role deliberately does not have.
+const trainingWriteDelete = [...trainingWrite, requireCapability('records.delete')];
 
 // Public: Verify certificate (NO auth needed)
 router.get('/verify/:certId', CertificateController.verify);
@@ -34,6 +37,6 @@ router.get('/:certId', authMiddleware, CertificateController.getById);
 router.patch('/:certId', ...trainingWrite, CertificateController.update);
 router.patch('/:certId/activate', ...trainingWrite, CertificateController.activate);
 router.patch('/:certId/revoke', ...trainingWrite, CertificateController.revoke);
-router.delete('/:certId', ...trainingWrite, CertificateController.remove);
+router.delete('/:certId', ...trainingWriteDelete, CertificateController.remove);
 
 export const CertificateRoutes = router;

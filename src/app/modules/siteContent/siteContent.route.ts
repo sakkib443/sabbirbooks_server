@@ -7,7 +7,7 @@ const router = express.Router();
 // Website page copy is content — see book.routes.ts for the pattern.
 const adminOnly = [
   authMiddleware,
-  authorize('admin', 'superAdmin', 'trainingManager', 'contentManager'),
+  authorize('admin', 'superAdmin', 'trainingManager', 'contentManager', 'manager'),
   requireCapability('content.write'),
 ];
 

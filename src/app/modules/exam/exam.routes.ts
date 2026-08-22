@@ -11,7 +11,7 @@ router.get('/my-results', authMiddleware, ExamController.myResults);
 router.get('/marks-sheet/:courseId', authMiddleware, ExamController.marksSheet);
 
 // Exam CRUD (Admin/Mentor)
-router.post('/', authMiddleware, authorize('admin', 'mentor', 'trainingManager'), requireCapability('training.manage'), ExamController.createExam);
+router.post('/', authMiddleware, authorize('admin', 'mentor', 'trainingManager', 'manager'), requireCapability('training.manage'), ExamController.createExam);
 router.get('/', authMiddleware, ExamController.getAllExams);
 router.get('/:id', authMiddleware, ExamController.getExam);
 router.patch('/:id', authMiddleware, authorize('admin', 'mentor'), requireCapability('training.manage'), ExamController.updateExam);

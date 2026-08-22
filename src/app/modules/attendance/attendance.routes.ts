@@ -15,15 +15,15 @@ router.get('/my/summary', authMiddleware, AttendanceController.getMySummary);
 router.get('/my-summary', authMiddleware, AttendanceController.getMyBatchSummary);
 
 // Get attendance by batch + date (staff only — students use /my* endpoints for their own records)
-router.get('/', authMiddleware, authorize('mentor', 'admin', 'trainingManager'), requireCapability('training.manage'), AttendanceController.getByDate);
+router.get('/', authMiddleware, authorize('mentor', 'admin', 'trainingManager', 'manager'), requireCapability('training.manage'), AttendanceController.getByDate);
 
 // Get attendance history for a batch (staff only)
-router.get('/history/:batchId', authMiddleware, authorize('mentor', 'admin', 'trainingManager'), requireCapability('training.manage'), AttendanceController.getHistory);
+router.get('/history/:batchId', authMiddleware, authorize('mentor', 'admin', 'trainingManager', 'manager'), requireCapability('training.manage'), AttendanceController.getHistory);
 
 // Get attendance stats for a batch (staff only)
-router.get('/stats/:batchId', authMiddleware, authorize('mentor', 'admin', 'trainingManager'), requireCapability('training.manage'), AttendanceController.getStats);
+router.get('/stats/:batchId', authMiddleware, authorize('mentor', 'admin', 'trainingManager', 'manager'), requireCapability('training.manage'), AttendanceController.getStats);
 
 // Delete attendance
-router.delete('/:id', authMiddleware, authorize('mentor', 'admin', 'trainingManager'), requireCapability('training.manage'), AttendanceController.deleteAttendance);
+router.delete('/:id', authMiddleware, authorize('mentor', 'admin', 'trainingManager', 'manager'), requireCapability('training.manage'), requireCapability('records.delete'), AttendanceController.deleteAttendance);
 
 export const AttendanceRoutes = router;

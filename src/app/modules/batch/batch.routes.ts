@@ -8,9 +8,12 @@ const router = Router();
 // is added on top so an admin can revoke it from a manager in the matrix.
 const trainingWrite = [
   authMiddleware,
-  authorize('admin', 'superAdmin', 'trainingManager'),
+  authorize('admin', 'superAdmin', 'trainingManager', 'manager'),
   requireCapability('training.manage'),
 ];
+// Deleting additionally needs records.delete, which the add-and-edit
+// `manager` role deliberately does not have.
+const trainingWriteDelete = [...trainingWrite, requireCapability('records.delete')];
 
 // Create new batch (admin only)
 router.post('/', ...trainingWrite, BatchController.createBatchController);
@@ -31,6 +34,6 @@ router.get('/:id', BatchController.getBatchByIdController);
 router.patch('/:id', ...trainingWrite, BatchController.updateBatchController);
 
 // Delete batch (admin / superAdmin / trainingManager — Manager manages batches fully)
-router.delete('/:id', ...trainingWrite, BatchController.deleteBatchController);
+router.delete('/:id', ...trainingWriteDelete, BatchController.deleteBatchController);
 
 export const BatchRoutes = router;

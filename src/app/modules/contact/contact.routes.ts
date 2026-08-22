@@ -15,14 +15,17 @@ const router = express.Router();
 // data and the public form only POSTs — so closing them breaks no screen.
 const readContacts = [
   authMiddleware,
-  authorize('admin', 'superAdmin', 'trainingManager'),
+  authorize('admin', 'superAdmin', 'trainingManager', 'manager'),
   requireCapability('users.read'),
 ];
 const writeContacts = [
   authMiddleware,
-  authorize('admin', 'superAdmin', 'trainingManager'),
+  authorize('admin', 'superAdmin', 'trainingManager', 'manager'),
   requireCapability('users.write'),
 ];
+// Deleting additionally needs records.delete, which the add-and-edit
+// `manager` role deliberately does not have.
+const writeContactsDelete = [...writeContacts, requireCapability('records.delete')];
 
 // Create contact message (public - anyone can submit)
 router.post('/create', ContactController.createContactController);
@@ -40,6 +43,6 @@ router.get('/:id', ...readContacts, ContactController.getSingleContactController
 router.patch('/:id', ...writeContacts, ContactController.updateContactController);
 
 // Delete contact message by ID
-router.delete('/:id', ...writeContacts, ContactController.deleteContactController);
+router.delete('/:id', ...writeContactsDelete, ContactController.deleteContactController);
 
 export const ContactRoutes = router;

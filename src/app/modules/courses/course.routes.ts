@@ -8,9 +8,12 @@ const router = express.Router();
 
 // Course records are content — see book.routes.ts for the pattern.
 const contentWrite = [
-  authorize('admin', 'trainingManager', 'contentManager'),
+  authorize('admin', 'trainingManager', 'contentManager', 'manager'),
   requireCapability('content.write'),
 ];
+// Deleting additionally needs records.delete, which the add-and-edit
+// `manager` role deliberately does not have.
+const contentWriteDelete = [...contentWrite, requireCapability('records.delete')];
 
 // Public routes
 router.get('/', CourseController.getAllCoursesController);
@@ -35,7 +38,7 @@ router.patch(
 router.delete(
   '/:id',
   authMiddleware,
-  ...contentWrite,
+  ...contentWriteDelete,
   CourseController.deleteCourseController
 );
 

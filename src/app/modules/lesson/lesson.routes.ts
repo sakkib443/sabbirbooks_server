@@ -7,13 +7,19 @@ const router = express.Router();
 
 // Lessons and their materials are content. Mentors keep the access they had.
 const contentWriteWithMentor = [
-  authorize('admin', 'trainingManager', 'contentManager', 'mentor'),
+  authorize('admin', 'trainingManager', 'contentManager', 'mentor', 'manager'),
   requireCapability('content.write'),
 ];
+// Deleting additionally needs records.delete, which the add-and-edit
+// `manager` role deliberately does not have.
+const contentWriteWithMentorDelete = [...contentWriteWithMentor, requireCapability('records.delete')];
 const contentWrite = [
-  authorize('admin', 'trainingManager', 'contentManager'),
+  authorize('admin', 'trainingManager', 'contentManager', 'manager'),
   requireCapability('content.write'),
 ];
+// Deleting additionally needs records.delete, which the add-and-edit
+// `manager` role deliberately does not have.
+const contentWriteDelete = [...contentWrite, requireCapability('records.delete')];
 
 // ── Public: Get lessons (limited info for non-enrolled) ─────
 router.get('/module/:moduleId', LessonController.getLessonsByModule);
@@ -38,7 +44,7 @@ router.patch(
 router.delete(
   '/:id',
   authMiddleware,
-  ...contentWrite,
+  ...contentWriteDelete,
   LessonController.deleteLesson
 );
 
@@ -54,7 +60,7 @@ router.post(
 router.delete(
   '/:id/materials/:materialId',
   authMiddleware,
-  ...contentWriteWithMentor,
+  ...contentWriteWithMentorDelete,
   LessonController.removeMaterial
 );
 

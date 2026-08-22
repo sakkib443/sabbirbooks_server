@@ -9,7 +9,7 @@ const router = express.Router();
 // A contentManager is in neither list and therefore never sees any of it.
 const trainingWrite = [
   authMiddleware,
-  authorize('admin', 'trainingManager'),
+  authorize('admin', 'trainingManager', 'manager'),
   requireCapability('training.manage'),
 ];
 
@@ -51,7 +51,7 @@ router.get(
 router.get(
   '/course/:courseId',
   authMiddleware,
-  authorize('admin', 'trainingManager', 'mentor'),
+  authorize('admin', 'trainingManager', 'mentor', 'manager'),
   requireCapability('training.manage'),
   EnrollmentController.getCourseEnrollments
 );

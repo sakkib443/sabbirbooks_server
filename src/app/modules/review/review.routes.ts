@@ -7,9 +7,12 @@ const router = express.Router();
 // Approving/deleting a testimonial is content moderation — see book.routes.ts.
 const contentWrite = [
   authMiddleware,
-  authorize('admin', 'trainingManager', 'contentManager'),
+  authorize('admin', 'trainingManager', 'contentManager', 'manager'),
   requireCapability('content.write'),
 ];
+// Deleting additionally needs records.delete, which the add-and-edit
+// `manager` role deliberately does not have.
+const contentWriteDelete = [...contentWrite, requireCapability('records.delete')];
 
 // Public: submit a review (with optional base64 image)
 router.post('/create', ReviewController.createReviewController);
@@ -30,7 +33,7 @@ router.patch(
 // Admin: delete
 router.delete(
     '/:id',
-    ...contentWrite,
+    ...contentWriteDelete,
     ReviewController.deleteReviewController
 );
 

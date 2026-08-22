@@ -25,7 +25,7 @@ export const signupValidationSchema = z.object({
   }),
 });
 
-// Staff (admin / trainingManager / contentManager) created by an admin from the dashboard
+// Staff (admin / trainingManager / contentManager / manager) created by an admin from the dashboard
 export const createStaffValidationSchema = z.object({
   body: z.object({
     firstName: z.string().min(1, { message: 'First name is required' }),
@@ -33,7 +33,7 @@ export const createStaffValidationSchema = z.object({
     email: z.string().email({ message: 'Valid email is required' }),
     phoneNumber: z.string().optional(),
     password: z.string().min(6, { message: 'Password should be at least 6 characters' }),
-    role: z.enum(['admin', 'trainingManager', 'contentManager']),
+    role: z.enum(['admin', 'trainingManager', 'contentManager', 'manager']),
     // Optional starting permission set for a manager. Omit it and the role's
     // defaults apply. 'staff.manage' is not in the grantable list, so it can
     // never be requested here.

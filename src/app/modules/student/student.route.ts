@@ -16,19 +16,22 @@ const router = express.Router();
 // these on the user capabilities breaks nothing.
 const readStudents = [
   authMiddleware,
-  authorize('admin', 'superAdmin', 'trainingManager'),
+  authorize('admin', 'superAdmin', 'trainingManager', 'manager'),
   requireCapability('users.read'),
 ];
 const writeStudents = [
   authMiddleware,
-  authorize('admin', 'superAdmin', 'trainingManager'),
+  authorize('admin', 'superAdmin', 'trainingManager', 'manager'),
   requireCapability('users.write'),
 ];
+// Deleting additionally needs records.delete, which the add-and-edit
+// `manager` role deliberately does not have.
+const writeStudentsDelete = [...writeStudents, requireCapability('records.delete')];
 
 router.post('/create-student', ...writeStudents, validateRequest(studentValidationSchema), StudentController.createStudentController);
 router.get('/', ...readStudents, StudentController.getAllStudentsController);
 router.get('/:id', ...readStudents, StudentController.getSingleStudentController);
 router.patch('/:id', ...writeStudents, StudentController.updateStudentController);
-router.delete('/:id', ...writeStudents, StudentController.deleteStudentController);
+router.delete('/:id', ...writeStudentsDelete, StudentController.deleteStudentController);
 
 export const StudentRoutes = router;

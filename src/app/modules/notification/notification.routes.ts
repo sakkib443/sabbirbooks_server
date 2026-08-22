@@ -1,6 +1,6 @@
 import express from 'express';
 import { NotificationController } from './notification.controller';
-import { authMiddleware, authorize } from '../../middlewares/auth';
+import { authMiddleware, authorize , requireCapability } from '../../middlewares/auth';
 
 const router = express.Router();
 
@@ -13,6 +13,8 @@ router.patch('/:id/read', authMiddleware, NotificationController.markAsRead);
 router.delete('/:id', authMiddleware, NotificationController.remove);
 
 // Admin/Mentor: Send notification
-router.post('/send', authMiddleware, authorize('admin', 'trainingManager', 'mentor'), NotificationController.adminSend);
+// Sending is an operational action, so it rides on training.manage rather
+// than being open to any allowed role — that keeps it switchable per manager.
+router.post('/send', authMiddleware, authorize('admin', 'trainingManager', 'mentor', 'manager'), requireCapability('training.manage'), NotificationController.adminSend);
 
 export const NotificationRoutes = router;

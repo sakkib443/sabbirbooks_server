@@ -9,9 +9,12 @@ const router = express.Router();
 // Mentor profiles are public-facing content — see book.routes.ts for the pattern.
 const adminOnly = [
   authMiddleware,
-  authorize('admin', 'superAdmin', 'trainingManager', 'contentManager'),
+  authorize('admin', 'superAdmin', 'trainingManager', 'contentManager', 'manager'),
   requireCapability('content.write'),
 ];
+// Deleting additionally needs records.delete, which the add-and-edit
+// `manager` role deliberately does not have.
+const adminOnlyDelete = [...adminOnly, requireCapability('records.delete')];
 
 // Mentor self-profile (token-based)
 router.get('/me', authMiddleware, MentorController.getMyMentorProfile);
@@ -22,6 +25,6 @@ router.post('/create-mentor', ...adminOnly, validateRequest(mentorValidationSche
 router.get('/', MentorController.getAllMentorsController);
 router.get('/:id', MentorController.getSingleMentorController);
 router.patch('/:id', ...adminOnly, MentorController.updateMentorController);
-router.delete('/:id', ...adminOnly, MentorController.deleteMentorController);
+router.delete('/:id', ...adminOnlyDelete, MentorController.deleteMentorController);
 
 export const MentorRoutes = router;

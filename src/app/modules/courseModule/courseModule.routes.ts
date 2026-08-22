@@ -6,13 +6,16 @@ const router = express.Router();
 
 // Curriculum modules are content. Mentors keep the access they already had.
 const contentWriteWithMentor = [
-  authorize('admin', 'trainingManager', 'contentManager', 'mentor'),
+  authorize('admin', 'trainingManager', 'contentManager', 'mentor', 'manager'),
   requireCapability('content.write'),
 ];
 const contentWrite = [
-  authorize('admin', 'trainingManager', 'contentManager'),
+  authorize('admin', 'trainingManager', 'contentManager', 'manager'),
   requireCapability('content.write'),
 ];
+// Deleting additionally needs records.delete, which the add-and-edit
+// `manager` role deliberately does not have.
+const contentWriteDelete = [...contentWrite, requireCapability('records.delete')];
 
 // Public: Get modules by course (for course detail page curriculum)
 router.get('/course/:courseId', CourseModuleController.getModulesByCourse);
@@ -36,7 +39,7 @@ router.patch(
 router.delete(
   '/:id',
   authMiddleware,
-  ...contentWrite,
+  ...contentWriteDelete,
   CourseModuleController.deleteModule
 );
 

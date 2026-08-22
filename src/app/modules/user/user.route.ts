@@ -85,11 +85,11 @@ router.post('/create-staff', authMiddleware, authorize('admin', 'superAdmin'), r
 router.get('/permissions/catalog', authMiddleware, authorize('admin', 'superAdmin'), requireCapability('staff.manage'), UserController.getPermissionCatalogController);
 
 // ── Create a student account — admin, superAdmin AND managers ──
-router.post('/create-student', authMiddleware, authorize('admin', 'superAdmin', 'trainingManager', 'contentManager'), requireCapability('users.write'), validateRequest(createStudentValidationSchema), UserController.createStudentController);
+router.post('/create-student', authMiddleware, authorize('admin', 'superAdmin', 'trainingManager', 'contentManager', 'manager'), requireCapability('users.write'), validateRequest(createStudentValidationSchema), UserController.createStudentController);
 
 // ── List users — admin/superAdmin see all; managers see only students (filtered in controller) ──
 // users.read is the gate that keeps a content-only manager away from personal data.
-router.get('/', authMiddleware, authorize('admin', 'superAdmin', 'trainingManager', 'contentManager'), requireCapability('users.read'), UserController.getAllUsersController);
+router.get('/', authMiddleware, authorize('admin', 'superAdmin', 'trainingManager', 'contentManager', 'manager'), requireCapability('users.read'), UserController.getAllUsersController);
 
 // Migration endpoint to fix duplicate user IDs (admin only) - MUST be before /:id routes
 router.post('/fix-duplicate-ids', authMiddleware, authorize('admin', 'superAdmin'), requireCapability('staff.manage'), async (req, res) => {
@@ -120,8 +120,8 @@ router.patch(
 // ── Single-user management (read / update / delete) ──
 // Managers are allowed here but the controller restricts them to student/user targets only.
 // These must come AFTER specific routes
-router.get('/:id', authMiddleware, authorize('admin', 'superAdmin', 'trainingManager', 'contentManager'), requireCapability('users.read'), UserController.getSingleUserController);
-router.patch('/:id', authMiddleware, authorize('admin', 'superAdmin', 'trainingManager', 'contentManager'), requireCapability('users.write'), UserController.updateUserController);
-router.delete('/:id', authMiddleware, authorize('admin', 'superAdmin', 'trainingManager', 'contentManager'), requireCapability('users.write'), UserController.deleteUserController);
+router.get('/:id', authMiddleware, authorize('admin', 'superAdmin', 'trainingManager', 'contentManager', 'manager'), requireCapability('users.read'), UserController.getSingleUserController);
+router.patch('/:id', authMiddleware, authorize('admin', 'superAdmin', 'trainingManager', 'contentManager', 'manager'), requireCapability('users.write'), UserController.updateUserController);
+router.delete('/:id', authMiddleware, authorize('admin', 'superAdmin', 'trainingManager', 'contentManager', 'manager'), requireCapability('users.write'), requireCapability('records.delete'), UserController.deleteUserController);
 
 export const UserRoutes = router;

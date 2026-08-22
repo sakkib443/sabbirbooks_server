@@ -10,7 +10,10 @@ import { authMiddleware, authorize, requireCapability } from '../../middlewares/
 const router = express.Router();
 
 // QR resources are content — see book.routes.ts for the pattern.
-const contentWrite = [authorize('admin', 'contentManager'), requireCapability('content.write')];
+const contentWrite = [authorize('admin', 'contentManager', 'manager'), requireCapability('content.write')];
+// Deleting additionally needs records.delete, which the add-and-edit
+// `manager` role deliberately does not have.
+const contentWriteDelete = [...contentWrite, requireCapability('records.delete')];
 
 // ─── Admin protected routes (auth + admin role; superAdmin always allowed) ────
 // Registered BEFORE the public single-segment '/:slug' so the public catch-all
@@ -43,7 +46,7 @@ router.patch(
 router.delete(
   '/:id',
   authMiddleware,
-  ...contentWrite,
+  ...contentWriteDelete,
   QrResourceController.deleteQrResourceController
 );
 

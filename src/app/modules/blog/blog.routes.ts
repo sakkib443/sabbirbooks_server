@@ -8,9 +8,12 @@ const router = express.Router();
 // needs the `content.write` capability an admin can revoke.
 const adminOnly = [
   authMiddleware,
-  authorize('admin', 'superAdmin', 'trainingManager', 'contentManager'),
+  authorize('admin', 'superAdmin', 'trainingManager', 'contentManager', 'manager'),
   requireCapability('content.write'),
 ];
+// Deleting additionally needs records.delete, which the add-and-edit
+// `manager` role deliberately does not have.
+const adminOnlyDelete = [...adminOnly, requireCapability('records.delete')];
 
 // Create blog (admin) — also accept POST '/' as an alias
 router.post('/create', ...adminOnly, BlogController.createBlogController);
@@ -33,6 +36,6 @@ router.patch('/:id', ...adminOnly, BlogController.updateBlogController);
 router.put('/:id', ...adminOnly, BlogController.updateBlogController);
 
 // Delete blog by ID (admin)
-router.delete('/:id', ...adminOnly, BlogController.deleteBlogController);
+router.delete('/:id', ...adminOnlyDelete, BlogController.deleteBlogController);
 
 export const BlogRoutes = router;

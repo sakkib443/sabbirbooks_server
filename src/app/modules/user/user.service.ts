@@ -70,7 +70,7 @@ const createUserServices = async (payload: IUser): Promise<CreateUserResponse> =
   return { user: newUser, token };
 };
 
-// ── Create a STAFF account (admin / trainingManager / contentManager) ──
+// ── Create a STAFF account (admin / trainingManager / contentManager / manager) ──
 // requesterRole enforces: only a superAdmin may create an 'admin'.
 const createStaffServices = async (
   payload: {
@@ -79,13 +79,13 @@ const createStaffServices = async (
     email: string;
     phoneNumber?: string;
     password: string;
-    role: 'admin' | 'trainingManager' | 'contentManager';
+    role: 'admin' | 'trainingManager' | 'contentManager' | 'manager';
     permissions?: unknown;
   },
   requesterRole: string,
 ): Promise<{ user: IUser; credentials: { email: string; password: string; role: string } }> => {
-  if (!['admin', 'trainingManager', 'contentManager'].includes(payload.role)) {
-    throw new Error('Staff role must be admin, trainingManager or contentManager');
+  if (!['admin', 'trainingManager', 'contentManager', 'manager'].includes(payload.role)) {
+    throw new Error('Staff role must be admin, trainingManager, contentManager or manager');
   }
   if (payload.role === 'admin' && requesterRole !== 'superAdmin') {
     const e: any = new Error('Only a Super Admin can create admin accounts');
