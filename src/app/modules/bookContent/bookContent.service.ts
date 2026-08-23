@@ -2,6 +2,7 @@ import { Types } from 'mongoose';
 import { BookPart, BookChapter, BookTopic, BookQuestion, generateQrCode } from './bookContent.model';
 import { BookAccessService } from '../bookAccess/bookAccess.service';
 import { Book } from '../book/book.model';
+import { withMediaTokens } from './mediaToken';
 
 // ─── Scan ───────────────────────────────────────────────────
 
@@ -93,7 +94,10 @@ const scanTopic = async (qrCode: string, userId: string): Promise<ScanResult> =>
         isImplicit: topic.isImplicit,
         qrCode: topic.qrCode,
       },
-      questions,
+      // Media URLs point at the access-checked media route, which an <img> tag
+      // cannot authenticate against — so they are stamped with a short-lived
+      // token here, on a response that has already passed the access check.
+      questions: withMediaTokens(questions, String(userId)),
       // Total is fine to expose ("this topic has 7 questions"). answeredCount
       // is deliberately absent: a reader shouldn't be able to see how much of
       // the book is still unfinished — that is an internal admin metric.
@@ -499,6 +503,46 @@ const getNextTopicForReader = async (topicId: string, userId: string) => {
   };
 };
 
+/**
+ * May this user fetch this protected media file?
+ *
+ * Answer figures, videos and PDFs used to sit under the world-readable
+ * /uploads mount, so anyone holding (or guessing) a filename could pull paid
+ * artwork without an account. They now live outside it and come through here.
+ *
+ * The file is located by finding the question that references it, which gives
+ * the owning book and chapter; access is then the same rule as a scan — a free
+ * chapter, or ownership of the book. Unreferenced files are refused outright,
+ * so an orphaned upload is not a public bucket.
+ */
+const canReadProtectedMedia = async (fileName: string, userId: string): Promise<boolean> => {
+  // Anchored to the end of the stored URL so "12-a.jpg" cannot match a request
+  // for "…/912-a.jpg". The filename itself is already sanitised by multer and
+  // re-validated by the controller before it reaches here.
+  const suffix = new RegExp(`/${fileName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
+
+  const question = await BookQuestion.findOne({
+    isDeleted: false,
+    $or: [{ 'videos.url': suffix }, { 'attachments.fileUrl': suffix }, { images: suffix }],
+  })
+    .select('bookId chapterId')
+    .lean();
+
+  if (!question) return false;
+
+  const freeChapter = await BookChapter.findOne({
+    _id: question.chapterId,
+    isFree: true,
+    isDeleted: false,
+    isPublished: true,
+  })
+    .select('_id')
+    .lean();
+  if (freeChapter) return true;
+
+  return BookAccessService.hasBookAccess(userId, question.bookId);
+};
+
 /** Next question still missing an answer — powers the admin "keep going" button. */
 const getNextUnanswered = async (bookId: string, afterOrder?: number) => {
   return BookQuestion.findOne({
@@ -533,4 +577,5 @@ export const BookContentService = {
   reorder,
   getNextUnanswered,
   getNextTopicForReader,
+  canReadProtectedMedia,
 };

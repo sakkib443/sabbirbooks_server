@@ -128,15 +128,21 @@ app.use('/api/blogs', BlogRoutes);
 app.use('/api/notices', NoticeRoutes);
 app.use('/api/partners', PartnerRoutes);
 
-// Serve locally-uploaded files (class materials, certificates, etc.)
+// Serve locally-uploaded files (class materials, notice attachments, logos).
+//
+// Mounted on uploads/materials, NOT uploads/. Everything public writes into
+// materials/, while uploads/protected/ holds paid book-answer media that must
+// only ever leave through the access-checked route in bookContent.routes —
+// serving the parent directory here would hand all of it out to anyone with a
+// filename. Both live under uploads/ so they share the one persistent volume.
 //
 // setHeaders re-states the cross-origin policy on the media itself rather than
 // relying on the app-wide helmet default surviving future edits: if this header
 // goes back to same-origin, every answer image and video silently breaks again.
 // Range requests (which <video> seeking needs) are handled by express.static.
 app.use(
-  '/uploads',
-  express.static(path.join(process.cwd(), 'uploads'), {
+  '/uploads/materials',
+  express.static(path.join(process.cwd(), 'uploads', 'materials'), {
     setHeaders: (res) => {
       res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
       res.setHeader('Access-Control-Allow-Origin', '*');

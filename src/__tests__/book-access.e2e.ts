@@ -328,6 +328,100 @@ async function main() {
     await BookChapter.updateOne({ _id: freeChapter._id }, { $set: { isDeleted: false } });
   }
 
+  console.log('\n── Protected media is gated by book access ──');
+  {
+    const { signMediaToken, verifyMediaToken, withMediaTokens } = await import(
+      '../app/modules/bookContent/mediaToken'
+    );
+
+    // Attach a figure to the PAID topic's question.
+    await BookQuestion.updateOne(
+      { topicId: paidTopic._id },
+      { $set: { images: ['https://x.test/api/book-content/media/1700000000-diagram.png'] } }
+    );
+
+    const buyer = await mkUser('media-buyer@t.com');
+    await mkOrder(String(buyer._id), {
+      status: 'delivered',
+      paymentStatus: 'paid',
+      format: 'printed',
+    });
+
+    check(
+      (await BookContentService.canReadProtectedMedia(
+        '1700000000-diagram.png',
+        String(buyer._id)
+      )) === true,
+      'delivered buyer can read the figure'
+    );
+    check(
+      (await BookContentService.canReadProtectedMedia(
+        '1700000000-diagram.png',
+        brokeId
+      )) === false,
+      'non-buyer CANNOT read the figure'
+    );
+    check(
+      (await BookContentService.canReadProtectedMedia('not-referenced.png', String(buyer._id))) ===
+        false,
+      'a file no question references is refused (no public bucket)'
+    );
+    // Prefix confusion: "0000-diagram.png" must not match "1700000000-diagram.png".
+    check(
+      (await BookContentService.canReadProtectedMedia(
+        '0000-diagram.png',
+        String(buyer._id)
+      )) === false,
+      'partial filename match is refused'
+    );
+
+    // Token round-trip and scope separation.
+    const t = signMediaToken(String(buyer._id));
+    check(verifyMediaToken(t) === String(buyer._id), 'media token round-trips to its user');
+    check(verifyMediaToken('garbage') === null, 'garbage media token rejected');
+
+    const jwtLib = (await import('jsonwebtoken')).default;
+    const cfg = (await import('../app/config')).default;
+    const accessLike = jwtLib.sign({ _id: String(buyer._id), role: 'admin' }, cfg.jwt.access_secret);
+    check(
+      verifyMediaToken(accessLike) === null,
+      'a normal access token is NOT accepted as a media token (scope enforced)'
+    );
+
+    // Stamping walks nested arrays/objects.
+    const stamped = withMediaTokens(
+      { videos: [{ url: 'https://x.test/api/book-content/media/a.mp4' }], other: 'untouched' },
+      String(buyer._id)
+    );
+    check(
+      stamped.videos[0].url.includes('?t='),
+      'withMediaTokens stamps nested media URLs'
+    );
+    check(stamped.other === 'untouched', 'withMediaTokens leaves non-media strings alone');
+
+    // answerHtml is a document, not a URL — the token must land on each embedded
+    // src, not on the end of the article.
+    const html = withMediaTokens(
+      {
+        answerHtml:
+          '<p>দেখুন</p><img src="https://x.test/api/book-content/media/a.png" alt="a">' +
+          '<p>আর</p><img src="https://x.test/api/book-content/media/b.png">',
+      },
+      String(buyer._id)
+    ).answerHtml;
+    check(
+      (html.match(/\?t=/g) || []).length === 2,
+      'both embedded <img> URLs in answerHtml are stamped'
+    );
+    check(
+      html.includes('.png?t=') && html.endsWith('>'),
+      'the token lands inside the src, not appended to the whole document'
+    );
+    // The regex must stop at the quote — swallowing it would produce
+    // src="…png?t=abc alt=" and break the tag.
+    check(html.includes(`a.png?t=${t}" alt="a"`), 'src quote and following attributes intact');
+  }
+
   console.log(`\n${failed === 0 ? '✅ ALL PASS' : '❌ FAILURES'} — ${passed} passed, ${failed} failed`);
   await mongoose.disconnect();
   await mongod.stop();

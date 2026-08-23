@@ -51,9 +51,11 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY package.json ./
 
-# Served statically at /uploads (app.ts). Mount a Coolify persistent volume
-# here or every redeploy wipes the uploaded materials.
-RUN mkdir -p /app/uploads/materials && chown -R node:node /app/uploads
+# materials/ is served statically at /uploads/materials (app.ts); protected/
+# holds paid book-answer media and is only reachable through the access-checked
+# route. Both must sit under the ONE Coolify persistent volume mounted at
+# /app/uploads — outside it, every redeploy wipes them.
+RUN mkdir -p /app/uploads/materials /app/uploads/protected && chown -R node:node /app/uploads
 
 USER node
 EXPOSE 5000

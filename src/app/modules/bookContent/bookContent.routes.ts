@@ -2,7 +2,7 @@ import express from 'express';
 import rateLimit from 'express-rate-limit';
 import { BookContentController } from './bookContent.controller';
 import { authMiddleware, authorize, requireCapability } from '../../middlewares/auth';
-import { uploadFileLocal } from '../../config/localUpload';
+import { uploadProtectedLocal } from '../../config/localUpload';
 
 const router = express.Router();
 
@@ -25,6 +25,15 @@ router.get('/scan/:qrCode', scanLimiter, authMiddleware, BookContentController.s
 // a locked user cannot walk past a free chapter into paid content.
 router.get('/next-topic/:topicId', authMiddleware, BookContentController.getNextTopicForReader);
 
+// Answer figures / videos / PDFs. Every request is access-checked against the
+// book the file belongs to — unlike /uploads, which express.static serves to
+// anyone.
+//
+// No authMiddleware: an <img>/<video> tag cannot send an Authorization header,
+// so the handler does its own auth, accepting the short-lived ?t= media token
+// as well as a Bearer header. It refuses anonymous requests itself.
+router.get('/media/:fileName', BookContentController.serveProtectedMedia);
+
 // ─── Admin ──────────────────────────────────────────────────
 //
 // contentManager belongs here: this is the book's actual content — parts,
@@ -45,8 +54,14 @@ router.get('/questions/topic/:topicId', ...admin, BookContentController.getQuest
 
 router.patch('/reorder/:level', ...admin, BookContentController.reorder);
 
-// PDFs, images and short answer videos → local disk (the mounted volume).
-router.post('/upload', ...admin, uploadFileLocal.single('file'), BookContentController.uploadFile);
+// PDFs, images and short answer videos → the protected directory on the mounted
+// volume (NOT uploads/, which is served publicly by express.static).
+router.post(
+  '/upload',
+  ...admin,
+  uploadProtectedLocal.single('file'),
+  BookContentController.uploadFile
+);
 
 for (const level of ['part', 'chapter', 'topic', 'question'] as const) {
   router.post(`/${level}s`, ...admin, BookContentController.makeCreate(level));
