@@ -34,7 +34,13 @@ type Plan = {
   to: string;
   fileName: string;
   fileFound: boolean;
+  needsMove: boolean;
 };
+
+// Stored URLs carry two different origins — an old *.sslip.io backend host and
+// the current site — so the origin is normalised rather than preserved. The
+// site proxies /api/* to the backend, so this one origin works for both.
+const NEW_ORIGIN = (process.env.MEDIA_ORIGIN || 'https://magicviva.com').replace(/\/+$/, '');
 
 /** Rewrites a legacy /uploads/materials/<name> URL, or returns null to skip. */
 const rewrite = (url: string): { to: string; fileName: string } | null => {
@@ -42,11 +48,12 @@ const rewrite = (url: string): { to: string; fileName: string } | null => {
   const match = /\/uploads\/materials\/([^/?#]+)/.exec(url);
   if (!match) return null; // external (YouTube etc.) — leave alone
   const fileName = decodeURIComponent(match[1]);
-  const origin = url.split('/uploads/')[0];
-  return { to: `${origin}${MEDIA_PATH}${fileName}`, fileName };
+  return { to: `${NEW_ORIGIN}${MEDIA_PATH}${fileName}`, fileName };
 };
 
-export const migrateAnswerMedia = async (apply: boolean) => {
+// verbose is off for the boot-time call: 1400+ per-file lines would bury the
+// startup log every single deploy, long after the migration stopped doing work.
+export const migrateAnswerMedia = async (apply: boolean, verbose = false) => {
   const questions = await BookQuestion.find({})
     .select('_id videos attachments images')
     .lean();
@@ -58,13 +65,22 @@ export const migrateAnswerMedia = async (apply: boolean) => {
       if (!url) return;
       const r = rewrite(url);
       if (!r) return;
+      // "Found" means the bytes are reachable — still in materials/, or already
+      // moved by an earlier run. A URL whose file is in neither place is left
+      // untouched: rewriting it would point the reader at a 404, and would also
+      // make a later run on the machine that DOES have the file skip it as
+      // "already migrated". That is the failure mode that would silently break
+      // all 1400+ figures if this were ever run somewhere without the volume.
+      const inMaterials = fs.existsSync(path.join(MATERIALS_DIR, r.fileName));
+      const inProtected = fs.existsSync(path.join(PROTECTED_MEDIA_DIR, r.fileName));
       plans.push({
         questionId: String(q._id),
         field,
         from: url,
         to: r.to,
         fileName: r.fileName,
-        fileFound: fs.existsSync(path.join(MATERIALS_DIR, r.fileName)),
+        fileFound: inMaterials || inProtected,
+        needsMove: inMaterials && !inProtected,
       });
     };
 
@@ -73,31 +89,38 @@ export const migrateAnswerMedia = async (apply: boolean) => {
     (q.images || []).forEach((src, i) => consider(src, `images.${i}`));
   }
 
-  console.log(`\n${plans.length} media reference(s) to migrate\n`);
-  for (const p of plans) {
-    console.log(`  ${p.fileFound ? '✓' : '⚠ file missing on disk:'} ${p.fileName}`);
-    console.log(`      ${p.field} of question ${p.questionId}`);
+  if (verbose) {
+    console.log(`\n${plans.length} media reference(s) to migrate\n`);
+    for (const p of plans) {
+      console.log(`  ${p.fileFound ? '✓' : '⚠ file missing on disk:'} ${p.fileName}`);
+      console.log(`      ${p.field} of question ${p.questionId}`);
+    }
   }
 
+  const actionable = plans.filter(p => p.fileFound);
   const missing = plans.filter(p => !p.fileFound);
-  if (missing.length) {
+  if (missing.length && verbose) {
     console.log(
-      `\n⚠  ${missing.length} reference(s) point at a file that is not in uploads/materials.` +
-        `\n   The URL will still be rewritten — if the file was already moved by an earlier` +
-        `\n   run this is expected; otherwise that media was already broken.`
+      `\n⚠  ${missing.length} reference(s) point at a file present in neither uploads/materials` +
+        `\n   nor uploads/protected. They are SKIPPED, not rewritten — most likely this is` +
+        `\n   running somewhere without the media volume attached. Run it where the volume is.`
     );
   }
 
   if (!apply) {
-    console.log('\nDry run — nothing changed. Re-run with --apply to commit.');
-    return { planned: plans.length, moved: 0, rewritten: 0 };
+    console.log(
+      `\nDry run — nothing changed. Would move ${
+        actionable.filter(p => p.needsMove).length
+      } file(s) and rewrite ${actionable.length} URL(s). Re-run with --apply to commit.`
+    );
+    return { planned: plans.length, moved: 0, rewritten: 0, skipped: missing.length };
   }
 
-  // Move files first. A moved file with a stale URL is invisible; a rewritten
-  // URL with an unmoved file is a 404 for every reader — so if the process dies
-  // between the two, this order fails in the quieter direction.
+  // Move files first. A moved file with a stale URL still serves (the fallback
+  // is the old public path); a rewritten URL with an unmoved file is a 404 for
+  // every reader — so if the process dies midway, this order fails quieter.
   let moved = 0;
-  const uniqueFiles = [...new Set(plans.filter(p => p.fileFound).map(p => p.fileName))];
+  const uniqueFiles = [...new Set(actionable.filter(p => p.needsMove).map(p => p.fileName))];
   for (const fileName of uniqueFiles) {
     const from = path.join(MATERIALS_DIR, fileName);
     const to = path.join(PROTECTED_MEDIA_DIR, fileName);
@@ -108,7 +131,7 @@ export const migrateAnswerMedia = async (apply: boolean) => {
 
   let rewritten = 0;
   const byQuestion = new Map<string, Plan[]>();
-  for (const p of plans) {
+  for (const p of actionable) {
     byQuestion.set(p.questionId, [...(byQuestion.get(p.questionId) || []), p]);
   }
   for (const [questionId, items] of byQuestion) {
@@ -118,7 +141,7 @@ export const migrateAnswerMedia = async (apply: boolean) => {
     rewritten += items.length;
   }
 
-  return { planned: plans.length, moved, rewritten };
+  return { planned: plans.length, moved, rewritten, skipped: missing.length };
 };
 
 if (require.main === module) {
@@ -128,9 +151,10 @@ if (require.main === module) {
     const { dbConnect } = await import('../app/utils/dbConnect');
     await dbConnect();
     console.log(apply ? '── APPLYING ──' : '── DRY RUN ──');
-    const res = await migrateAnswerMedia(apply);
+    const res = await migrateAnswerMedia(apply, true);
     console.log(
-      `\n✅ ${res.planned} planned, ${res.moved} file(s) moved, ${res.rewritten} URL(s) rewritten.`
+      `\n✅ ${res.planned} planned, ${res.moved} file(s) moved, ${res.rewritten} URL(s) rewritten,` +
+        ` ${res.skipped} skipped (file not on this machine).`
     );
     await mongoose.disconnect();
     process.exit(0);
