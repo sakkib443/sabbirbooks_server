@@ -35,7 +35,7 @@ async function startServer() {
   // volume attached is a no-op rather than a mass-breakage.
   if (dbReady) {
     try {
-      const { migrateAnswerMedia } = await import('./scripts/migrateAnswerMediaToProtected');
+      const { migrateAnswerMedia } = await import('./app/utils/migrateAnswerMedia');
       const res = await migrateAnswerMedia(true);
       if (res.moved || res.rewritten) {
         console.log(
