@@ -273,10 +273,12 @@ const getAllOrders = async (query?: {
 // ─── PATCH status (admin fulfillment) ────────────────────────
 //
 // More than a field write. Moving an order along the ladder has consequences:
-//   processing → the order is confirmed; stock is reserved and (via
-//                bookAccess's PAID_ORDER_STATUSES) the buyer's QR content opens
-//   delivered  → a cash-on-delivery order is now actually paid
-//   cancelled  → reserved stock goes back on the shelf
+//   processing → the order is confirmed and stock is reserved
+//   delivered  → a cash-on-delivery order is now actually paid, AND (via
+//                bookAccess's PRINTED_ACCESS_STATUSES) the printed book's QR
+//                content finally opens — the buyer has the paper in hand
+//   cancelled  → reserved stock goes back on the shelf, and QR access closes
+//                again even if the payment was already taken
 const updateOrderStatus = async (
   id: string,
   status: string,

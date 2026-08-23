@@ -32,6 +32,10 @@ const hasBookAccess = async (
   const order = await Order.findOne({
     user: userId,
     'items.book': bookId,
+    // A refunded order keeps payment.status 'paid' (updateOrderStatus only
+    // downgrades an UNpaid payment to 'failed'), so without this the digital
+    // branch below would keep serving content after the money went back.
+    status: { $ne: 'cancelled' },
     $or: [
       // Printed copy that has actually reached the buyer.
       {
@@ -44,6 +48,29 @@ const hasBookAccess = async (
         items: { $elemMatch: { book: bookId, format: 'digital' } },
       },
     ],
+  })
+    .select('_id')
+    .lean();
+
+  return Boolean(order);
+};
+
+/**
+ * True when the user has bought this book but it has not reached them yet.
+ *
+ * Only meaningful once hasBookAccess has already said no. Without this the
+ * reader is told "you don't own this book — buy it", which for a customer
+ * whose parcel is in transit reads as an invitation to pay twice.
+ */
+const hasPendingDelivery = async (
+  userId: string | Types.ObjectId,
+  bookId: string | Types.ObjectId
+): Promise<boolean> => {
+  const order = await Order.findOne({
+    user: userId,
+    'items.book': bookId,
+    status: { $nin: ['cancelled', 'delivered', 'access-granted'] },
+    items: { $elemMatch: { book: bookId, format: 'printed' } },
   })
     .select('_id')
     .lean();
@@ -121,6 +148,7 @@ const listAccess = async (bookId: string) => {
 
 export const BookAccessService = {
   hasBookAccess,
+  hasPendingDelivery,
   recordScan,
   getScanHistory,
   grantAccess,

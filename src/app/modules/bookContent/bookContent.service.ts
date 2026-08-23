@@ -8,7 +8,11 @@ import { Book } from '../book/book.model';
 export type ScanResult =
   | { ok: true; data: Record<string, unknown> }
   | { ok: false; reason: 'not_found' }
-  | { ok: false; reason: 'no_access'; book: Record<string, unknown> | null };
+  // 'awaiting_delivery' is still a refusal — it carries exactly the same
+  // (zero) content as 'no_access'. It exists only so the reader is told
+  // "your book is on the way" instead of "buy this book", which a customer
+  // who already paid would reasonably act on by paying again.
+  | { ok: false; reason: 'no_access' | 'awaiting_delivery'; book: Record<string, unknown> | null };
 
 /**
  * Resolve a printed QR code into that topic's questions.
@@ -29,18 +33,32 @@ const scanTopic = async (qrCode: string, userId: string): Promise<ScanResult> =>
   // A free chapter lets any signed-in user read its topics without owning the
   // book — the check happens BEFORE the paid-access probe so a locked user is
   // not turned away from the sample.
-  const chapterForAccess = await BookChapter.findById(topic.chapterId)
-    .select('isFree')
+  //
+  // isDeleted/isPublished are part of the WHERE, not an afterthought: a chapter
+  // that was retired while still flagged isFree would otherwise keep handing
+  // out free content forever, and unpublishing it would be no way to stop that.
+  const freeChapter = await BookChapter.findOne({
+    _id: topic.chapterId,
+    isFree: true,
+    isDeleted: false,
+    isPublished: true,
+  })
+    .select('_id')
     .lean();
-  const isFreeChapter = Boolean(chapterForAccess?.isFree);
+  const isFreeChapter = Boolean(freeChapter);
 
   const allowed = isFreeChapter || (await BookAccessService.hasBookAccess(userId, topic.bookId));
   if (!allowed) {
     // Enough to render a "buy this book" card, and nothing from inside it.
-    const book = await Book.findById(topic.bookId)
-      .select('title slug author coverImage price offerPrice')
-      .lean();
-    return { ok: false, reason: 'no_access', book: book as Record<string, unknown> | null };
+    const [book, awaitingDelivery] = await Promise.all([
+      Book.findById(topic.bookId).select('title slug author coverImage price offerPrice').lean(),
+      BookAccessService.hasPendingDelivery(userId, topic.bookId),
+    ]);
+    return {
+      ok: false,
+      reason: awaitingDelivery ? 'awaiting_delivery' : 'no_access',
+      book: book as Record<string, unknown> | null,
+    };
   }
 
   const [chapter, part, questions] = await Promise.all([
@@ -369,15 +387,33 @@ const reorder = async (level: ReorderLevel, items: { _id: string; order: number 
  * the last question of a topic and follows the returned QR code to the next
  * scannable page.
  *
- * Access is re-checked here even though the current topic was reached via
- * scan: a locked user could otherwise walk out of a free chapter into a paid
- * one just by hitting "next topic" over and over.
+ * Two separate access checks, and both matter:
+ *
+ *   • the CURRENT topic — otherwise any signed-in user holding one topic id
+ *     could walk the whole book, harvesting every topic title and printed QR
+ *     code. Topic ids are sequential-ish ObjectIds, so one id is enough to
+ *     start guessing. Returns null rather than an error: to a caller with no
+ *     business here, the book simply has no next topic.
+ *   • the NEXT topic — reported as `allowed` so a reader who finishes the free
+ *     chapter is shown a padlock instead of a working link.
  */
 const getNextTopicForReader = async (topicId: string, userId: string) => {
   const current = await BookTopic.findById(topicId)
     .select('bookId partId chapterId order')
     .lean();
   if (!current) return null;
+
+  const currentIsFree = await BookChapter.findOne({
+    _id: current.chapterId,
+    isFree: true,
+    isDeleted: false,
+    isPublished: true,
+  })
+    .select('_id')
+    .lean();
+  const mayReadCurrent =
+    Boolean(currentIsFree) || (await BookAccessService.hasBookAccess(userId, current.bookId));
+  if (!mayReadCurrent) return null;
 
   // Same chapter, next in order.
   let next = await BookTopic.findOne({
@@ -444,11 +480,12 @@ const getNextTopicForReader = async (topicId: string, userId: string) => {
   if (!next) return null;
 
   const nextChapter = await BookChapter.findById(next.chapterId)
-    .select('isFree title chapterNo')
+    .select('isFree title chapterNo isDeleted isPublished')
     .lean();
+  const nextIsFree =
+    Boolean(nextChapter?.isFree) && !nextChapter?.isDeleted && nextChapter?.isPublished !== false;
   const allowed =
-    Boolean(nextChapter?.isFree) ||
-    (await BookAccessService.hasBookAccess(userId, next.bookId));
+    nextIsFree || (await BookAccessService.hasBookAccess(userId, next.bookId));
 
   return {
     qrCode: next.qrCode,

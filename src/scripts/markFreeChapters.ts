@@ -12,14 +12,35 @@
  */
 import mongoose from 'mongoose';
 import { BookChapter } from '../app/modules/bookContent/bookContent.model';
+import { Book } from '../app/modules/book/book.model';
 
 // Chapters that should be readable as a sample. Matches are case-insensitive
 // and use a substring match on `title` so "Inferior extremity", "INFERIOR
 // EXTREMITY", "Inferior Extremity (Lower Limb)" all hit the same row.
 const FREE_CHAPTERS: string[] = ['inferior extremity'];
 
+// Which book those titles belong to. Without this the substring match would
+// span the whole catalogue and quietly give away a chapter of some other book
+// that happens to share the name. Matched case-insensitively against title.
+const BOOK_TITLE = 'anatomy';
+
 export const markFreeChapters = async () => {
-  const allChapters = await BookChapter.find({ isDeleted: false })
+  const books = await Book.find({ title: new RegExp(BOOK_TITLE, 'i') })
+    .select('_id title')
+    .lean();
+  if (books.length === 0) throw new Error(`No book matching "${BOOK_TITLE}"`);
+  if (books.length > 1) {
+    throw new Error(
+      `"${BOOK_TITLE}" matches ${books.length} books (${books
+        .map(b => b.title)
+        .join(', ')}) — narrow BOOK_TITLE so this cannot free the wrong one.`
+    );
+  }
+  console.log(`Book: ${books[0].title}`);
+
+  // Scoped to this one book, so a same-named chapter elsewhere is untouched —
+  // including by the "flip off" branch below.
+  const allChapters = await BookChapter.find({ bookId: books[0]._id, isDeleted: false })
     .select('_id title isFree')
     .lean();
 

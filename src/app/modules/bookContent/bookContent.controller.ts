@@ -24,6 +24,15 @@ const scan = async (req: Request, res: Response) => {
       return res.status(404).json({ success: false, message: 'QR code not found' });
     }
 
+    if (!result.ok && result.reason === 'awaiting_delivery') {
+      return res.status(403).json({
+        success: false,
+        message: 'Your book has not been delivered yet',
+        code: 'BOOK_AWAITING_DELIVERY',
+        book: result.book,
+      });
+    }
+
     if (!result.ok && result.reason === 'no_access') {
       return res.status(403).json({
         success: false,
