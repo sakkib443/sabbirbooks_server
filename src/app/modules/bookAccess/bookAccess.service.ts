@@ -2,18 +2,25 @@ import { Types } from 'mongoose';
 import { BookAccess, BookTopicScan } from './bookAccess.model';
 import { Order } from '../order/order.model';
 
-// Order states that mean the buyer has paid for the book. A printed book ships
-// after payment, so waiting for 'delivered' would leave a paying reader locked
-// out for the days the parcel is in transit — and the QR is scanned from the
-// book they are already holding. Manual (Send Money) orders only reach 'paid'
-// after an admin verifies the transaction, so this is not self-service.
-const PAID_ORDER_STATUSES = ['paid', 'processing', 'shipped', 'delivered', 'access-granted'];
+// Order states that unlock a PRINTED book's QR content. Waiting for
+// 'delivered' is deliberate: the QR is scanned from the paper page, and
+// handing out access at 'paid' would let a buyer read the whole book before
+// the parcel even ships. If the buyer needs early access (out-of-stock hold,
+// courier delay, complaint) an admin can grant it manually via the access
+// endpoints — that path is preserved. Digital items have nothing to deliver
+// and are handled below.
+const PRINTED_ACCESS_STATUSES = ['delivered', 'access-granted'];
 
 /**
  * The single gate for every piece of book content.
  *
- * True when either an explicit grant exists, or the user has an order for this
- * book whose payment is confirmed.
+ * True when any one of the following holds:
+ *   • an explicit BookAccess grant (manual, gift, etc.)
+ *   • an order whose PRINTED copy of this book has reached the delivered
+ *     rung of the ladder
+ *   • an order that contains a DIGITAL copy of this book and has been paid —
+ *     digital has no shipping step, so waiting for 'delivered' would lock the
+ *     buyer out forever
  */
 const hasBookAccess = async (
   userId: string | Types.ObjectId,
@@ -25,7 +32,18 @@ const hasBookAccess = async (
   const order = await Order.findOne({
     user: userId,
     'items.book': bookId,
-    $or: [{ 'payment.status': 'paid' }, { status: { $in: PAID_ORDER_STATUSES } }],
+    $or: [
+      // Printed copy that has actually reached the buyer.
+      {
+        status: { $in: PRINTED_ACCESS_STATUSES },
+        items: { $elemMatch: { book: bookId, format: 'printed' } },
+      },
+      // Digital copy — payment is the only fulfillment step there is.
+      {
+        'payment.status': 'paid',
+        items: { $elemMatch: { book: bookId, format: 'digital' } },
+      },
+    ],
   })
     .select('_id')
     .lean();

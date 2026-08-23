@@ -76,9 +76,9 @@ const scanTopic = async (qrCode: string, userId: string): Promise<ScanResult> =>
         qrCode: topic.qrCode,
       },
       questions,
-      // Lets the viewer say "answers coming soon" instead of looking broken
-      // while the admin works through the backlog.
-      answeredCount: questions.filter(q => Boolean(q.answerHtml?.trim())).length,
+      // Total is fine to expose ("this topic has 7 questions"). answeredCount
+      // is deliberately absent: a reader shouldn't be able to see how much of
+      // the book is still unfinished — that is an internal admin metric.
       totalCount: questions.length,
     },
   };
