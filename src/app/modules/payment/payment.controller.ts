@@ -3,7 +3,8 @@ import { Request, Response } from 'express';
 import { BkashService } from './bkash.service';
 import { SslcommerzService } from './sslcommerz.service';
 import { EnrollmentService } from '../enrollment/enrollment.service';
-import { publicGatewayStatus, returnUrl } from './gateway.config';
+import { bkashState, publicGatewayStatus, returnUrl, sslcommerzState } from './gateway.config';
+import { resolveCoursePrice } from './coursePricing';
 import { mongoSettlementDeps } from './orderSettlement.deps';
 import { settleGatewayPayment, type SettlementInput, type SettlementResult } from './orderSettlement';
 
@@ -44,16 +45,22 @@ const gateways = async (_req: Request, res: Response) => {
 const initiate = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
-    const { courseId, amount, totalFee, couponCode, couponDiscount } = req.body;
+    const { courseId, couponCode } = req.body;
 
-    if (!courseId || !amount) {
-      return res.status(400).json({ success: false, message: 'courseId and amount are required' });
+    if (!courseId) {
+      return res.status(400).json({ success: false, message: 'courseId is required' });
     }
+
+    // Priced from the database, not the request. `amount`, `totalFee` and
+    // `couponDiscount` used to be taken from the body and billed as sent, so a
+    // buyer could edit the JSON and pay 1৳ — or 0৳ — for any course. The coupon
+    // is re-evaluated server side for the same reason.
+    const priced = await resolveCoursePrice(courseId, couponCode);
 
     const invoiceNumber = `INV-${Date.now()}-${Math.random().toString(36).substring(7)}`;
 
     const result = await BkashService.createPayment({
-      amount: Number(amount),
+      amount: priced.amount,
       courseId,
       studentId: user._id,
       invoiceNumber,
@@ -64,11 +71,11 @@ const initiate = async (req: Request, res: Response) => {
       await EnrollmentService.createEnrollment({
         studentId: user._id,
         courseId,
-        customFee: totalFee ? Number(totalFee) : undefined,
-        couponCode: couponCode || undefined,
-        couponDiscount: couponDiscount != null ? Number(couponDiscount) : undefined,
+        customFee: priced.listPrice,
+        couponCode: priced.couponCode,
+        couponDiscount: priced.couponDiscount,
         payment: {
-          amount: Number(amount),
+          amount: priced.amount,
           method: 'bkash',
           transactionId: result.paymentID,
         },
@@ -241,28 +248,44 @@ const status = async (req: Request, res: Response) => {
   }
 };
 
+/**
+ * Refuse a demo settlement when the gateway can actually take money.
+ *
+ * These endpoints exist so checkout is walkable before credentials arrive. With
+ * real credentials present they are pure liability: a free pass around a
+ * working gateway. 404 rather than 403 — an endpoint that does not apply here
+ * should not advertise that it exists.
+ */
+const rejectIfGatewayLive = (res: Response, gateway: 'bkash' | 'sslcommerz'): boolean => {
+  const state = gateway === 'bkash' ? bkashState() : sslcommerzState();
+  if (state.configured) {
+    res.status(404).json({ success: false, message: 'Not found' });
+    return true;
+  }
+  return false;
+};
+
 // ─── Demo: Simulate successful payment ───────────────────────
+//
+// Settles ONLY the pending enrollment that /initiate already created for this
+// user. It used to fall back to createEnrollment() with the courseId and amount
+// straight from the request body, which meant any signed-in user could POST a
+// courseId and be enrolled in it for nothing — no payment, no gateway, not even
+// a prior /initiate call.
 const demoComplete = async (req: Request, res: Response) => {
   try {
+    if (rejectIfGatewayLive(res, 'bkash')) return;
+
     const user = (req as any).user;
-    const { paymentID, courseId, amount, totalFee } = req.body;
+    const { paymentID } = req.body;
+    if (!paymentID) {
+      return res.status(400).json({ success: false, message: 'paymentID is required' });
+    }
 
     const trxId = `DEMO_TRX_${Date.now()}`;
-
-    try {
-      await EnrollmentService.verifyPayment(paymentID, trxId);
-    } catch {
-      await EnrollmentService.createEnrollment({
-        studentId: user._id,
-        courseId,
-        customFee: totalFee ? Number(totalFee) : undefined,
-        payment: {
-          amount: Number(amount || 0),
-          method: 'bkash',
-          transactionId: trxId,
-        },
-      });
-    }
+    // Scoped to this user: without it, someone else's paymentID or enrollment
+    // id would settle THEIR enrollment.
+    await EnrollmentService.verifyPayment(paymentID, trxId, String(user._id));
 
     res.status(200).json({
       success: true,
@@ -285,16 +308,19 @@ const demoComplete = async (req: Request, res: Response) => {
 const sslInit = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
-    const { courseId, amount, courseName, totalFee, couponCode, couponDiscount } = req.body;
+    const { courseId, courseName, couponCode } = req.body;
 
-    if (!courseId || !amount) {
-      return res.status(400).json({ success: false, message: 'courseId and amount are required' });
+    if (!courseId) {
+      return res.status(400).json({ success: false, message: 'courseId is required' });
     }
+
+    // Server-priced — see the note in initiate() above.
+    const priced = await resolveCoursePrice(courseId, couponCode);
 
     const invoiceNumber = `SSL-${Date.now()}-${Math.random().toString(36).substring(7)}`;
 
     const result = await SslcommerzService.initSession({
-      amount: Number(amount),
+      amount: priced.amount,
       courseId,
       courseName: courseName || 'Course',
       studentId: user._id,
@@ -309,11 +335,11 @@ const sslInit = async (req: Request, res: Response) => {
       await EnrollmentService.createEnrollment({
         studentId: user._id,
         courseId,
-        customFee: totalFee ? Number(totalFee) : undefined,
-        couponCode: couponCode || undefined,
-        couponDiscount: couponDiscount != null ? Number(couponDiscount) : undefined,
+        customFee: priced.listPrice,
+        couponCode: priced.couponCode,
+        couponDiscount: priced.couponDiscount,
         payment: {
-          amount: Number(amount),
+          amount: priced.amount,
           method: 'sslcommerz',
           transactionId: result.tran_id || invoiceNumber,
         },
@@ -476,27 +502,20 @@ const sslCancel = async (req: Request, res: Response) => {
 };
 
 // ─── SSLCommerz Demo Complete ────────────────────────────────
+// Same reasoning as demoComplete above: demo-mode only, settles just this
+// user's own pending enrollment, and never builds one from the request body.
 const sslDemoComplete = async (req: Request, res: Response) => {
   try {
+    if (rejectIfGatewayLive(res, 'sslcommerz')) return;
+
     const user = (req as any).user;
-    const { tran_id, courseId, amount, totalFee } = req.body;
+    const { tran_id } = req.body;
+    if (!tran_id) {
+      return res.status(400).json({ success: false, message: 'tran_id is required' });
+    }
 
     const valId = `DEMO_VAL_${Date.now()}`;
-
-    try {
-      await EnrollmentService.verifyPayment(tran_id, valId);
-    } catch {
-      await EnrollmentService.createEnrollment({
-        studentId: user._id,
-        courseId,
-        customFee: totalFee ? Number(totalFee) : undefined,
-        payment: {
-          amount: Number(amount || 0),
-          method: 'sslcommerz',
-          transactionId: valId,
-        },
-      });
-    }
+    await EnrollmentService.verifyPayment(tran_id, valId, String(user._id));
 
     res.status(200).json({
       success: true,

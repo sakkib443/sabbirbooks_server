@@ -3,6 +3,7 @@ import { BookPart, BookChapter, BookTopic, BookQuestion, generateQrCode } from '
 import { BookAccessService } from '../bookAccess/bookAccess.service';
 import { Book } from '../book/book.model';
 import { withMediaTokens } from './mediaToken';
+import { sanitizeQuestionPayload } from './sanitizeAnswer';
 
 // ─── Scan ───────────────────────────────────────────────────
 
@@ -291,7 +292,7 @@ const createQuestion = async (payload: Record<string, unknown>) => {
     }
   }
 
-  const question = new BookQuestion({ ...payload, order: index + 1 });
+  const question = new BookQuestion({ ...sanitizeQuestionPayload(payload), order: index + 1 });
   // Validated before anything moves: a payload the model rejects would leave
   // the topic renumbered around a question that never came into existence.
   await question.validate();
@@ -336,7 +337,7 @@ const updateTopic = async (id: string, payload: Record<string, unknown>) => {
 };
 
 const updateQuestion = async (id: string, payload: Record<string, unknown>) =>
-  BookQuestion.findByIdAndUpdate(id, payload, { new: true });
+  BookQuestion.findByIdAndUpdate(id, sanitizeQuestionPayload(payload), { new: true });
 
 // Soft delete everywhere — a printed QR pointing at a hard-deleted topic would
 // be unrecoverable.

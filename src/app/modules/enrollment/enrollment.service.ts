@@ -1,3 +1,4 @@
+import { isValidObjectId } from 'mongoose';
 import { Enrollment } from './enrollment.model';
 import { Course } from '../courses/course.model';
 import { User } from '../user/user.model';
@@ -126,14 +127,34 @@ const createEnrollment = async (payload: {
 };
 
 // ─── Verify Payment & Activate ──────────────────────────────
-const verifyPayment = async (transactionOrId: string, verifiedTrxId: string) => {
+/**
+ * Mark an enrollment paid.
+ *
+ * `ownerId` scopes the lookup to one student and should be passed on every
+ * path that a user can reach. Without it this took any string and, failing a
+ * transactionId match, fell through to findById — so posting somebody else's
+ * enrollment id marked THEIR enrollment paid. It stays optional only for the
+ * gateway callbacks (bKash/SSLCommerz IPN), where there is no session and the
+ * caller has already been authenticated by other means.
+ */
+const verifyPayment = async (
+  transactionOrId: string,
+  verifiedTrxId: string,
+  ownerId?: string
+) => {
+  const scope = ownerId ? { studentId: ownerId } : {};
+
   // Try to find by transactionId first, then by _id
   let enrollment = await Enrollment.findOne({
     'payment.transactionId': transactionOrId,
     isDeleted: false,
+    ...scope,
   });
-  if (!enrollment) {
-    enrollment = await Enrollment.findById(transactionOrId);
+  // Guarded: a gateway paymentID is not an ObjectId, and an unguarded _id query
+  // throws a CastError. That thrown error used to be what pushed demoComplete
+  // into its "just create the enrollment from the request body" fallback.
+  if (!enrollment && isValidObjectId(transactionOrId)) {
+    enrollment = await Enrollment.findOne({ _id: transactionOrId, isDeleted: false, ...scope });
   }
   if (!enrollment) throw new Error('Enrollment not found');
 
