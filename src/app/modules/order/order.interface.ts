@@ -68,6 +68,13 @@ export interface IShippingAddress {
   // Courier zone; defaults to outside-dhaka (the more expensive of the two) so a
   // client that forgets to send it can never under-charge us.
   area?: TDeliveryArea;
+  // Geography, NOT the courier zone. `area` is one of two billing buckets;
+  // `district`/`division` are where the parcel actually goes, prefilled from the
+  // buyer's medical college. The zone is derived from the district at checkout,
+  // but the two stay separate fields — merging them would lose the address the
+  // courier needs the moment a third zone is priced.
+  district?: string;
+  division?: string;
   note?: string;
 }
 
@@ -90,6 +97,11 @@ export interface IOrder {
   total: number;
   payment: IOrderPayment;
   status: TOrderStatus;
+  // True when any line was a pre-order at checkout time. Snapshotted rather than
+  // re-derived from the books, because the book stops being a pre-order the day
+  // it is printed and this order's discount must still be explicable afterwards.
+  // Optional: orders placed before pre-ordering existed carry no flag.
+  isPreOrder?: boolean;
   // True once this order's copies have been taken out of stock. Guards the
   // decrement against running twice on the COD confirm → deliver path.
   stockAdjusted?: boolean;

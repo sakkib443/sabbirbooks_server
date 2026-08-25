@@ -64,6 +64,19 @@ export const getMeController = async (req: Request, res: Response) => {
         firstName: account?.firstName ?? tokenUser.firstName,
         lastName: account?.lastName ?? tokenUser.lastName,
         name: tokenUser.name,
+        whatsappNumber: account?.whatsappNumber ?? '',
+        medicalCollege: account?.medicalCollege ?? null,
+        medicalCollegeName: account?.medicalCollegeName ?? '',
+        district: account?.district ?? '',
+        division: account?.division ?? '',
+        // The client blocks a student behind a "complete your profile" step
+        // until this is true. Computed here, from the document, so a Google
+        // sign-in — which cannot supply a WhatsApp number — is caught on its
+        // very first authenticated request rather than slipping through.
+        // Staff accounts are exempt: they are created by an admin, not by
+        // signup, and are not customers anyone needs to reach on WhatsApp.
+        profileComplete:
+          account?.role !== 'student' || Boolean(account?.whatsappNumber),
         permissions: account?.permissions,
         capabilities: account
           ? UserService.capabilitiesFor(account as any)

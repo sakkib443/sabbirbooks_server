@@ -1,5 +1,18 @@
 import { Schema, model } from 'mongoose';
-import { IBook } from './book.interface';
+import { IBook, IBookFeature } from './book.interface';
+
+// Landing-page selling points. Declared as its own schema with `_id: false` —
+// the same convention the order module's embedded docs use — because these are
+// display copy the admin rewrites wholesale, and per-row ids would just be noise
+// in every API response.
+const bookFeatureSchema = new Schema<IBookFeature>(
+  {
+    text: { type: String, required: true },
+    weight: { type: Number, default: 1 },
+    highlight: { type: Boolean, default: false },
+  },
+  { _id: false }
+);
 
 // Mongoose Schema: ডাটাবেজে Book কিভাবে সংরক্ষণ হবে তা নির্ধারণ করে
 // Simplified for the medical-book store: only `title` is required in practice —
@@ -33,6 +46,25 @@ const bookSchema = new Schema<IBook>(
 
     status: { type: String, enum: ['draft', 'published', 'archived'], default: 'published' },
     isFeatured: { type: Boolean, default: false },
+
+    // Pre-order: the book can be bought before it is printed. Defaults keep every
+    // existing book an ordinary stocked title, so nothing changes until an admin
+    // ticks the box.
+    isPreOrder: { type: Boolean, default: false },
+    // Capped at 90 so a typo'd 100 (or 900) cannot hand the book away for free —
+    // this number is applied to real money at checkout.
+    preOrderDiscountPercent: { type: Number, default: 25, min: 0, max: 90 },
+    preOrderNote: { type: String, default: '' },
+    // Clearing the date field in the admin form posts '', which Mongoose would
+    // reject as an invalid Date — read it as "no date set" instead of 400ing an
+    // otherwise valid edit. null rather than undefined, because an undefined in
+    // an update is dropped from the $set and would silently keep the old date.
+    expectedReleaseDate: { type: Date, set: (v: unknown) => (v === '' ? null : v) },
+
+    // Landing page content. promoVideoUrl holds either a YouTube link or a path
+    // to a file uploaded through the media route, so it is not validated as a URL.
+    promoVideoUrl: { type: String, default: '' },
+    features: { type: [bookFeatureSchema], default: [] },
 
     rating: { type: Number, default: 0 },
     totalSold: { type: Number, default: 0 },

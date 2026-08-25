@@ -76,6 +76,17 @@ const settingsSchema = new Schema<ISiteSettings>(
         },
         // Support number printed on the order confirmation screen.
         orderSupportPhone: { type: String, default: '' },
+
+        // ── Landing page ───────────────────────────────────────────────────
+        // The public site is one page about one book. This says which book —
+        // by slug, so the admin can point the landing page at a different
+        // title without a deploy. Empty means "the featured book", and failing
+        // that the newest published one, so the page is never blank.
+        landingBookSlug: { type: String, default: '', trim: true },
+        // Optional copy overriding what the book itself says, for when the
+        // marketing line and the catalogue description should differ.
+        landingHeadline: { type: String, default: '' },
+        landingSubheadline: { type: String, default: '' },
     },
     { timestamps: true }
 );

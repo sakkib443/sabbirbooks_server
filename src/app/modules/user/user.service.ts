@@ -53,11 +53,61 @@ interface CreateUserResponse {
   token: string;
 }
 
+/**
+ * Store WhatsApp numbers in one shape: 11 digits starting 01.
+ *
+ * People type theirs as 01712345678, +8801712345678 or 8801712345678, and an
+ * admin searching the student list should find the same person whichever way it
+ * was entered. The country code is dropped rather than added because every
+ * number here is Bangladeshi and wa.me accepts the 88-prefixed form built at
+ * display time.
+ */
+export const normalizeBdMobile = (raw?: string): string => {
+  const digits = String(raw || '').replace(/\D/g, '');
+  if (digits.length === 13 && digits.startsWith('88')) return digits.slice(2);
+  if (digits.length === 12 && digits.startsWith('8')) return digits.slice(1);
+  return digits;
+};
+
+/**
+ * Copy the chosen college's name, district and division onto the user.
+ *
+ * The reference alone would mean every admin list and CSV export has to join a
+ * second collection, and a student whose college is not in the directory yet
+ * would have nothing to show at all. Silently ignores an id that does not
+ * resolve — a bad reference must not block a signup.
+ */
+const withCollegeSnapshot = async <T extends Partial<IUser>>(payload: T): Promise<T> => {
+  if (!payload.medicalCollege) return payload;
+  try {
+    const { MedicalCollege } = await import('../medicalCollege/medicalCollege.model');
+    const college = await MedicalCollege.findById(payload.medicalCollege)
+      .select('name district division')
+      .lean();
+    if (!college) return { ...payload, medicalCollege: undefined };
+    return {
+      ...payload,
+      medicalCollegeName: college.name,
+      district: college.district,
+      division: college.division,
+    };
+  } catch {
+    return payload;
+  }
+};
+
 const createUserServices = async (payload: IUser): Promise<CreateUserResponse> => {
   // Do not accept externally provided id — generate it here.
   // Public signup is ALWAYS a student — never trust a client-supplied role (privilege-escalation guard).
   const id = await generateUserId();
-  const toCreate = { ...payload, id, role: 'student', authProvider: 'local' as const } as IUser;
+  const withCollege = await withCollegeSnapshot(payload);
+  const toCreate = {
+    ...withCollege,
+    whatsappNumber: normalizeBdMobile(withCollege.whatsappNumber),
+    id,
+    role: 'student',
+    authProvider: 'local' as const,
+  } as IUser;
 
   const newUser = await User.create(toCreate);
 
@@ -224,9 +274,13 @@ const updateUserServices = async (id: string, payload: Partial<IUser>): Promise<
 
   // findOneAndUpdate bypasses the model's pre-save hook, so a raw password
   // would be stored in plaintext → login would break. Hash it here.
-  const data: Partial<IUser> = { ...payload };
+  const data: Partial<IUser> = await withCollegeSnapshot({ ...payload });
   if (data.password) {
     data.password = await bcrypt.hash(data.password, 10);
+  }
+  // Same one-shape rule as signup, so an edited number stays searchable.
+  if (data.whatsappNumber !== undefined) {
+    data.whatsappNumber = normalizeBdMobile(data.whatsappNumber);
   }
 
   // `permissions` is NEVER writable through the generic user PATCH. That route

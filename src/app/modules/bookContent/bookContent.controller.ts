@@ -99,12 +99,35 @@ const scan = async (req: Request, res: Response) => {
 };
 
 /**
+ * The body both upload routes answer with.
+ *
+ * Shared so the two cannot drift: the admin pickers read `fileUrl` and `size`,
+ * and a field present on one route but missing from its twin is a form that
+ * breaks for one kind of asset only — the sort of thing nobody notices until a
+ * client reports it.
+ */
+const describeUpload = (file: any, fileUrl: string) => {
+  const originalName = file.originalname || 'file';
+  const ext = (originalName.split('.').pop() || '').toLowerCase();
+  const isVideo = /^(mp4|webm|mov|mkv|avi)$/.test(ext);
+
+  return {
+    fileUrl,
+    fileName: originalName,
+    fileType: ext,
+    size: file.size,
+    kind: isVideo ? 'video' : /^(png|jpe?g|webp|gif|svg)$/.test(ext) ? 'image' : 'document',
+  };
+};
+
+/**
  * POST /api/book-content/upload — PDFs, images and short answer videos.
  *
  * Files land on local disk (Cloudinary is not configured) under
- * <cwd>/uploads/materials and are served back by the static handler in app.ts.
- * In the container that path is the mounted volume, so uploads survive a
- * redeploy — without it every answer's PDF would vanish on the next push.
+ * <cwd>/uploads/protected and leave again only through the access-checked media
+ * route below. In the container that path is the mounted volume, so uploads
+ * survive a redeploy — without it every answer's PDF would vanish on the next
+ * push.
  */
 const uploadFile = async (req: Request, res: Response) => {
   try {
@@ -118,20 +141,36 @@ const uploadFile = async (req: Request, res: Response) => {
       ? `${base}/api/book-content/media/${file.filename}`
       : file.path || file.secure_url || file.url;
 
-    const originalName = file.originalname || 'file';
-    const ext = (originalName.split('.').pop() || '').toLowerCase();
-    const isVideo = /^(mp4|webm|mov|mkv|avi)$/.test(ext);
+    res.status(200).json({ success: true, data: describeUpload(file, fileUrl) });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
 
-    res.status(200).json({
-      success: true,
-      data: {
-        fileUrl,
-        fileName: originalName,
-        fileType: ext,
-        size: file.size,
-        kind: isVideo ? 'video' : /^(png|jpe?g|webp|gif|svg)$/.test(ext) ? 'image' : 'document',
-      },
-    });
+/**
+ * POST /api/book-content/upload-public — cover art, preview pages, sample PDFs.
+ *
+ * Twin of uploadFile, kept separate on purpose. Everything here is marketing:
+ * the storefront, the homepage and Facebook's link-preview crawler all fetch it
+ * with no token at all, so a cover stored behind the media route answers them
+ * with 401 and renders as a broken image for exactly the visitors it exists to
+ * attract. Landing in uploads/materials — the one directory app.ts serves
+ * statically — is what makes that work.
+ *
+ * Nothing attached to an ANSWER may be uploaded here: that is uploadFile's job,
+ * and the split is the whole reason paid figures stay paid.
+ */
+const uploadPublicFile = async (req: Request, res: Response) => {
+  try {
+    const file = (req as any).file;
+    if (!file) return res.status(400).json({ success: false, message: 'No file uploaded' });
+
+    const base = publicBaseUrl(req);
+    const fileUrl = file.filename
+      ? `${base}/uploads/materials/${file.filename}`
+      : file.path || file.secure_url || file.url;
+
+    res.status(200).json({ success: true, data: describeUpload(file, fileUrl) });
   } catch (error: any) {
     res.status(400).json({ success: false, message: error.message });
   }
@@ -278,10 +317,33 @@ const getNextUnanswered = async (req: Request, res: Response) => {
   }
 };
 
+/**
+ * PATCH /api/book-content/reorder/:level
+ *
+ * `scopeId` is optional and is the parent the caller believes it is reordering
+ * (the topic, for questions). The service rejects a payload that disagrees with
+ * it — every validation failure below is a 400 with a readable reason, never a
+ * partial write.
+ */
 const reorder = async (req: Request, res: Response) => {
   try {
-    const result = await BookContentService.reorder(req.params.level as any, req.body.items);
+    const result = await BookContentService.reorder(
+      req.params.level,
+      req.body?.items,
+      req.body?.scopeId
+    );
     res.status(200).json({ success: true, message: 'Reordered', data: result });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+/** PATCH /api/book-content/questions/:id/restore — undo a question delete. */
+const restoreQuestion = async (req: Request, res: Response) => {
+  try {
+    const result = await BookContentService.restoreQuestion(req.params.id);
+    if (!result) return res.status(404).json({ success: false, message: 'question not found' });
+    res.status(200).json({ success: true, message: 'question restored', data: result });
   } catch (error: any) {
     res.status(400).json({ success: false, message: error.message });
   }
@@ -346,6 +408,7 @@ const makeDelete = (level: Level) => async (req: Request, res: Response) => {
 export const BookContentController = {
   scan,
   uploadFile,
+  uploadPublicFile,
   serveProtectedMedia,
   getTree,
   getStats,
@@ -354,6 +417,7 @@ export const BookContentController = {
   getNextUnanswered,
   getNextTopicForReader,
   reorder,
+  restoreQuestion,
   makeCreate,
   makeUpdate,
   makeDelete,

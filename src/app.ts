@@ -39,6 +39,7 @@ import { NoticeRoutes } from './app/modules/notice/notice.route';
 import { PartnerRoutes } from './app/modules/partner/partner.route';
 import { BookContentRoutes } from './app/modules/bookContent/bookContent.routes';
 import { BookAccessRoutes } from './app/modules/bookAccess/bookAccess.routes';
+import { MedicalCollegeRoutes } from './app/modules/medicalCollege/medicalCollege.routes';
 
 const app: Application = express();
 
@@ -118,6 +119,9 @@ app.use('/api/qr', QrResourceRoutes);
 // Separate from /api/qr above, which is the older flat one-QR-per-question module.
 app.use('/api/book-content', BookContentRoutes);
 app.use('/api/book-access', BookAccessRoutes);
+// The medical-college directory students pick from at signup. Its list endpoint
+// is public because the signup form needs it before an account exists.
+app.use('/api/medical-colleges', MedicalCollegeRoutes);
 app.use('/api/orders', OrderRoutes);
 app.use('/api/attendance', AttendanceRoutes);
 app.use('/api/exams', ExamRoutes);

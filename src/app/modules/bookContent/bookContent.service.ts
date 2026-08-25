@@ -350,16 +350,149 @@ const deleteTopic = async (id: string) => BookTopic.findByIdAndUpdate(id, { isDe
 const deleteQuestion = async (id: string) =>
   BookQuestion.findByIdAndUpdate(id, { isDeleted: true });
 
+/**
+ * Undo a question delete.
+ *
+ * Questions are the one level with a delete, so they are the one level with an
+ * undo. It flips `isDeleted` and touches nothing else — the answer, images,
+ * videos and attachments were never removed by the soft delete, so they come
+ * back exactly as they were, still at the same `order` and `questionNo`.
+ *
+ * Idempotent on purpose: an admin who taps undo twice gets the same question
+ * back, not an error.
+ */
+const restoreQuestion = async (id: string) =>
+  BookQuestion.findByIdAndUpdate(id, { isDeleted: false }, { new: true });
+
 const getQuestionsByTopic = async (topicId: string) =>
   BookQuestion.find({ topicId, isDeleted: false }).sort({ order: 1 }).lean();
 
 const getTopicById = async (id: string) => BookTopic.findById(id).lean();
 
+// ─── Reorder ────────────────────────────────────────────────
+
 type ReorderLevel = 'parts' | 'chapters' | 'topics' | 'questions';
 
-const reorder = async (level: ReorderLevel, items: { _id: string; order: number }[]) => {
-  const writes = items.map(i => ({
-    updateOne: { filter: { _id: i._id }, update: { $set: { order: i.order } } },
+/**
+ * The parent each level is ordered WITHIN.
+ *
+ * `order` is never global: chapter numbering restarts inside every part and
+ * question numbering inside every topic. A payload mixing two parents is
+ * therefore not merely odd, it is meaningless — which is what makes "every id
+ * must share one parent" a rule the route can enforce rather than a guess.
+ */
+const REORDER_PARENT = {
+  parts: 'bookId',
+  chapters: 'partId',
+  topics: 'chapterId',
+  questions: 'topicId',
+} as const;
+
+const isReorderLevel = (value: string): value is ReorderLevel =>
+  Object.prototype.hasOwnProperty.call(REORDER_PARENT, value);
+
+/**
+ * The requested rows with the parent each one actually belongs to.
+ *
+ * Deleted rows are left out, so a payload naming one is short and gets
+ * rejected below rather than quietly resurrecting an `order` on it.
+ */
+const findReorderTargets = async (
+  level: ReorderLevel,
+  ids: string[]
+): Promise<{ _id: string; parent: string }[]> => {
+  const filter = { _id: { $in: ids }, isDeleted: false };
+  switch (level) {
+    case 'parts':
+      return (await BookPart.find(filter).select('bookId').lean()).map(d => ({
+        _id: String(d._id),
+        parent: String(d.bookId),
+      }));
+    case 'chapters':
+      return (await BookChapter.find(filter).select('partId').lean()).map(d => ({
+        _id: String(d._id),
+        parent: String(d.partId),
+      }));
+    case 'topics':
+      return (await BookTopic.find(filter).select('chapterId').lean()).map(d => ({
+        _id: String(d._id),
+        parent: String(d.chapterId),
+      }));
+    case 'questions':
+      return (await BookQuestion.find(filter).select('topicId').lean()).map(d => ({
+        _id: String(d._id),
+        parent: String(d.topicId),
+      }));
+  }
+};
+
+/**
+ * Write a new `order` across one parent's children.
+ *
+ * Everything before the bulkWrite is validation, and it is not decoration: the
+ * route used to take any ids at all and set `order` on whatever they matched,
+ * so a payload naming questions from three different books scrambled all three
+ * — silently, and with no way to tell afterwards what the old order had been.
+ * A reorder now names one parent's rows or it does not happen.
+ *
+ * `scopeId` is the caller stating which parent it believes it is reordering.
+ * It is optional, but when given it must agree: that is what turns a client
+ * bug (stale topic in hand, ids from the topic it just left) into a 400
+ * instead of a silent rewrite of the wrong topic.
+ */
+const reorder = async (level: string, items: unknown, scopeId?: unknown) => {
+  if (!isReorderLevel(level)) throw new Error(`Unknown reorder level: ${level}`);
+  const parentKey = REORDER_PARENT[level];
+
+  // bulkWrite([]) throws a raw driver error ("Invalid BulkOperation, Batch
+  // cannot be empty"), so an absent or empty list has to be caught here to come
+  // back as a sentence rather than as mongo internals.
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new Error('items must be a non-empty array of { _id, order }');
+  }
+
+  const requested = items.map(raw => {
+    const { _id, order } = (raw ?? {}) as { _id?: unknown; order?: unknown };
+    const id = String(_id ?? '');
+    if (!Types.ObjectId.isValid(id)) {
+      throw new Error(`items contains an invalid _id: ${id || '(missing)'}`);
+    }
+    const position = Number(order);
+    if (!Number.isFinite(position)) {
+      throw new Error(`items contains a non-numeric order for ${id}`);
+    }
+    return { _id: id, order: position };
+  });
+
+  const ids = requested.map(i => i._id);
+  // Two entries for one row would leave the winner decided by write order.
+  if (new Set(ids).size !== ids.length) throw new Error('items names the same _id twice');
+
+  const targets = await findReorderTargets(level, ids);
+  if (targets.length !== ids.length) {
+    const found = new Set(targets.map(t => t._id));
+    const missing = ids.filter(id => !found.has(id));
+    throw new Error(`items names ${level} that do not exist: ${missing.join(', ')}`);
+  }
+
+  const parents = new Set(targets.map(t => t.parent));
+  if (parents.size !== 1) {
+    throw new Error(`every one of the ${level} must belong to the same ${parentKey}`);
+  }
+  const [parent] = parents;
+  if (scopeId !== undefined && scopeId !== null && String(scopeId) !== parent) {
+    throw new Error(`those ${level} do not belong to ${parentKey} ${String(scopeId)}`);
+  }
+
+  // The parent is part of every filter, not just a precondition checked above:
+  // the write itself is then incapable of reaching outside the one parent, so
+  // a document that moved between the check and the write cannot be caught by
+  // it either.
+  const writes = requested.map(i => ({
+    updateOne: {
+      filter: { _id: i._id, [parentKey]: parent },
+      update: { $set: { order: i.order } },
+    },
   }));
 
   // Dispatched per level rather than through a lookup table: the four models
@@ -378,11 +511,9 @@ const reorder = async (level: ReorderLevel, items: { _id: string; order: number 
     case 'questions':
       await BookQuestion.bulkWrite(writes);
       break;
-    default:
-      throw new Error(`Unknown reorder level: ${level}`);
   }
 
-  return { updated: items.length };
+  return { updated: requested.length, [parentKey]: parent };
 };
 
 /**
@@ -573,6 +704,7 @@ export const BookContentService = {
   deleteChapter,
   deleteTopic,
   deleteQuestion,
+  restoreQuestion,
   getQuestionsByTopic,
   getTopicById,
   reorder,

@@ -50,6 +50,24 @@ async function startServer() {
     }
   }
 
+  // ─── Seed the medical-college directory, once ──────────────────
+  //
+  // Students pick their college from this list at signup, so it has to exist
+  // before the first signup — not after someone remembers to run a script.
+  // Insert-only: a name or district the admin corrected in the panel is never
+  // overwritten by a later deploy. Non-fatal for the same reason as above.
+  if (dbReady) {
+    try {
+      const { MedicalCollegeService } = await import(
+        './app/modules/medicalCollege/medicalCollege.service'
+      );
+      const { inserted } = await MedicalCollegeService.seedFromFile();
+      if (inserted) console.log(`🎓 Medical college directory — ${inserted} added.`);
+    } catch (error) {
+      console.error('⚠️  College seed failed (server still starting):', error);
+    }
+  }
+
   app.listen(PORT, () => {
     console.log(`🚀 Sabbir Book Server is running on http://localhost:${PORT}`);
   });

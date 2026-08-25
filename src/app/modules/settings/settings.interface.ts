@@ -54,6 +54,11 @@ export interface ISiteSettings {
     deliveryNote: string;
     orderSupportPhone: string;
 
+    // Landing page
+    landingBookSlug: string;
+    landingHeadline: string;
+    landingSubheadline: string;
+
     createdAt?: Date;
     updatedAt?: Date;
 }

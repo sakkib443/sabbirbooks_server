@@ -55,6 +55,10 @@ async function main() {
     firstName: 'Device',
     lastName: 'Tester',
     email: 'device.test@example.com',
+    // Required at signup since the shop started reaching customers on WhatsApp.
+    // Without it registration 400s and every assertion below fails for a reason
+    // that has nothing to do with device sessions.
+    whatsappNumber: '01712345678',
     password: 'pass1234',
   };
 
@@ -131,6 +135,7 @@ async function main() {
     lastName: 'Login',
     email: 'phone.login@example.com',
     phoneNumber: '01711111111',
+    whatsappNumber: '01799999999',
     password: 'pass1234',
   };
   await api().post('/api/auth/register').send(phoneUser);

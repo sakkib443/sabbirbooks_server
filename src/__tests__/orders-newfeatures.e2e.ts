@@ -66,9 +66,18 @@ async function main() {
     Book.create({ id, title: `Book ${id}`, slug, price: 100, format: 'printed', stock: 500 });
 
   const registerLogin = async (email: string, device: string, role?: string) => {
+    // whatsappNumber is required at signup — every customer is reached there
+    // about their order. A fixture without one gets a 400 and every assertion
+    // below it fails for a reason that has nothing to do with orders.
     await api()
       .post('/api/auth/register')
-      .send({ firstName: 'T', lastName: 'U', email, password: 'pass1234' });
+      .send({
+        firstName: 'T',
+        lastName: 'U',
+        email,
+        password: 'pass1234',
+        whatsappNumber: '01712345678',
+      });
     if (role) await User.updateOne({ email }, { role });
     const res = await api()
       .post('/api/auth/login')

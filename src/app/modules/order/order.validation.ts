@@ -9,6 +9,10 @@ const shippingAddressSchema = z.object({
   // Courier zone. Optional here and defaulted server-side to the dearer zone, so
   // an old client that never sends it cannot under-pay the delivery charge.
   area: z.enum(['inside-dhaka', 'outside-dhaka']).optional(),
+  // Geography, prefilled from the buyer's college. When a district is sent it
+  // decides the courier zone, so `area` above becomes advisory — see createOrder.
+  district: z.string().optional(),
+  division: z.string().optional(),
   note: z.string().optional(),
 });
 

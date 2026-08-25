@@ -1,3 +1,12 @@
+// One selling point on the book's landing page. `weight` orders them (bigger =
+// louder) and `highlight` paints one in the accent red, so the shop owner can
+// re-arrange the pitch from the admin form without a deploy.
+export interface IBookFeature {
+  text: string;
+  weight?: number;
+  highlight?: boolean;
+}
+
 // Book Interface: catalog book (printed or digital) এর ডাটার ধরন নির্ধারণ করে
 export interface IBook {
   id: number;
@@ -29,6 +38,22 @@ export interface IBook {
 
   status?: 'draft' | 'published' | 'archived';
   isFeatured?: boolean;
+
+  // ── Pre-order ──
+  // The book is sold before the print run exists. Every field below is optional
+  // so the thousands of already-published books keep loading untouched.
+  isPreOrder?: boolean;
+  // Percent knocked off this book's lines at checkout while it is a pre-order.
+  // Per-book rather than a site-wide constant: an early title may be discounted
+  // harder than a reprint.
+  preOrderDiscountPercent?: number;
+  // Free-text promise shown next to the buy button ("১৫ সেপ্টেম্বর থেকে ডেলিভারি").
+  preOrderNote?: string;
+  expectedReleaseDate?: Date;
+
+  // ── Landing page content ──
+  promoVideoUrl?: string;
+  features?: IBookFeature[];
 
   rating?: number;
   totalSold?: number;

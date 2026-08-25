@@ -53,6 +53,18 @@ const quoteDeliveryCharge = async (opts: {
   return Math.max(0, Math.round(charge + codExtra));
 };
 
+/**
+ * Which courier zone a district belongs to.
+ *
+ * Deliberately an exact match rather than a fuzzy "does it look like Dhaka"
+ * test. Every district we fail to recognise lands on the DEARER zone, which is
+ * the only safe direction to be wrong in: guessing the other way would silently
+ * under-charge the shop on every order from a district spelt in a way we did
+ * not anticipate, and nobody would notice until the courier bills arrived.
+ */
+const areaForDistrict = (district: string): TDeliveryArea =>
+  district.trim() === 'ঢাকা' ? 'inside-dhaka' : 'outside-dhaka';
+
 /** Which payment methods the shop currently accepts. */
 const getEnabledPaymentMethods = async (): Promise<{ cod: boolean; online: boolean }> => {
   const s: any = await SettingsService.getSettingsService();
@@ -68,6 +80,12 @@ const getEnabledPaymentMethods = async (): Promise<{ cod: boolean; online: boole
 // computes subtotal/delivery/total server-side, and enforces shipping + stock
 // for printed items.
 //
+// Nothing about the money is read from `payload`. It carries book references,
+// quantities, an address and a payment method — that is the whole of it. A body
+// that also contains `discount`, `subtotal` or `total` is not rejected, it is
+// simply never consulted, because every one of those is recomputed below and
+// only the computed locals are written to the document.
+//
 // The order is born `pending` either way. What differs is what happens next:
 //   manual → buyer submits a TrxID, admin verifies it
 //   cod    → admin confirms the order, then the courier collects the cash
@@ -82,6 +100,11 @@ const createOrder = async (
   const items: IOrder['items'] = [];
   let hasPrinted = false;
   let hasDigital = false;
+  let hasPreOrder = false;
+  // Accumulated unrounded so the whole order rounds once at the end — rounding
+  // each line and summing drifts by a taka per line against what the client
+  // showed the buyer.
+  let preOrderDiscount = 0;
 
   for (const line of payload.items) {
     const qty = line.quantity && line.quantity > 0 ? line.quantity : 1;
@@ -90,9 +113,15 @@ const createOrder = async (
       throw new Error(`Book not found: ${line.bookSlugOrId}`);
     }
 
+    const isPreOrderLine = book.isPreOrder === true;
+    if (isPreOrderLine) hasPreOrder = true;
+
     if (book.format === 'printed') {
       hasPrinted = true;
-      if ((book.stock ?? 0) < qty) {
+      // A pre-order is sold before the print run exists, so there is no stock to
+      // check — gating on it would reject every single pre-order, which is the
+      // entire point of the feature. Ordinary titles keep the check.
+      if (!isPreOrderLine && (book.stock ?? 0) < qty) {
         throw new Error(`Insufficient stock for "${book.title}" (available: ${book.stock ?? 0})`);
       }
     } else {
@@ -101,6 +130,16 @@ const createOrder = async (
 
     // Effective unit price = offer price if set, else base price (0 when unset).
     const unitPrice = book.offerPrice != null ? book.offerPrice : (book.price ?? 0);
+
+    if (isPreOrderLine) {
+      // Clamped here as well as in the book schema. The schema's min/max only
+      // guards writes that went through it; this number comes off a stored
+      // document and is about to be subtracted from a real invoice, so a row
+      // that predates the limits (or was patched straight in the shell) must
+      // not be able to price the order.
+      const pct = Math.min(90, Math.max(0, Number(book.preOrderDiscountPercent ?? 25) || 0));
+      preOrderDiscount += (unitPrice * qty * pct) / 100;
+    }
 
     items.push({
       book: book._id as any,
@@ -137,11 +176,23 @@ const createOrder = async (
     throw new Error('Online payment is currently unavailable');
   }
 
-  const area: TDeliveryArea =
-    payload.shippingAddress?.area === 'inside-dhaka' ? 'inside-dhaka' : 'outside-dhaka';
+  // A district is real geography, so it — not the client's guess at a billing
+  // bucket — decides the zone whenever we have one. Without a district we keep
+  // the old behaviour: honour an explicit `area`, else the dearer zone. Note
+  // that the derivation can only reach the cheap zone through an exact match on
+  // a district the server itself recognises; every other string, including one
+  // sent alongside `area: 'inside-dhaka'`, resolves to outside-dhaka.
+  const district = payload.shippingAddress?.district?.trim();
+  const area: TDeliveryArea = district
+    ? areaForDistrict(district)
+    : payload.shippingAddress?.area === 'inside-dhaka'
+      ? 'inside-dhaka'
+      : 'outside-dhaka';
 
   const subtotal = items.reduce((sum, it) => sum + it.price * it.quantity, 0);
-  const discount = 0;
+  // Whole taka: nobody hands a courier 62.5tk, and the client renders this row
+  // verbatim.
+  const discount = Math.round(preOrderDiscount);
   const deliveryCharge = await quoteDeliveryCharge({
     hasPrinted,
     area,
@@ -165,6 +216,7 @@ const createOrder = async (
     discount,
     deliveryCharge,
     total,
+    isPreOrder: hasPreOrder,
     // COD records its method up front — there is no later "pay" step to set it,
     // and the admin queue filters on it.
     payment: method === 'cod' ? { method: 'cod', status: 'pending' } : { status: 'pending' },
@@ -422,6 +474,13 @@ const payWithSslcommerz = async (id: string, userId: string) => {
  * because a COD order reserves stock when the admin confirms it and only turns
  * 'paid' at delivery; keying off payment status decremented the same copies on
  * both transitions. Old orders have no flag, so `!== true` is the right test.
+ *
+ * Pre-orders are decremented here exactly like anything else, and are allowed to
+ * drive `stock` negative. That is deliberate: before the print run exists there
+ * is no true stock figure to protect, and -80 is genuinely more useful than 0 —
+ * it is the count of copies already sold that the run has to cover. Clamping it
+ * at zero would throw that number away, and refusing the decrement would leave
+ * `totalSold` lying about how many were shipped.
  */
 const applyStockOnce = async (order: any): Promise<void> => {
   if (order.stockAdjusted === true) return;

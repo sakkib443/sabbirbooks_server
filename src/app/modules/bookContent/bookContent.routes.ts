@@ -2,7 +2,7 @@ import express from 'express';
 import rateLimit from 'express-rate-limit';
 import { BookContentController } from './bookContent.controller';
 import { authMiddleware, authorize, requireCapability } from '../../middlewares/auth';
-import { uploadProtectedLocal } from '../../config/localUpload';
+import { uploadFileLocal, uploadProtectedLocal } from '../../config/localUpload';
 
 const router = express.Router();
 
@@ -63,6 +63,20 @@ router.post(
   BookContentController.uploadFile
 );
 
+// Cover art, preview pages and sample PDFs → uploads/materials, which
+// express.static hands to anyone. Same admin guard as /upload — only staff may
+// write files — but the opposite destination, because these have to be READABLE
+// by people who own nothing: the storefront, the homepage and Facebook's
+// link-preview crawler all fetch them anonymously. Uploading a cover through
+// /upload above is what turned it into a 401 and left the admin staring at a
+// broken image.
+router.post(
+  '/upload-public',
+  ...admin,
+  uploadFileLocal.single('file'),
+  BookContentController.uploadPublicFile
+);
+
 for (const level of ['part', 'chapter', 'topic', 'question'] as const) {
   router.post(`/${level}s`, ...admin, BookContentController.makeCreate(level));
   router.patch(`/${level}s/:id`, ...admin, BookContentController.makeUpdate(level));
@@ -72,5 +86,14 @@ for (const level of ['part', 'chapter', 'topic', 'question'] as const) {
 // codes (topics directly, parts and chapters transitively) — deleting any of
 // them would turn a real paper QR into a dead end, so the routes do not exist.
 router.delete('/questions/:id', ...adminDelete, BookContentController.makeDelete('question'));
+
+// Undo for the line above, and guarded identically. The delete is soft, so the
+// document is still there — this is the only thing that lets the admin who just
+// misclicked get the answer and its media back instead of retyping them.
+//
+// adminDelete, not admin: restoring is one half of a delete, and a role that is
+// deliberately not trusted to remove a question has no business deciding which
+// removed ones come back.
+router.patch('/questions/:id/restore', ...adminDelete, BookContentController.restoreQuestion);
 
 export const BookContentRoutes = router;

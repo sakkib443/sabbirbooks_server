@@ -27,6 +27,30 @@ const bookBodySchema = z.object({
   status: z.enum(['draft', 'published', 'archived']).optional(),
   isFeatured: z.boolean().optional(),
 
+  // ── Pre-order ──
+  // These MUST be listed here even though they are all optional: validateRequest
+  // discards zod's parsed output and forwards the raw body, so an unlisted field
+  // is not stripped — it reaches Mongoose, which drops it silently under strict
+  // mode. A field missing from this schema half-works, which is worse than either.
+  isPreOrder: z.boolean().optional(),
+  preOrderDiscountPercent: z.number().min(0).max(90).optional(),
+  preOrderNote: z.string().optional(),
+  // An ISO date string from the admin form; null/'' when the admin clears it.
+  expectedReleaseDate: z.union([z.string(), z.null()]).optional(),
+
+  // ── Landing page content ──
+  // Not .url(): this is either a YouTube link or a path to an uploaded file.
+  promoVideoUrl: z.string().optional(),
+  features: z
+    .array(
+      z.object({
+        text: z.string().min(1),
+        weight: z.number().optional(),
+        highlight: z.boolean().optional(),
+      })
+    )
+    .optional(),
+
   rating: z.number().min(0).max(5).optional(),
   totalSold: z.number().min(0).optional(),
 });

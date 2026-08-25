@@ -237,7 +237,21 @@ export const updateOwnProfileController = async (req: Request, res: Response) =>
   try {
     const userId = (req as any).user?._id;
     if (!userId) return res.status(401).json({ success: false, message: 'Unauthorized' });
-    const allowed = ['firstName', 'lastName', 'phoneNumber', 'location', 'image'] as const;
+    // What a user may change about themselves. WhatsApp and college are here
+    // because this is also the endpoint the "complete your profile" step calls
+    // after a Google sign-in, which has no other way to supply them.
+    const allowed = [
+      'firstName',
+      'lastName',
+      'phoneNumber',
+      'whatsappNumber',
+      'medicalCollege',
+      'medicalCollegeName',
+      'district',
+      'division',
+      'location',
+      'image',
+    ] as const;
     const payload: any = {};
     allowed.forEach((k) => { if (req.body[k] !== undefined) payload[k] = req.body[k]; });
     const updated = await UserService.updateUserServices(String(userId), payload);

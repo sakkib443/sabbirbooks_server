@@ -6,6 +6,13 @@ export interface IUser {
   firstName: string;
   lastName?: string;
   phoneNumber?: string;
+  /** Required of students, enforced at signup rather than in the schema. */
+  whatsappNumber?: string;
+  /** ObjectId of a MedicalCollege; the three fields below snapshot it. */
+  medicalCollege?: string;
+  medicalCollegeName?: string;
+  district?: string;
+  division?: string;
   location?: string;
   gender?: 'male' | 'female' | 'other';
   password?: string;

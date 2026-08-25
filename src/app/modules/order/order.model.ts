@@ -51,6 +51,12 @@ const shippingAddressSchema = new Schema(
       enum: ['inside-dhaka', 'outside-dhaka'],
       default: 'outside-dhaka',
     },
+    // Where the parcel goes, as opposed to `area` above, which is only the
+    // billing zone the courier fee is looked up by. Kept as free text (not an
+    // enum) because the buyer may type a district the college directory has
+    // never heard of, and refusing their address over a spelling is not worth it.
+    district: { type: String, trim: true, default: '' },
+    division: { type: String, trim: true, default: '' },
     note: { type: String },
   },
   { _id: false }
@@ -99,6 +105,11 @@ const orderSchema = new Schema<IOrder>(
       ],
       default: 'pending',
     },
+
+    // Set when any line was a pre-order at checkout. Drives the "pre-order" badge
+    // on the admin queue and the buyer's order list; default false means every
+    // order written before this feature reads back as an ordinary order.
+    isPreOrder: { type: Boolean, default: false },
 
     // Set the first time stock is taken off the shelf for this order. Payment
     // status alone can no longer answer "have we already decremented?" — a COD
