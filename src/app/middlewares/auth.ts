@@ -30,6 +30,33 @@ export const authMiddleware = (req: Request, res: Response, next: NextFunction) 
 };
 
 /**
+ * Same as authMiddleware, but a missing or bad token is not an error.
+ *
+ * For routes that serve BOTH a stranger and a signed-in reader from one URL —
+ * the QR scan endpoint, where a free chapter is public and everything else is
+ * not. The route still gets req.user when a token is present, so the handler
+ * can widen what it returns; it just no longer refuses the request outright.
+ *
+ * This does not decide access. The handler must still gate paid content on
+ * req.user itself — this middleware only stops the door being slammed before
+ * the handler is reached.
+ */
+export const optionalAuth = (req: Request, _res: Response, next: NextFunction) => {
+  const authHeader = req.headers.authorization;
+
+  if (authHeader?.startsWith('Bearer ')) {
+    try {
+      (req as any).user = jwt.verify(authHeader.split(' ')[1], config.jwt.access_secret);
+    } catch {
+      // An expired token is treated exactly like no token: the visitor gets the
+      // free view instead of a 401 they cannot act on from a public page.
+    }
+  }
+
+  next();
+};
+
+/**
  * Role-based Authorization middleware.
  * Usage: authorize('admin', 'mentor') → only these roles + superAdmin can access.
  * superAdmin always has access.

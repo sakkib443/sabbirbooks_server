@@ -63,10 +63,10 @@ const verifyBearerUserId = (token: string): string | null => {
  */
 const scan = async (req: Request, res: Response) => {
   try {
+    // No 401 up front: a free chapter is readable by a stranger, so whether the
+    // request is allowed depends on the topic, not on the header. The service
+    // decides, and answers 'login_required' when a token really was needed.
     const userId = (req as any).user?._id;
-    if (!userId) {
-      return res.status(401).json({ success: false, message: 'Unauthorized access' });
-    }
 
     const result = await BookContentService.scanTopic(req.params.qrCode, userId);
 
@@ -79,6 +79,15 @@ const scan = async (req: Request, res: Response) => {
         success: false,
         message: 'Your book has not been delivered yet',
         code: 'BOOK_AWAITING_DELIVERY',
+        book: result.book,
+      });
+    }
+
+    if (!result.ok && result.reason === 'login_required') {
+      return res.status(401).json({
+        success: false,
+        message: 'Please sign in to read this topic',
+        code: 'LOGIN_REQUIRED',
         book: result.book,
       });
     }
@@ -405,8 +414,25 @@ const makeDelete = (level: Level) => async (req: Request, res: Response) => {
   }
 };
 
+/**
+ * GET /api/book-content/outline/:bookIdOrSlug — the public table of contents.
+ *
+ * 200 with null data for an unknown book rather than 404: the shop renders this
+ * inside a page that must not fail, and "this book has no outline" and "no such
+ * book" lead to the same (hidden) section.
+ */
+const getOutline = async (req: Request, res: Response) => {
+  try {
+    const data = await BookContentService.getOutline(req.params.bookIdOrSlug);
+    return res.status(200).json({ success: true, data });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 export const BookContentController = {
   scan,
+  getOutline,
   uploadFile,
   uploadPublicFile,
   serveProtectedMedia,

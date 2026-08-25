@@ -150,6 +150,15 @@ app.use(
     setHeaders: (res) => {
       res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
       res.setHeader('Access-Control-Allow-Origin', '*');
+      // helmet's defaults are `frame-ancestors 'self'` plus X-Frame-Options:
+      // SAMEORIGIN. Right for the API's own pages, wrong for these files: the
+      // free sample PDF is shown in an <iframe> on the shop, which is a
+      // different origin, so both headers block the one thing on the landing
+      // page a buyer can check for themselves. These are public assets that
+      // exist to be embedded — opt them out here rather than weakening the
+      // whole app's CSP.
+      res.removeHeader('X-Frame-Options');
+      res.setHeader('Content-Security-Policy', 'frame-ancestors *');
       // Uploaded files are content-addressed by timestamp, so they never change
       // under the same name — cache them hard.
       res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
