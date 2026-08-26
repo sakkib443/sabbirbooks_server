@@ -254,7 +254,17 @@ async function main() {
   // Nothing above may have disturbed the one thing printed on paper.
   const finalTopic = await BookTopic.findById(topic._id).lean();
   check('the printed QR code is still the same after everything', finalTopic?.qrCode === printedCode);
-  check('and still resolves', (await BookContentService.scanTopic(printedCode)).ok !== undefined);
+  // Still resolves to a topic — the refusal is 'no_access' (this fixture has no
+  // order), not 'not_found', which is what a broken or reissued code would give.
+  const stillResolves = await BookContentService.scanTopic(
+    printedCode,
+    String(new mongoose.Types.ObjectId())
+  );
+  check(
+    'and still resolves to a real topic',
+    stillResolves.ok === false && stillResolves.reason === 'no_access',
+    stillResolves
+  );
 
   await mongoose.disconnect();
   await mongod.stop();

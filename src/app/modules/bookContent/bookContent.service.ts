@@ -14,14 +14,7 @@ export type ScanResult =
   // (zero) content as 'no_access'. It exists only so the reader is told
   // "your book is on the way" instead of "buy this book", which a customer
   // who already paid would reasonably act on by paying again.
-  // 'login_required' is what an anonymous visitor gets for a chapter that is
-  // not free. Distinct from 'no_access' because the fix is different: sign in,
-  // versus buy the book.
-  | {
-      ok: false;
-      reason: 'no_access' | 'awaiting_delivery' | 'login_required';
-      book: Record<string, unknown> | null;
-    };
+  | { ok: false; reason: 'no_access' | 'awaiting_delivery'; book: Record<string, unknown> | null };
 
 /**
  * Resolve a printed QR code into that topic's questions.
@@ -30,7 +23,7 @@ export type ScanResult =
  * serialised — "only the scanned topic is visible" is a property of this
  * function, not of the page that renders it.
  */
-const scanTopic = async (qrCode: string, userId?: string): Promise<ScanResult> => {
+const scanTopic = async (qrCode: string, userId: string): Promise<ScanResult> => {
   const topic = await BookTopic.findOne({
     qrCode: qrCode.toUpperCase().trim(),
     isDeleted: false,
@@ -39,42 +32,29 @@ const scanTopic = async (qrCode: string, userId?: string): Promise<ScanResult> =
 
   if (!topic) return { ok: false, reason: 'not_found' };
 
-  // A free chapter lets ANY visitor read its topics — signed in or not, owning
-  // the book or not. The check happens BEFORE the paid-access probe so a locked
-  // user is not turned away from the sample.
+  // Owning the book is the only way in. There is no free-chapter bypass and no
+  // anonymous path: what a QR opens is the thing the book is sold for, so a
+  // visitor who has not bought it sees the "buy this book" card instead — even
+  // for a chapter an admin has flagged isFree. That flag no longer grants
+  // anything; the free sample the shop offers is the preview PDF, which is a
+  // separate file served from the public uploads mount.
   //
-  // Open to strangers on purpose: the shop's landing page links straight here
-  // as its "read a free chapter" proof, and a sample that demands a signup
-  // first is not a sample. Only chapters an admin has explicitly flagged isFree
-  // are reachable this way; every other topic still needs a paid account.
-  //
-  // isDeleted/isPublished are part of the WHERE, not an afterthought: a chapter
-  // that was retired while still flagged isFree would otherwise keep handing
-  // out free content forever, and unpublishing it would be no way to stop that.
-  const freeChapter = await BookChapter.findOne({
-    _id: topic.chapterId,
-    isFree: true,
-    isDeleted: false,
-    isPublished: true,
-  })
-    .select('_id')
-    .lean();
-  const isFreeChapter = Boolean(freeChapter);
-
-  const allowed =
-    isFreeChapter || (Boolean(userId) && (await BookAccessService.hasBookAccess(userId!, topic.bookId)));
+  // The id is validated before it is used: hasBookAccess queries by userId, and
+  // mongoose answers a malformed one with a CastError — a 500 where a refusal
+  // belongs. The route's authMiddleware means that should never happen, but
+  // "the gate throws instead of saying no" is the wrong failure for the one
+  // function standing between a stranger and the paid content.
+  const identified = Boolean(userId) && Types.ObjectId.isValid(String(userId));
+  const allowed = identified && (await BookAccessService.hasBookAccess(userId, topic.bookId));
   if (!allowed) {
     // Enough to render a "buy this book" card, and nothing from inside it.
-    // hasPendingDelivery is skipped for a stranger — there is no order to look
-    // up, and it would be one query per scan on the public path.
     const [book, awaitingDelivery] = await Promise.all([
       Book.findById(topic.bookId).select('title slug author coverImage price offerPrice').lean(),
-      userId ? BookAccessService.hasPendingDelivery(userId, topic.bookId) : Promise.resolve(false),
+      identified ? BookAccessService.hasPendingDelivery(userId, topic.bookId) : Promise.resolve(false),
     ]);
-    const reason = !userId ? 'login_required' : awaitingDelivery ? 'awaiting_delivery' : 'no_access';
     return {
       ok: false,
-      reason,
+      reason: awaitingDelivery ? 'awaiting_delivery' : 'no_access',
       book: book as Record<string, unknown> | null,
     };
   }
@@ -89,10 +69,7 @@ const scanTopic = async (qrCode: string, userId?: string): Promise<ScanResult> =
   ]);
 
   await Promise.all([
-    // Per-user scan history only exists for a signed-in reader. An anonymous
-    // free-chapter view still counts towards the topic's scanCount, which is a
-    // topic statistic rather than a record of who read what.
-    userId ? BookAccessService.recordScan(userId, topic.bookId, topic._id) : Promise.resolve(),
+    BookAccessService.recordScan(userId, topic.bookId, topic._id),
     BookTopic.updateOne({ _id: topic._id }, { $inc: { scanCount: 1 } }),
   ]);
 
@@ -354,14 +331,15 @@ const createQuestion = async (payload: Record<string, unknown>) => {
  * cannot be recalled. So titles, numbers and order are immutable here, and
  * qrCode is not writable at any level — it is assigned once and never reissued.
  *
- * Two flags stay open because neither is printed anywhere:
- *   • isFree     — whether a chapter is the public sample. A marketing switch;
- *                  the shop's "read a free chapter" button depends on it.
- *   • isPublished — the ability to withdraw a chapter that should not be live.
+ * One flag stays open because it is printed nowhere: isPublished, the ability
+ * to withdraw a chapter that should not be live. isFree is still accepted so a
+ * stored value can be cleared, but it no longer grants anyone access — the free
+ * chapter preview was withdrawn, and the only sample the shop offers is the
+ * preview PDF.
  *
  * Anything else in the payload is dropped silently rather than refused: the
  * admin form posts whole objects, and rejecting the request outright would also
- * block the two flags that are legitimately being changed. The guarantee that
+ * block the flags that are legitimately being changed. The guarantee that
  * matters is that the write cannot touch structure, and stripping gives that
  * whatever the client sends.
  */
@@ -625,16 +603,7 @@ const getNextTopicForReader = async (topicId: string, userId: string) => {
     .lean();
   if (!current) return null;
 
-  const currentIsFree = await BookChapter.findOne({
-    _id: current.chapterId,
-    isFree: true,
-    isDeleted: false,
-    isPublished: true,
-  })
-    .select('_id')
-    .lean();
-  const mayReadCurrent =
-    Boolean(currentIsFree) || (await BookAccessService.hasBookAccess(userId, current.bookId));
+  const mayReadCurrent = await BookAccessService.hasBookAccess(userId, current.bookId);
   if (!mayReadCurrent) return null;
 
   // Same chapter, next in order.
@@ -702,12 +671,9 @@ const getNextTopicForReader = async (topicId: string, userId: string) => {
   if (!next) return null;
 
   const nextChapter = await BookChapter.findById(next.chapterId)
-    .select('isFree title chapterNo isDeleted isPublished')
+    .select('title chapterNo')
     .lean();
-  const nextIsFree =
-    Boolean(nextChapter?.isFree) && !nextChapter?.isDeleted && nextChapter?.isPublished !== false;
-  const allowed =
-    nextIsFree || (await BookAccessService.hasBookAccess(userId, next.bookId));
+  const allowed = await BookAccessService.hasBookAccess(userId, next.bookId);
 
   return {
     qrCode: next.qrCode,
@@ -729,9 +695,9 @@ const getNextTopicForReader = async (topicId: string, userId: string) => {
  * artwork without an account. They now live outside it and come through here.
  *
  * The file is located by finding the question that references it, which gives
- * the owning book and chapter; access is then the same rule as a scan — a free
- * chapter, or ownership of the book. Unreferenced files are refused outright,
- * so an orphaned upload is not a public bucket.
+ * the owning book; access is then the same rule as a scan — ownership of the
+ * book, and nothing else. Unreferenced files are refused outright, so an
+ * orphaned upload is not a public bucket.
  */
 const canReadProtectedMedia = async (fileName: string, userId: string): Promise<boolean> => {
   // Anchored to the end of the stored URL so "12-a.jpg" cannot match a request
@@ -748,15 +714,6 @@ const canReadProtectedMedia = async (fileName: string, userId: string): Promise<
 
   if (!question) return false;
 
-  const freeChapter = await BookChapter.findOne({
-    _id: question.chapterId,
-    isFree: true,
-    isDeleted: false,
-    isPublished: true,
-  })
-    .select('_id')
-    .lean();
-  if (freeChapter) return true;
 
   return BookAccessService.hasBookAccess(userId, question.bookId);
 };
@@ -781,9 +738,6 @@ export interface OutlineChapter {
   titleBn?: string;
   topicCount: number;
   questionCount: number;
-  isFree: boolean;
-  /** The first topic of a free chapter, so the shop can link straight into it. */
-  freeQrCode?: string;
 }
 
 export interface BookOutline {
@@ -792,21 +746,18 @@ export interface BookOutline {
     chapters: number;
     topics: number;
     questions: number;
-    freeChapters: number;
   };
-  /** First free topic in the whole book — the landing page's "read it now" link. */
-  firstFreeQrCode?: string;
   parts: { title: string; titleBn?: string; chapters: OutlineChapter[] }[];
 }
 
 /**
  * The book's table of contents, for the public shop page.
  *
- * Structure only — titles and counts. No questions, no answers, no media, and
- * no QR code except for chapters an admin flagged isFree, whose content is
- * public anyway. That exception is the point: a buyer deciding on a printed
- * book wants to see the contents and read one chapter, and both of those are
- * facts about the book rather than marketing copy.
+ * Structure only — titles and counts. No questions, no answers, no media and no
+ * QR code, at any level: this endpoint needs no token, so anything it returns is
+ * public, and a code that reaches a browser is a code that can be typed into
+ * /b/. The counts are worth publishing because they are facts about the book
+ * rather than marketing copy; the codes are the product.
  *
  * Returns null for an unknown book so the caller can render nothing instead of
  * a page of zeroes.
@@ -827,7 +778,7 @@ const getOutline = async (bookIdOrSlug: string): Promise<BookOutline | null> => 
 
   const [parts, chapters, topics] = await Promise.all([
     BookPart.find(live).select('title titleBn order').sort({ order: 1 }).lean(),
-    BookChapter.find(live).select('partId chapterNo title titleBn isFree order').sort({ order: 1 }).lean(),
+    BookChapter.find(live).select('partId chapterNo title titleBn order').sort({ order: 1 }).lean(),
     BookTopic.find(live).select('chapterId qrCode order').sort({ order: 1 }).lean(),
   ]);
 
@@ -847,10 +798,8 @@ const getOutline = async (bookIdOrSlug: string): Promise<BookOutline | null> => 
     else topicsByChapter.set(key, [t]);
   }
 
-  let firstFreeQrCode: string | undefined;
   let totalTopics = 0;
   let totalQuestions = 0;
-  let freeChapters = 0;
 
   const chaptersByPart = new Map<string, OutlineChapter[]>();
 
@@ -864,22 +813,12 @@ const getOutline = async (bookIdOrSlug: string): Promise<BookOutline | null> => 
     totalTopics += chTopics.length;
     totalQuestions += questionCount;
 
-    const isFree = Boolean(ch.isFree);
-    if (isFree) freeChapters += 1;
-
-    // Only a free chapter's code is ever serialised. A paid chapter's QR code
-    // stays out of the payload entirely rather than being filtered client side.
-    const freeQrCode = isFree ? chTopics[0]?.qrCode : undefined;
-    if (freeQrCode && !firstFreeQrCode) firstFreeQrCode = freeQrCode;
-
     const entry: OutlineChapter = {
       chapterNo: ch.chapterNo,
       title: ch.title,
       titleBn: ch.titleBn,
       topicCount: chTopics.length,
       questionCount,
-      isFree,
-      ...(freeQrCode ? { freeQrCode } : {}),
     };
 
     const key = String(ch.partId);
@@ -904,9 +843,7 @@ const getOutline = async (bookIdOrSlug: string): Promise<BookOutline | null> => 
       chapters: chapters.length,
       topics: totalTopics,
       questions: totalQuestions,
-      freeChapters,
     },
-    ...(firstFreeQrCode ? { firstFreeQrCode } : {}),
     parts: outlineParts,
   };
 };

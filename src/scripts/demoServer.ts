@@ -36,6 +36,10 @@ interface OutlineFile {
 // pointless without one free chapter to open.
 const FREE_CHAPTER_TITLE = 'Inferior Extremity';
 
+/** The live shop's public uploads mount — cover art, preview pages, sample PDF. */
+const LIVE_UPLOADS =
+  'https://sxygeronwx1p799pbax4t4lv.164.68.126.31.sslip.io/uploads/materials';
+
 async function main() {
   const mongod = await MongoMemoryServer.create();
   process.env.DATABASE_URL = mongod.getUri();
@@ -62,6 +66,13 @@ async function main() {
     stock: 500,
     status: 'published',
     isFeatured: true,
+    // The real public assets from the live shop, so the landing page can be
+    // looked at as a customer actually sees it. These are served from the
+    // world-readable uploads mount, so no token is involved.
+    coverImage: `${LIVE_UPLOADS}/1786737752647-1.png`,
+    previewImages: [`${LIVE_UPLOADS}/1786737752647-1.png`, `${LIVE_UPLOADS}/1786737752892-2.png`],
+    previewPdfUrl: `${LIVE_UPLOADS}/1786737607197-Test__Book_Format_.pdf`,
+    promoVideoUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
   });
 
   let topicsMade = 0;

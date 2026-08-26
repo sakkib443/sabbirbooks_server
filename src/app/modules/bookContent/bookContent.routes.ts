@@ -1,7 +1,7 @@
 import express from 'express';
 import rateLimit from 'express-rate-limit';
 import { BookContentController } from './bookContent.controller';
-import { authMiddleware, authorize, optionalAuth, requireCapability } from '../../middlewares/auth';
+import { authMiddleware, authorize, requireCapability } from '../../middlewares/auth';
 import { uploadFileLocal, uploadProtectedLocal } from '../../config/localUpload';
 
 const router = express.Router();
@@ -18,15 +18,18 @@ const scanLimiter = rateLimit({
 });
 
 // ─── Public ─────────────────────────────────────────────────
-// The shop's table of contents. Structure and counts only, plus the QR code of
-// any chapter an admin flagged free — see BookContentService.getOutline.
+// The shop's table of contents. Structure and counts only — no QR code at any
+// level. See BookContentService.getOutline.
 router.get('/outline/:bookIdOrSlug', BookContentController.getOutline);
 
 // ─── Reader ─────────────────────────────────────────────────
-// optionalAuth, not authMiddleware: a chapter flagged isFree is readable by a
-// stranger, which is what the shop's "read a free chapter" button opens. Paid
-// topics are still refused inside the service, and answer 401 there.
-router.get('/scan/:qrCode', scanLimiter, optionalAuth, BookContentController.scan);
+// Login required: the printed book alone is not enough.
+//
+// This briefly took optionalAuth so the shop could link a stranger straight
+// into a free chapter. The client withdrew that: what a QR opens is what the
+// book is sold for, and a visitor who has not signed in must not reach it. The
+// free sample the shop offers is the preview PDF, which is a separate file.
+router.get('/scan/:qrCode', scanLimiter, authMiddleware, BookContentController.scan);
 
 // "Next topic" navigation for the reader. Access is re-checked server side, so
 // a locked user cannot walk past a free chapter into paid content.

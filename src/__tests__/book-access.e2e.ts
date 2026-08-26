@@ -7,8 +7,9 @@
  *   printed item → content opens only at 'delivered' / 'access-granted'
  *   digital item → content opens as soon as payment is 'paid'
  *   cancelled    → never, even if the payment was taken and later refunded
- *   free chapter → readable by any signed-in user, with no order at all
- *   next-topic   → cannot be used to walk out of a free chapter into paid content
+ *   isFree       → grants NOTHING: the free-chapter preview was withdrawn, so a
+ *                  flagged chapter is as closed as any other
+ *   next-topic   → leaks no titles or codes to someone who may not read them
  *
  * Run:  npx ts-node src/__tests__/book-access.e2e.ts
  */
@@ -223,12 +224,22 @@ async function main() {
     order: 1,
   });
 
-  console.log('\n── Free chapter: open to any signed-in user ──');
+  // The client withdrew the free-chapter preview: what a QR opens is what the
+  // book is sold for, so isFree must not open a door that ownership does not.
+  // The free sample the shop offers is the preview PDF, a separate public file.
+  console.log('\n── isFree grants nothing without an order ──');
   const broke = await mkUser('broke@t.com');
   const brokeId = String(broke._id);
   {
     const r = await BookContentService.scanTopic('FREE0001', brokeId);
-    check(r.ok === true, 'free chapter QR → readable with no order');
+    check(
+      r.ok === false && r.reason === 'no_access',
+      'chapter flagged isFree → still blocked without an order'
+    );
+    check(
+      !JSON.stringify(r).includes('free answer'),
+      'and the refusal carries none of its answers'
+    );
   }
   {
     const r = await BookContentService.scanTopic('PAID0001', brokeId);
@@ -262,22 +273,33 @@ async function main() {
 
   console.log('\n── Scan payload must not leak completion stats ──');
   {
-    const r = await BookContentService.scanTopic('FREE0001', brokeId);
+    // Read as a delivered buyer — nobody else gets a payload to inspect now.
+    const reader = await mkUser('stats-reader@t.com');
+    await mkOrder(String(reader._id), {
+      status: 'delivered',
+      paymentStatus: 'paid',
+      format: 'printed',
+    });
+    const r = await BookContentService.scanTopic('FREE0001', String(reader._id));
     const data = (r as { data: Record<string, unknown> }).data;
     check(!('answeredCount' in data), 'scan payload has no answeredCount');
     check('totalCount' in data, 'scan payload still has totalCount');
   }
 
-  console.log('\n── next-topic must not be an escape hatch out of the free chapter ──');
+  console.log('\n── next-topic gives a non-buyer nothing at all ──');
   {
+    // This used to return the next topic with allowed:false, because standing
+    // in a free chapter was a legitimate place to be. With the free preview
+    // gone there is no such standing, so the answer is null — no title, no
+    // code, nothing to walk from.
     const next = await BookContentService.getNextTopicForReader(String(freeTopic._id), brokeId);
-    check(next !== null, 'next topic after the free topic is found');
-    check(next?.allowed === false, 'next topic (paid chapter) is reported as NOT allowed');
-    // And the hard guarantee: even holding the code, the scan is refused.
-    const r = await BookContentService.scanTopic(String(next?.qrCode), brokeId);
+    check(next === null, 'a user with no order gets null, not a next-topic card');
+
+    // And the hard guarantee: even holding a code, the scan is refused.
+    const r = await BookContentService.scanTopic('PAID0001', brokeId);
     check(
       r.ok === false && r.reason === 'no_access',
-      'scanning that next code directly is still refused'
+      'scanning a code directly is still refused'
     );
   }
 
@@ -305,27 +327,35 @@ async function main() {
     check(ok?.allowed === true, 'delivered buyer still gets a working next-topic link');
   }
 
-  console.log('\n── A retired free chapter must stop being free ──');
+  console.log('\n── isFree changes nothing for a buyer either ──');
   {
+    // The flag is inert in both directions: a buyer reads a flagged chapter
+    // because they bought the book, not because of the flag, and unpublishing
+    // it closes it the same way it closes any other chapter.
     const u = await mkUser('after-retire@t.com');
+    await mkOrder(String(u._id), {
+      status: 'delivered',
+      paymentStatus: 'paid',
+      format: 'printed',
+    });
     check(
       (await BookContentService.scanTopic('FREE0001', String(u._id))).ok === true,
-      'free chapter readable while published (control)'
+      'delivered buyer reads the flagged chapter (control)'
     );
 
     await BookChapter.updateOne({ _id: freeChapter._id }, { $set: { isPublished: false } });
-    const r = await BookContentService.scanTopic('FREE0001', String(u._id));
-    check(r.ok === false, 'unpublished free chapter → NO free access');
-
-    await BookChapter.updateOne(
-      { _id: freeChapter._id },
-      { $set: { isPublished: true, isDeleted: true } }
+    check(
+      (await BookContentService.scanTopic('FREE0001', String(u._id))).ok === true,
+      'unpublishing the CHAPTER does not hide a published topic from its buyer'
     );
+
+    await BookTopic.updateOne({ _id: freeTopic._id }, { $set: { isPublished: false } });
     const r2 = await BookContentService.scanTopic('FREE0001', String(u._id));
-    check(r2.ok === false, 'soft-deleted free chapter → NO free access');
+    check(r2.ok === false && r2.reason === 'not_found', 'unpublishing the TOPIC closes its code');
 
     // Restore so the fixture stays truthful if more checks are appended.
-    await BookChapter.updateOne({ _id: freeChapter._id }, { $set: { isDeleted: false } });
+    await BookTopic.updateOne({ _id: freeTopic._id }, { $set: { isPublished: true } });
+    await BookChapter.updateOne({ _id: freeChapter._id }, { $set: { isPublished: true } });
   }
 
   console.log('\n── Protected media is gated by book access ──');
