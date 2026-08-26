@@ -56,6 +56,30 @@ const stampUrlsIn = (text: string, token: string): string =>
     : text;
 
 /**
+ * Is this a `{}` literal, as opposed to an instance of some class?
+ *
+ * The walk below rebuilds every object it descends into, which destroys any
+ * value whose meaning lives in its prototype. `.lean()` returns a plain object
+ * at the TOP level, but its fields are still real BSON: `_id` is an ObjectId,
+ * `createdAt` is a Date. Rebuilding an ObjectId from its own enumerable
+ * properties yields `{ buffer: { 0: 106, 1: 142, … } }` — the raw bytes, with
+ * `toJSON()` gone, so it serialises as that blob instead of the hex string.
+ *
+ * That is not cosmetic. The admin editor puts `_id` straight into the URL it
+ * saves to, so every question PATCH went to `/questions/[object Object]` and
+ * came back 400 "Cast to ObjectId failed" — editing, deleting and uploading an
+ * image to a question were all dead, because none of them could be saved.
+ *
+ * Null-prototype objects count as plain: `Object.create(null)` is a bag of
+ * data, and refusing to walk into one would silently skip its media URLs.
+ */
+const isPlainObject = (value: unknown): value is Record<string, unknown> => {
+  if (value === null || typeof value !== 'object') return false;
+  const proto = Object.getPrototypeOf(value);
+  return proto === Object.prototype || proto === null;
+};
+
+/**
  * Append a media token to every protected-media URL in an arbitrary payload.
  *
  * Walks the object rather than naming each field: answer media hangs off
@@ -68,11 +92,12 @@ export const withMediaTokens = <T>(payload: T, userId: string): T => {
   const walk = (node: unknown): unknown => {
     if (typeof node === 'string') return stampUrlsIn(node, token);
     if (Array.isArray(node)) return node.map(walk);
-    if (node && typeof node === 'object') {
-      // Plain object rebuild — these are .lean() results, so there is no class
-      // identity or getter to preserve.
-      return Object.fromEntries(Object.entries(node as Record<string, unknown>).map(([k, v]) => [k, walk(v)]));
+    if (isPlainObject(node)) {
+      return Object.fromEntries(Object.entries(node).map(([k, v]) => [k, walk(v)]));
     }
+    // Anything else is returned untouched: no media URL can hide inside a
+    // number, a Date or an ObjectId, so there is nothing here to gain by
+    // descending into one — and everything to lose. See isPlainObject.
     return node;
   };
 

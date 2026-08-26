@@ -340,6 +340,13 @@ async function main() {
     order: 1,
   });
 
+  // Topics used to be reorderable within one chapter, and this suite pinned
+  // down the cross-chapter refusal. They are now refused outright: a topic's
+  // position is printed in the book, beside the QR code that opens it, and the
+  // print run has shipped. The stricter rule subsumes the old one — a payload
+  // naming two chapters cannot get far enough to be judged on that — so the
+  // check is now that NO topic reorder lands, whatever it names.
+  // Full coverage of the lock lives in structure-locked.e2e.ts.
   const crossChapter = await rejection(() =>
     BookContentService.reorder('topics', [
       { _id: String(topicA._id), order: 1 },
@@ -348,23 +355,29 @@ async function main() {
   );
   check(
     'topics from two chapters cannot be reordered together',
-    crossChapter !== null && /same chapterId/.test(crossChapter),
+    crossChapter !== null,
     { crossChapter }
   );
 
-  const topicSwap = await BookContentService.reorder(
-    'topics',
-    [
-      { _id: String(topicB._id), order: 1 },
-      { _id: String(topicA._id), order: 2 },
-    ],
-    String(chapter._id)
+  const topicSwap = await rejection(() =>
+    BookContentService.reorder(
+      'topics',
+      [
+        { _id: String(topicB._id), order: 1 },
+        { _id: String(topicA._id), order: 2 },
+      ],
+      String(chapter._id)
+    )
   );
-  check('topics within one chapter still reorder', topicSwap.updated === 2, topicSwap);
+  check(
+    'topics within one chapter are refused too — the order is printed',
+    topicSwap !== null && /printed/.test(topicSwap),
+    { topicSwap }
+  );
   const reorderedTopics = await BookTopic.find({ chapterId: chapter._id }).sort({ order: 1 }).lean();
   check(
-    'and the chapter reads back in the new order',
-    reorderedTopics.map(t => t.title).join(',') === 'Connective tissue,Epithelium',
+    'and the chapter still reads back in its printed order',
+    reorderedTopics.map(t => t.title).join(',') === 'Epithelium,Connective tissue',
     { titles: reorderedTopics.map(t => t.title) }
   );
 

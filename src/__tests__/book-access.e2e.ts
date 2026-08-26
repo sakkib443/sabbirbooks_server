@@ -413,6 +413,36 @@ async function main() {
       (html.match(/\?t=/g) || []).length === 2,
       'both embedded <img> URLs in answerHtml are stamped'
     );
+
+    // The walk used to rebuild EVERY object from its own properties, which
+    // turned each ObjectId into { buffer: {0:106,…} } and every Date into {}.
+    // The admin editor puts a question's _id straight into the URL it saves to,
+    // so that shipped as "PATCH /questions/[object Object]" → 400, and editing,
+    // deleting or adding an image to a question all failed with it.
+    const realId = new mongoose.Types.ObjectId();
+    const realDate = new Date('2026-08-26T10:00:00.000Z');
+    const doc = withMediaTokens(
+      {
+        _id: realId,
+        createdAt: realDate,
+        images: ['https://x.test/api/book-content/media/c.png'],
+        nested: [{ topicId: realId }],
+      },
+      String(buyer._id)
+    );
+
+    check(doc._id instanceof mongoose.Types.ObjectId, 'an ObjectId survives the walk as an ObjectId');
+    check(String(doc._id) === String(realId), 'and still stringifies to the same hex id');
+    check(
+      JSON.parse(JSON.stringify(doc))._id === String(realId),
+      'so it serialises to the hex string a URL can be built from'
+    );
+    check(doc.createdAt instanceof Date, 'a Date survives the walk as a Date');
+    check(
+      String(doc.nested[0].topicId) === String(realId),
+      'ids nested inside arrays survive too'
+    );
+    check(doc.images[0].includes('?t='), 'and media URLs are still stamped alongside them');
     check(
       html.includes('.png?t=') && html.endsWith('>'),
       'the token lands inside the src, not appended to the whole document'

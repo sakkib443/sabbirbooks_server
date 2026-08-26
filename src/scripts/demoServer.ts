@@ -115,6 +115,20 @@ async function main() {
     }
   }
 
+  // An admin, so the dashboard can be driven against this data too — the
+  // content editor is where most of the reported bugs live, and it cannot be
+  // reached without one.
+  const { User } = await import('../app/modules/user/user.model');
+  await User.create({
+    id: 'ADM-demo',
+    email: 'admin@demo.local',
+    firstName: 'Demo',
+    lastName: 'Admin',
+    password: 'demo1234',
+    role: 'admin',
+    status: 'active',
+  });
+
   const { default: app } = await import('../app');
 
   // One code from each side of the paywall, printed so the open/closed pair can

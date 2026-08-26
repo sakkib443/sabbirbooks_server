@@ -343,15 +343,63 @@ const createQuestion = async (payload: Record<string, unknown>) => {
   return question.save();
 };
 
-const updatePart = async (id: string, payload: Record<string, unknown>) =>
-  BookPart.findByIdAndUpdate(id, payload, { new: true });
+/**
+ * What may still be written on a board, chapter or topic once the book is in
+ * print — which is to say: almost nothing.
+ *
+ * The structure IS the printed book. A reader holds a paper page, points a
+ * camera at the QR beside a topic, and expects the site to show that topic
+ * under that chapter of that board. Rename or renumber any of the three and the
+ * paper and the site stop agreeing, on a print run that has already shipped and
+ * cannot be recalled. So titles, numbers and order are immutable here, and
+ * qrCode is not writable at any level — it is assigned once and never reissued.
+ *
+ * Two flags stay open because neither is printed anywhere:
+ *   • isFree     — whether a chapter is the public sample. A marketing switch;
+ *                  the shop's "read a free chapter" button depends on it.
+ *   • isPublished — the ability to withdraw a chapter that should not be live.
+ *
+ * Anything else in the payload is dropped silently rather than refused: the
+ * admin form posts whole objects, and rejecting the request outright would also
+ * block the two flags that are legitimately being changed. The guarantee that
+ * matters is that the write cannot touch structure, and stripping gives that
+ * whatever the client sends.
+ */
+const STRUCTURE_MUTABLE: Record<'part' | 'chapter' | 'topic', readonly string[]> = {
+  part: ['isPublished'],
+  chapter: ['isFree', 'isPublished'],
+  topic: ['isPublished'],
+};
 
-const updateChapter = async (id: string, payload: Record<string, unknown>) =>
-  BookChapter.findByIdAndUpdate(id, payload, { new: true });
+const onlyMutable = (level: 'part' | 'chapter' | 'topic', payload: Record<string, unknown>) => {
+  const allowed = STRUCTURE_MUTABLE[level];
+  return Object.fromEntries(Object.entries(payload).filter(([key]) => allowed.includes(key)));
+};
 
-/** qrCode is stripped: once printed, a topic's code can never change. */
+/** Throws rather than reporting a silent success on a payload that changes nothing. */
+const assertSomethingToWrite = (level: string, safe: Record<string, unknown>) => {
+  if (Object.keys(safe).length === 0) {
+    throw new Error(
+      `A ${level}'s title, number and order are permanent once the book is printed — the QR codes on paper point at them. Only questions inside a topic can be edited.`
+    );
+  }
+};
+
+const updatePart = async (id: string, payload: Record<string, unknown>) => {
+  const safe = onlyMutable('part', payload);
+  assertSomethingToWrite('board', safe);
+  return BookPart.findByIdAndUpdate(id, safe, { new: true });
+};
+
+const updateChapter = async (id: string, payload: Record<string, unknown>) => {
+  const safe = onlyMutable('chapter', payload);
+  assertSomethingToWrite('chapter', safe);
+  return BookChapter.findByIdAndUpdate(id, safe, { new: true });
+};
+
 const updateTopic = async (id: string, payload: Record<string, unknown>) => {
-  const { qrCode: _ignored, ...safe } = payload;
+  const safe = onlyMutable('topic', payload);
+  assertSomethingToWrite('topic', safe);
   return BookTopic.findByIdAndUpdate(id, safe, { new: true });
 };
 
@@ -411,6 +459,20 @@ const isReorderLevel = (value: string): value is ReorderLevel =>
   Object.prototype.hasOwnProperty.call(REORDER_PARENT, value);
 
 /**
+ * Reordering is for questions and nothing else.
+ *
+ * `order` decides the sequence a reader is shown, and for boards, chapters and
+ * topics that sequence is printed — moving one silently disagrees with every
+ * copy already in a student's hands. Questions are the one level below the QR
+ * code, so rearranging them changes nothing on paper.
+ *
+ * Enforced here rather than by dropping the other three from REORDER_PARENT,
+ * because that table is also what tells `reorder` which parent to scope its
+ * writes to; the levels must stay described even though three are refused.
+ */
+const REORDERABLE: readonly ReorderLevel[] = ['questions'];
+
+/**
  * The requested rows with the parent each one actually belongs to.
  *
  * Deleted rows are left out, so a payload naming one is short and gets
@@ -461,6 +523,11 @@ const findReorderTargets = async (
  */
 const reorder = async (level: string, items: unknown, scopeId?: unknown) => {
   if (!isReorderLevel(level)) throw new Error(`Unknown reorder level: ${level}`);
+  if (!REORDERABLE.includes(level)) {
+    throw new Error(
+      `${level} cannot be reordered — their order is printed in the book and the QR codes on paper depend on it. Only questions inside a topic can be rearranged.`
+    );
+  }
   const parentKey = REORDER_PARENT[level];
 
   // bulkWrite([]) throws a raw driver error ("Invalid BulkOperation, Batch
