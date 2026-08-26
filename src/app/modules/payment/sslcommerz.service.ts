@@ -79,7 +79,26 @@ const initSession = async (payload: {
     body: formData,
   });
 
-  return response.json();
+  // Read as text first: a misconfigured store or a wrong URL makes SSLCommerz
+  // reply with an HTML error page, and response.json() on that throws the raw
+  // "Unexpected token '<'" the buyer should never see. Turn it into a clear
+  // message instead.
+  const raw = await response.text();
+  let data: any;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    throw new Error(
+      `The payment provider did not return a valid session (HTTP ${response.status}). ` +
+        `Please check the store credentials and try again.`
+    );
+  }
+  if (data?.status !== 'SUCCESS' || !data?.GatewayPageURL) {
+    throw new Error(
+      data?.failedreason || data?.error || 'The payment provider could not start a session.'
+    );
+  }
+  return data;
 };
 
 // ── 2. Validate Transaction ──────────────────────────────────
@@ -98,7 +117,15 @@ const validateTransaction = async (valId: string) => {
 
   const url = `${sslcommerzHost()}/validator/api/validationserverAPI.php?val_id=${valId}&store_id=${config.sslcommerz.store_id}&store_passwd=${config.sslcommerz.store_pass}&format=json`;
   const response = await fetch(url);
-  return response.json();
+  const raw = await response.text();
+  try {
+    return JSON.parse(raw);
+  } catch {
+    // A non-JSON validator response means we cannot confirm the payment — treat
+    // it as invalid rather than crashing the callback, so the order stays unpaid
+    // (safe) instead of the request 500ing.
+    return { status: 'INVALID', reason: `non-JSON validator response (HTTP ${response.status})` };
+  }
 };
 
 export const SslcommerzService = {
