@@ -72,7 +72,9 @@ const initSession = async (payload: {
   formData.append('value_a', courseId);
   formData.append('value_b', studentId);
 
-  const response = await fetch(`${sslcommerzHost()}/gwprocess/v4`, {
+  // The v4 session endpoint is /gwprocess/v4/api.php — without api.php the host
+  // answers an HTML page, not a session, and the buyer never reaches a gateway.
+  const response = await fetch(`${sslcommerzHost()}/gwprocess/v4/api.php`, {
     method: 'POST',
     body: formData,
   });
