@@ -88,9 +88,21 @@ const initSession = async (payload: {
   try {
     data = JSON.parse(raw);
   } catch {
+    // TEMP DIAGNOSTIC — SSLCommerz's api.php always answers JSON (even for bad
+    // credentials), so a non-JSON body means something other than the gateway
+    // replied: a WAF / geo-block / Cloudflare challenge served to the server's
+    // datacenter IP. Surface what actually came back so we can see it once, then
+    // revert this to the clean message.
+    const ct = response.headers.get('content-type') || 'unknown';
+    const snippet = raw.replace(/\s+/g, ' ').trim().slice(0, 180);
+    console.error('[sslcommerz] non-JSON session response', {
+      url: `${sslcommerzHost()}/gwprocess/v4/api.php`,
+      status: response.status,
+      contentType: ct,
+      bodySnippet: raw.slice(0, 500),
+    });
     throw new Error(
-      `The payment provider did not return a valid session (HTTP ${response.status}). ` +
-        `Please check the store credentials and try again.`
+      `Payment provider returned non-JSON (HTTP ${response.status}, ${ct}). Body: ${snippet}`
     );
   }
   if (data?.status !== 'SUCCESS' || !data?.GatewayPageURL) {
