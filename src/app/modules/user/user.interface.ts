@@ -13,6 +13,7 @@ export interface IUser {
   medicalCollegeName?: string;
   district?: string;
   division?: string;
+  upazila?: string;
   location?: string;
   gender?: 'male' | 'female' | 'other';
   password?: string;

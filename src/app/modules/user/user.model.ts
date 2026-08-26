@@ -26,6 +26,10 @@ const userSchema = new Schema<IUser>(
     medicalCollegeName: { type: String, default: '' },
     district: { type: String, default: '' },
     division: { type: String, default: '' },
+    // The college's upazila/thana, snapshotted like district/division so the
+    // checkout address can pre-select all three. Blank until the college
+    // directory carries an area for the row.
+    upazila: { type: String, default: '' },
     location: { type: String, default: '' },
     gender: { type: String, enum: ['male', 'female', 'other'], required: false },
     password: { type: String, required: false, default: '' },

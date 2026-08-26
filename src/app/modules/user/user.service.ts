@@ -82,7 +82,7 @@ const withCollegeSnapshot = async <T extends Partial<IUser>>(payload: T): Promis
   try {
     const { MedicalCollege } = await import('../medicalCollege/medicalCollege.model');
     const college = await MedicalCollege.findById(payload.medicalCollege)
-      .select('name district division')
+      .select('name district division area')
       .lean();
     if (!college) return { ...payload, medicalCollege: undefined };
     return {
@@ -90,6 +90,9 @@ const withCollegeSnapshot = async <T extends Partial<IUser>>(payload: T): Promis
       medicalCollegeName: college.name,
       district: college.district,
       division: college.division,
+      // Often blank in the directory — the checkout just leaves the upazila
+      // select empty then, for the buyer to choose.
+      upazila: college.area || '',
     };
   } catch {
     return payload;

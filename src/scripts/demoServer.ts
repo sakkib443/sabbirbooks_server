@@ -160,6 +160,7 @@ async function main() {
     medicalCollegeName: 'Sylhet MAG Osmani Medical College',
     district: 'সিলেট',
     division: 'সিলেট',
+    upazila: 'সিলেট সদর',
   });
 
   // Seed book orders across the current month so the admin dashboard shows real

@@ -64,11 +64,13 @@ export const getMeController = async (req: Request, res: Response) => {
         firstName: account?.firstName ?? tokenUser.firstName,
         lastName: account?.lastName ?? tokenUser.lastName,
         name: tokenUser.name,
+        phoneNumber: account?.phoneNumber ?? '',
         whatsappNumber: account?.whatsappNumber ?? '',
         medicalCollege: account?.medicalCollege ?? null,
         medicalCollegeName: account?.medicalCollegeName ?? '',
         district: account?.district ?? '',
         division: account?.division ?? '',
+        upazila: account?.upazila ?? '',
         // The client blocks a student behind a "complete your profile" step
         // until this is true. Computed here, from the document, so a Google
         // sign-in — which cannot supply a WhatsApp number — is caught on its
