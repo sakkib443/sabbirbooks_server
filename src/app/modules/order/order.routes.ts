@@ -31,6 +31,10 @@ router.get('/my', authMiddleware, OrderController.getMyOrders);
 // capability an admin switches off for a content-only manager.
 router.get('/', authMiddleware, authorize('admin'), requireCapability('orders.read'), OrderController.getAllOrders);
 
+// Book-order dashboard numbers — counts and revenue. Same capability as the
+// list above. Declared before '/:id' so 'stats' is not read as an order id.
+router.get('/stats', authMiddleware, authorize('admin'), requireCapability('orders.read'), OrderController.getStats);
+
 // ─── Payment (owner) — placed before '/:id' plain GET is fine ─
 router.post('/:id/pay/bkash', authMiddleware, OrderController.payWithBkash);
 router.post('/:id/pay/sslcommerz', authMiddleware, OrderController.payWithSslcommerz);

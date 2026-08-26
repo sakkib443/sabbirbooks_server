@@ -676,8 +676,89 @@ const getDownloadUrl = async (
   return { title: book.title, secureFileUrl: book.secureFileUrl };
 };
 
+// ─── Dashboard stats ────────────────────────────────────────
+//
+// Everything here is book-order data — orders ARE books; courses live in
+// enrollments. "Revenue" is the `total` of orders that were not cancelled, by
+// the day the order was placed (gross sales), which is the number the admin
+// dashboard headlines. A cancelled order is not income and is excluded.
+//
+// Days are counted in Bangladesh time (UTC+6, no DST), so "today" and "this
+// month" line up with the shop's own clock rather than the server's UTC.
+const BD_OFFSET_MS = 6 * 60 * 60 * 1000;
+
+/** The UTC instant of Bangladesh-midnight for a given BD calendar date. */
+const bdMidnightUtc = (y: number, m: number, d: number) =>
+  new Date(Date.UTC(y, m, d) - BD_OFFSET_MS);
+
+const getBookOrderStats = async (year?: number, month?: number) => {
+  const now = new Date();
+  const bdNow = new Date(now.getTime() + BD_OFFSET_MS);
+
+  // Selected month for the chart; defaults to the current BD month. `month` is
+  // 0-based to match the client's Date.getMonth().
+  const y = Number.isFinite(year) ? (year as number) : bdNow.getUTCFullYear();
+  const m = Number.isFinite(month) ? (month as number) : bdNow.getUTCMonth();
+
+  const todayStart = bdMidnightUtc(bdNow.getUTCFullYear(), bdNow.getUTCMonth(), bdNow.getUTCDate());
+  const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
+  const monthStart = bdMidnightUtc(y, m, 1);
+  const monthEnd = bdMidnightUtc(y, m + 1, 1);
+  const daysInMonth = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+
+  const notCancelled = { status: { $ne: 'cancelled' } };
+  const sum = { orders: { $sum: 1 }, revenue: { $sum: '$total' } };
+
+  const [totalsAgg, todayAgg, newOrders, monthDaily] = await Promise.all([
+    Order.aggregate([{ $match: notCancelled }, { $group: { _id: null, ...sum } }]),
+    Order.aggregate([
+      { $match: { ...notCancelled, createdAt: { $gte: todayStart, $lt: todayEnd } } },
+      { $group: { _id: null, ...sum } },
+    ]),
+    // "New" = still waiting for the admin to confirm it. A COD order sits at
+    // 'pending' until then; this is the count that needs action.
+    Order.countDocuments({ status: 'pending' }),
+    Order.aggregate([
+      { $match: { ...notCancelled, createdAt: { $gte: monthStart, $lt: monthEnd } } },
+      {
+        $group: {
+          _id: { $dayOfMonth: { date: '$createdAt', timezone: 'Asia/Dhaka' } },
+          ...sum,
+        },
+      },
+    ]),
+  ]);
+
+  const byDay = new Map(
+    (monthDaily as Array<{ _id: number; orders: number; revenue: number }>).map((r) => [r._id, r])
+  );
+  const daily = Array.from({ length: daysInMonth }, (_, i) => {
+    const row = byDay.get(i + 1);
+    return { day: i + 1, orders: row?.orders ?? 0, revenue: row?.revenue ?? 0 };
+  });
+
+  const pick = (agg: Array<{ orders: number; revenue: number }>) => ({
+    orders: agg[0]?.orders ?? 0,
+    revenue: agg[0]?.revenue ?? 0,
+  });
+
+  return {
+    newOrders,
+    today: pick(todayAgg),
+    totals: pick(totalsAgg),
+    month: {
+      year: y,
+      month: m,
+      orders: daily.reduce((s, d) => s + d.orders, 0),
+      revenue: daily.reduce((s, d) => s + d.revenue, 0),
+      daily,
+    },
+  };
+};
+
 export const OrderService = {
   createOrder,
+  getBookOrderStats,
   getCheckoutOptions,
   getMyOrders,
   getOrderById,

@@ -148,7 +148,7 @@ async function main() {
 
   // A student whose medical college snapshotted a district + division, so the
   // checkout address prefill can be seen filling the cascade.
-  await User.create({
+  const student = await User.create({
     id: 'STU-demo',
     email: 'student@demo.local',
     firstName: 'Demo',
@@ -161,6 +161,68 @@ async function main() {
     district: 'সিলেট',
     division: 'সিলেট',
   });
+
+  // Seed book orders across the current month so the admin dashboard shows real
+  // counts, a today figure, and a revenue curve. Dates are set explicitly, so
+  // insertMany runs with timestamps off.
+  const { Order } = await import('../app/modules/order/order.model');
+  const nowDate = new Date();
+  const yr = nowDate.getFullYear();
+  const mo = nowDate.getMonth();
+  const today = nowDate.getDate();
+  const UNIT = 450;
+  const DELIVERY = 60;
+  const spread = ['delivered', 'paid', 'processing', 'shipped', 'delivered', 'delivered'];
+
+  const makeOrder = (idx: number, created: Date, status: string) => {
+    const qty = 1 + (idx % 3 === 0 ? 1 : 0);
+    const subtotal = UNIT * qty;
+    return {
+      orderNumber: `ORD-DEMO-${idx}`,
+      orderSeq: idx,
+      user: student._id,
+      items: [{ book: book._id, title: book.title, price: UNIT, quantity: qty, format: 'printed' }],
+      deliveryType: 'printed',
+      shippingAddress: {
+        name: 'Demo Buyer',
+        phone: '01700000000',
+        address: 'House 1, Road 2',
+        city: 'সিলেট সদর',
+        upazila: 'সিলেট সদর',
+        district: 'সিলেট',
+        division: 'সিলেট',
+        area: 'outside-dhaka',
+      },
+      subtotal,
+      discount: 0,
+      deliveryCharge: DELIVERY,
+      total: subtotal + DELIVERY,
+      payment: { status: status === 'pending' ? 'pending' : 'paid' },
+      status,
+      createdAt: created,
+      updatedAt: created,
+    };
+  };
+
+  const orders: ReturnType<typeof makeOrder>[] = [];
+  let seq = 1;
+  // Spread ~20 confirmed orders over days already passed this month.
+  for (let i = 0; i < 20; i++) {
+    const day = 1 + Math.floor((i / 20) * Math.max(today - 1, 1));
+    const created = new Date(yr, mo, day, 9 + (i % 9), (i * 7) % 60);
+    orders.push(makeOrder(seq++, created, spread[i % spread.length]));
+  }
+  // A handful placed today — some new (pending), some confirmed.
+  for (let i = 0; i < 5; i++) {
+    const created = new Date(yr, mo, today, 8 + i * 2, (i * 13) % 60);
+    orders.push(makeOrder(seq++, created, i < 3 ? 'pending' : 'delivered'));
+  }
+  // A couple more pending from earlier this week, so "new orders" isn't just today.
+  for (let i = 0; i < 2; i++) {
+    const created = new Date(yr, mo, Math.max(today - 2 - i, 1), 12, 0);
+    orders.push(makeOrder(seq++, created, 'pending'));
+  }
+  await Order.insertMany(orders, { timestamps: false } as never);
 
   const { default: app } = await import('../app');
 
