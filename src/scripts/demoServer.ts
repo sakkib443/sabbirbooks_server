@@ -69,10 +69,16 @@ async function main() {
     // The real public assets from the live shop, so the landing page can be
     // looked at as a customer actually sees it. These are served from the
     // world-readable uploads mount, so no token is involved.
-    coverImage: `${LIVE_UPLOADS}/1786737752647-1.png`,
+    //
+    // coverImage is the actual book COVER — the branded "MAGIC VIVA ANATOMY"
+    // artwork. The earlier demo pointed this at 1786737752647-1.png, which is a
+    // preview PAGE from inside the book, not its cover; that is what put a book
+    // page on the left of the hero. The preview pages belong in previewImages,
+    // where the "inside pages" fallback uses them.
+    coverImage: `${LIVE_UPLOADS}/1787724655555-magic_viva_final.jpeg`,
     previewImages: [`${LIVE_UPLOADS}/1786737752647-1.png`, `${LIVE_UPLOADS}/1786737752892-2.png`],
-    previewPdfUrl: `${LIVE_UPLOADS}/1786737607197-Test__Book_Format_.pdf`,
-    promoVideoUrl: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+    previewPdfUrl: `${LIVE_UPLOADS}/1787732330496-MAGIC_VIVA_Inferior_Extremity.pdf`,
+    promoVideoUrl: 'https://www.youtube.com/watch?v=O_DVYk1WvuE',
   });
 
   let topicsMade = 0;
