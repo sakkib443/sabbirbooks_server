@@ -88,21 +88,21 @@ const initSession = async (payload: {
   try {
     data = JSON.parse(raw);
   } catch {
-    // TEMP DIAGNOSTIC — SSLCommerz's api.php always answers JSON (even for bad
-    // credentials), so a non-JSON body means something other than the gateway
-    // replied: a WAF / geo-block / Cloudflare challenge served to the server's
-    // datacenter IP. Surface what actually came back so we can see it once, then
-    // revert this to the clean message.
-    const ct = response.headers.get('content-type') || 'unknown';
-    const snippet = raw.replace(/\s+/g, ' ').trim().slice(0, 180);
+    // api.php always answers JSON — even for wrong credentials — so a non-JSON
+    // body means a firewall/proxy page reached us instead of the gateway. The
+    // one we hit in practice: SSLCommerz's WAF rejects a session request whose
+    // callback URLs carry a raw IP (Coolify's default *.<ip>.sslip.io host), so
+    // SERVER_URL must be a clean domain. Log the body server-side for the next
+    // time; keep the buyer's message clean.
     console.error('[sslcommerz] non-JSON session response', {
       url: `${sslcommerzHost()}/gwprocess/v4/api.php`,
       status: response.status,
-      contentType: ct,
-      bodySnippet: raw.slice(0, 500),
+      contentType: response.headers.get('content-type'),
+      bodySnippet: raw.slice(0, 300),
     });
     throw new Error(
-      `Payment provider returned non-JSON (HTTP ${response.status}, ${ct}). Body: ${snippet}`
+      `The payment provider did not return a valid session (HTTP ${response.status}). ` +
+        `Please try again in a moment.`
     );
   }
   if (data?.status !== 'SUCCESS' || !data?.GatewayPageURL) {
