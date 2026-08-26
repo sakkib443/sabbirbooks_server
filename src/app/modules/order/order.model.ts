@@ -57,6 +57,8 @@ const shippingAddressSchema = new Schema(
     // never heard of, and refusing their address over a spelling is not worth it.
     district: { type: String, trim: true, default: '' },
     division: { type: String, trim: true, default: '' },
+    // Set alongside `city` (which holds the same value) — see IShippingAddress.
+    upazila: { type: String, trim: true, default: '' },
     note: { type: String },
   },
   { _id: false }

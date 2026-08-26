@@ -75,6 +75,11 @@ export interface IShippingAddress {
   // courier needs the moment a third zone is priced.
   district?: string;
   division?: string;
+  // The upazila/thana — the most local of the three geo levels the buyer picks
+  // (division → district → upazila). `city` is set to this too, so the required
+  // city field and the notification address line stay populated without a
+  // separate free-text town; this holds the same value under its real name.
+  upazila?: string;
   note?: string;
 }
 

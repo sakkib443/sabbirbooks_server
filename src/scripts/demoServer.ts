@@ -146,6 +146,22 @@ async function main() {
     status: 'active',
   });
 
+  // A student whose medical college snapshotted a district + division, so the
+  // checkout address prefill can be seen filling the cascade.
+  await User.create({
+    id: 'STU-demo',
+    email: 'student@demo.local',
+    firstName: 'Demo',
+    lastName: 'Student',
+    password: 'demo1234',
+    role: 'student',
+    status: 'active',
+    whatsappNumber: '01711000000',
+    medicalCollegeName: 'Sylhet MAG Osmani Medical College',
+    district: 'সিলেট',
+    division: 'সিলেট',
+  });
+
   const { default: app } = await import('../app');
 
   // One code from each side of the paywall, printed so the open/closed pair can
