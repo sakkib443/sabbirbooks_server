@@ -60,10 +60,15 @@ const settingsSchema = new Schema<ISiteSettings>(
         codEnabled: { type: Boolean, default: true },
         onlinePaymentEnabled: { type: Boolean, default: true },
 
-        // Delivery charge for printed books, in taka. Two zones because Dhaka
-        // and outside-Dhaka courier rates differ; set them equal for a flat fee.
-        deliveryChargeInsideDhaka: { type: Number, default: 120 },
-        deliveryChargeOutsideDhaka: { type: Number, default: 120 },
+        // Flat delivery charge for printed books, in taka — one rate everywhere.
+        deliveryCharge: { type: Number, default: 130 },
+        // Retired inside/outside-Dhaka split, kept so old documents still load.
+        deliveryChargeInsideDhaka: { type: Number, default: 130 },
+        deliveryChargeOutsideDhaka: { type: Number, default: 130 },
+        // Free local delivery for a specific college's students shipping within
+        // their own division. Empty college = rule off. See order.service.
+        freeDeliveryCollege: { type: String, default: 'Khulna Medical College' },
+        freeDeliveryDivision: { type: String, default: 'খুলনা' },
         // Order subtotal at or above which delivery is free. 0 = never free.
         freeDeliveryAbove: { type: Number, default: 0 },
         // Extra fee some sellers add for collecting cash. 0 = no surcharge.

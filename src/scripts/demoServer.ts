@@ -157,10 +157,10 @@ async function main() {
     role: 'student',
     status: 'active',
     whatsappNumber: '01711000000',
-    medicalCollegeName: 'Sylhet MAG Osmani Medical College',
-    district: 'সিলেট',
-    division: 'সিলেট',
-    upazila: 'সিলেট সদর',
+    medicalCollegeName: 'Khulna Medical College',
+    district: 'খুলনা',
+    division: 'খুলনা',
+    upazila: 'খুলনা সদর',
   });
 
   // Seed book orders across the current month so the admin dashboard shows real

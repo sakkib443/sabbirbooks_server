@@ -29,9 +29,11 @@ const resolveBook = async (slugOrId: string) => {
  */
 const quoteDeliveryCharge = async (opts: {
   hasPrinted: boolean;
-  area: TDeliveryArea;
   subtotal: number;
   isCod: boolean;
+  // The buyer's own division and college, when known — for the free-local rule.
+  division?: string;
+  college?: string;
 }): Promise<number> => {
   if (!opts.hasPrinted) return 0;
 
@@ -40,14 +42,26 @@ const quoteDeliveryCharge = async (opts: {
   const freeAbove = Number(s?.freeDeliveryAbove) || 0;
   if (freeAbove > 0 && opts.subtotal >= freeAbove) return 0;
 
-  const base =
-    opts.area === 'inside-dhaka'
-      ? Number(s?.deliveryChargeInsideDhaka)
-      : Number(s?.deliveryChargeOutsideDhaka);
+  // Free local delivery: the configured college's students shipping within the
+  // configured division pay nothing. The same student shipping to any other
+  // division falls through to the flat charge.
+  const freeCollege = String(s?.freeDeliveryCollege || '').trim();
+  const freeDivision = String(s?.freeDeliveryDivision || '').trim();
+  if (
+    freeCollege &&
+    freeDivision &&
+    (opts.college || '').trim() === freeCollege &&
+    (opts.division || '').trim() === freeDivision
+  ) {
+    return 0;
+  }
 
-  // Number(undefined) is NaN, and NaN would poison the order total — fall back
-  // to the documented default rather than writing a broken number.
-  const charge = Number.isFinite(base) ? base : 120;
+  // One flat rate everywhere. deliveryCharge is the live field; the old
+  // inside-Dhaka value is the fallback for a settings doc written before it
+  // existed, then the documented default.
+  const flat = Number(s?.deliveryCharge);
+  const legacy = Number(s?.deliveryChargeInsideDhaka);
+  const charge = Number.isFinite(flat) ? flat : Number.isFinite(legacy) ? legacy : 130;
   const codExtra = opts.isCod ? Number(s?.codExtraCharge) || 0 : 0;
 
   return Math.max(0, Math.round(charge + codExtra));
@@ -176,28 +190,22 @@ const createOrder = async (
     throw new Error('Online payment is currently unavailable');
   }
 
-  // A district is real geography, so it — not the client's guess at a billing
-  // bucket — decides the zone whenever we have one. Without a district we keep
-  // the old behaviour: honour an explicit `area`, else the dearer zone. Note
-  // that the derivation can only reach the cheap zone through an exact match on
-  // a district the server itself recognises; every other string, including one
-  // sent alongside `area: 'inside-dhaka'`, resolves to outside-dhaka.
-  const district = payload.shippingAddress?.district?.trim();
-  const area: TDeliveryArea = district
-    ? areaForDistrict(district)
-    : payload.shippingAddress?.area === 'inside-dhaka'
-      ? 'inside-dhaka'
-      : 'outside-dhaka';
-
   const subtotal = items.reduce((sum, it) => sum + it.price * it.quantity, 0);
   // Whole taka: nobody hands a courier 62.5tk, and the client renders this row
   // verbatim.
   const discount = Math.round(preOrderDiscount);
+
+  // The buyer's college decides the free-local rule. Looked up only when there
+  // is a printed item to charge for; the shipping division comes off the order.
+  const buyerCollege = hasPrinted
+    ? (await User.findById(userId).select('medicalCollegeName').lean())?.medicalCollegeName || ''
+    : '';
   const deliveryCharge = await quoteDeliveryCharge({
     hasPrinted,
-    area,
     subtotal: subtotal - discount,
     isCod: method === 'cod',
+    division: payload.shippingAddress?.division,
+    college: buyerCollege,
   });
   const total = subtotal - discount + deliveryCharge;
 
@@ -211,7 +219,7 @@ const createOrder = async (
     orderSeq,
     items,
     deliveryType,
-    shippingAddress: hasPrinted ? { ...payload.shippingAddress, area } : undefined,
+    shippingAddress: hasPrinted ? { ...payload.shippingAddress } : undefined,
     subtotal,
     discount,
     deliveryCharge,
@@ -246,18 +254,17 @@ const getCheckoutOptions = async (subtotal = 0) => {
   const s: any = await SettingsService.getSettingsService();
   const enabled = await getEnabledPaymentMethods();
 
-  const quote = (area: TDeliveryArea) =>
-    quoteDeliveryCharge({ hasPrinted: true, area, subtotal, isCod: false });
-
-  const [insideDhaka, outsideDhaka] = await Promise.all([
-    quote('inside-dhaka'),
-    quote('outside-dhaka'),
-  ]);
+  // One flat charge everywhere. The buyer's own eligibility for free local
+  // delivery is decided on the client from freeDeliveryCollege/Division below
+  // (it knows the buyer's college); the server re-checks it at order time.
+  const deliveryCharge = await quoteDeliveryCharge({ hasPrinted: true, subtotal, isCod: false });
 
   return {
     codEnabled: enabled.cod,
     onlinePaymentEnabled: enabled.online,
-    deliveryCharge: { 'inside-dhaka': insideDhaka, 'outside-dhaka': outsideDhaka },
+    deliveryCharge,
+    freeDeliveryCollege: String(s?.freeDeliveryCollege || ''),
+    freeDeliveryDivision: String(s?.freeDeliveryDivision || ''),
     codExtraCharge: Number(s?.codExtraCharge) || 0,
     freeDeliveryAbove: Number(s?.freeDeliveryAbove) || 0,
     deliveryNote: s?.deliveryNote || '',

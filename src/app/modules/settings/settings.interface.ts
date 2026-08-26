@@ -47,8 +47,16 @@ export interface ISiteSettings {
     // Ordering & delivery (printed books)
     codEnabled: boolean;
     onlinePaymentEnabled: boolean;
+    // Flat delivery charge, one rate everywhere (taka). The old inside/outside
+    // Dhaka split is retired; these two are kept only so old documents type.
+    deliveryCharge: number;
     deliveryChargeInsideDhaka: number;
     deliveryChargeOutsideDhaka: number;
+    // Free local delivery: a student of `freeDeliveryCollege` shipping within
+    // `freeDeliveryDivision` pays nothing; the same student shipping to any other
+    // division pays the flat charge. Empty college turns the rule off.
+    freeDeliveryCollege: string;
+    freeDeliveryDivision: string;
     freeDeliveryAbove: number;
     codExtraCharge: number;
     deliveryNote: string;
