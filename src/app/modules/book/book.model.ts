@@ -1,5 +1,5 @@
 import { Schema, model } from 'mongoose';
-import { IBook, IBookFeature } from './book.interface';
+import { IBook, IBookFeature, IBookOffer, IBookOffers } from './book.interface';
 
 // Landing-page selling points. Declared as its own schema with `_id: false` —
 // the same convention the order module's embedded docs use — because these are
@@ -10,6 +10,28 @@ const bookFeatureSchema = new Schema<IBookFeature>(
     text: { type: String, required: true },
     weight: { type: Number, default: 1 },
     highlight: { type: Boolean, default: false },
+  },
+  { _id: false }
+);
+
+// One named discount. `percent` is capped at 90 like the pre-order field — this
+// is applied to real money at checkout, so a typo'd 100 must not zero the price.
+const bookOfferSchema = new Schema<IBookOffer>(
+  {
+    enabled: { type: Boolean, default: false },
+    label: { type: String, default: '' },
+    percent: { type: Number, default: 0, min: 0, max: 90 },
+  },
+  { _id: false }
+);
+
+// The three offers, each embedded and optional so a book with none is priced at
+// list. See book.pricing.ts for how they combine.
+const bookOffersSchema = new Schema<IBookOffers>(
+  {
+    normal: { type: bookOfferSchema, default: undefined },
+    preorder: { type: bookOfferSchema, default: undefined },
+    online: { type: bookOfferSchema, default: undefined },
   },
   { _id: false }
 );
@@ -46,6 +68,10 @@ const bookSchema = new Schema<IBook>(
 
     status: { type: String, enum: ['draft', 'published', 'archived'], default: 'published' },
     isFeatured: { type: Boolean, default: false },
+
+    // Named per-book offers (normal / pre-order / online-payment). Absent on
+    // legacy books, which keep pricing off the fields below. See book.pricing.ts.
+    offers: { type: bookOffersSchema, default: undefined },
 
     // Pre-order: the book can be bought before it is printed. Defaults keep every
     // existing book an ordinary stocked title, so nothing changes until an admin

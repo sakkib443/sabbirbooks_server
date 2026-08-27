@@ -4,6 +4,7 @@ import { Order } from './order.model';
 import { getNextSequence, ORDER_SEQ } from './counter.model';
 import { IOrder, IShippingAddress, TDeliveryType, TDeliveryArea } from './order.interface';
 import { Book } from '../book/book.model';
+import { priceBookUnit, hasOffers } from '../book/book.pricing';
 import { User } from '../user/user.model';
 import { BkashService } from '../payment/bkash.service';
 import { SslcommerzService } from '../payment/sslcommerz.service';
@@ -118,7 +119,12 @@ const createOrder = async (
   // Accumulated unrounded so the whole order rounds once at the end — rounding
   // each line and summing drifts by a taka per line against what the client
   // showed the buyer.
-  let preOrderDiscount = 0;
+  let orderDiscount = 0;
+
+  // The online-payment offer applies to any method that is not cash on delivery.
+  // The gateway path creates the order with no paymentMethod (→ online), COD sends
+  // 'cod'. Decided up front so it can price each line below.
+  const payingOnline = payload.paymentMethod !== 'cod';
 
   for (const line of payload.items) {
     const qty = line.quantity && line.quantity > 0 ? line.quantity : 1;
@@ -127,7 +133,9 @@ const createOrder = async (
       throw new Error(`Book not found: ${line.bookSlugOrId}`);
     }
 
-    const isPreOrderLine = book.isPreOrder === true;
+    // Pre-order MODE — the new offers.preorder toggle or the legacy flag. Both
+    // skip the stock check and mark the order a pre-order.
+    const isPreOrderLine = book.isPreOrder === true || book.offers?.preorder?.enabled === true;
     if (isPreOrderLine) hasPreOrder = true;
 
     if (book.format === 'printed') {
@@ -142,17 +150,28 @@ const createOrder = async (
       hasDigital = true;
     }
 
-    // Effective unit price = offer price if set, else base price (0 when unset).
-    const unitPrice = book.offerPrice != null ? book.offerPrice : (book.price ?? 0);
-
-    if (isPreOrderLine) {
-      // Clamped here as well as in the book schema. The schema's min/max only
-      // guards writes that went through it; this number comes off a stored
-      // document and is about to be subtracted from a real invoice, so a row
-      // that predates the limits (or was patched straight in the shell) must
-      // not be able to price the order.
-      const pct = Math.min(90, Math.max(0, Number(book.preOrderDiscountPercent ?? 25) || 0));
-      preOrderDiscount += (unitPrice * qty * pct) / 100;
+    // Two pricing paths, so a book saved before the offers system keeps its exact
+    // old price. A book the admin has configured `offers` on is priced by the
+    // shared helper: the line's unit is the catalogue price and every discount
+    // (headline + online) is carried in `orderDiscount`. A legacy book keeps the
+    // old effective-price-then-pre-order-percent behaviour untouched.
+    let unitPrice: number;
+    if (hasOffers(book)) {
+      const p = priceBookUnit(book, { online: payingOnline });
+      unitPrice = p.list;
+      orderDiscount += (p.list - p.unitOnline) * qty;
+    } else {
+      // Effective unit price = offer price if set, else base price (0 when unset).
+      unitPrice = book.offerPrice != null ? book.offerPrice : (book.price ?? 0);
+      if (isPreOrderLine) {
+        // Clamped here as well as in the book schema. The schema's min/max only
+        // guards writes that went through it; this number comes off a stored
+        // document and is about to be subtracted from a real invoice, so a row
+        // that predates the limits (or was patched straight in the shell) must
+        // not be able to price the order.
+        const pct = Math.min(90, Math.max(0, Number(book.preOrderDiscountPercent ?? 25) || 0));
+        orderDiscount += (unitPrice * qty * pct) / 100;
+      }
     }
 
     items.push({
@@ -193,7 +212,7 @@ const createOrder = async (
   const subtotal = items.reduce((sum, it) => sum + it.price * it.quantity, 0);
   // Whole taka: nobody hands a courier 62.5tk, and the client renders this row
   // verbatim.
-  const discount = Math.round(preOrderDiscount);
+  const discount = Math.round(orderDiscount);
 
   // The buyer's college decides the free-local rule. Looked up only when there
   // is a printed item to charge for; the shipping division comes off the order.

@@ -61,11 +61,17 @@ async function main() {
     author: 'Dr. Sabbir',
     description: 'Medical viva preparation — QR-linked question bank.',
     price: 600,
-    offerPrice: 450,
     format: 'printed',
     stock: 500,
     status: 'published',
     isFeatured: true,
+    // Named offers, to exercise the new system: a 25% headline "ঈদ অফার" everyone
+    // gets, plus 10% more for paying online instead of cash on delivery.
+    offers: {
+      normal: { enabled: true, label: 'ঈদ অফার', percent: 25 },
+      preorder: { enabled: false, label: '', percent: 25 },
+      online: { enabled: true, label: 'অনলাইন পেমেন্টে ছাড়', percent: 10 },
+    },
     // The real public assets from the live shop, so the landing page can be
     // looked at as a customer actually sees it. These are served from the
     // world-readable uploads mount, so no token is involved.

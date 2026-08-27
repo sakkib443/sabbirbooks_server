@@ -1,5 +1,14 @@
 import { z } from 'zod';
 
+// One named offer — normal / pre-order / online-payment. All parts optional so a
+// partial edit (just flip `enabled`, say) is accepted; percent is capped to match
+// the schema and the pricing clamp.
+const bookOfferSchema = z.object({
+  enabled: z.boolean().optional(),
+  label: z.string().optional(),
+  percent: z.number().min(0).max(90).optional(),
+});
+
 // ─── Book body schema (simplified) ───────────────────────────
 // Only `title` is required. id/slug are auto-filled by the service; every other
 // field is optional so a book can be added with minimal input and finished later.
@@ -26,6 +35,18 @@ const bookBodySchema = z.object({
 
   status: z.enum(['draft', 'published', 'archived']).optional(),
   isFeatured: z.boolean().optional(),
+
+  // ── Offers (named discounts) ──
+  // Each block is optional; percent mirrors the schema/pricing cap of 90. Must be
+  // declared here for the same reason the pre-order fields are — validateRequest
+  // forwards the raw body, and Mongoose drops anything strict mode does not know.
+  offers: z
+    .object({
+      normal: bookOfferSchema.optional(),
+      preorder: bookOfferSchema.optional(),
+      online: bookOfferSchema.optional(),
+    })
+    .optional(),
 
   // ── Pre-order ──
   // These MUST be listed here even though they are all optional: validateRequest

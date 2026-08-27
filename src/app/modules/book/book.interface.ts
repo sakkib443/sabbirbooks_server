@@ -7,6 +7,25 @@ export interface IBookFeature {
   highlight?: boolean;
 }
 
+// One named, admin-editable discount. `label` is the offer's own name so a
+// campaign can be called anything ("ঈদ অফার", "আগে পেমেন্টে ছাড়") and the
+// storefront shows that name; `percent` is 0–90. See book.pricing.ts.
+export interface IBookOffer {
+  enabled?: boolean;
+  label?: string;
+  percent?: number;
+}
+
+// The three offers a book can run at once. `normal` is the everyday headline
+// discount; `preorder` is the headline while the book is sold before printing;
+// `online` is an EXTRA reduction applied only when the buyer pays online instead
+// of cash on delivery. All optional, so a book with none prices at list.
+export interface IBookOffers {
+  normal?: IBookOffer;
+  preorder?: IBookOffer;
+  online?: IBookOffer;
+}
+
 // Book Interface: catalog book (printed or digital) এর ডাটার ধরন নির্ধারণ করে
 export interface IBook {
   id: number;
@@ -39,13 +58,19 @@ export interface IBook {
   status?: 'draft' | 'published' | 'archived';
   isFeatured?: boolean;
 
+  // ── Offers ──
+  // Named, per-book discounts (normal / pre-order / online-payment). Priced and
+  // resolved by book.pricing.ts, which also falls back to the legacy pre-order
+  // and offerPrice fields below for books saved before this existed.
+  offers?: IBookOffers;
+
   // ── Pre-order ──
   // The book is sold before the print run exists. Every field below is optional
   // so the thousands of already-published books keep loading untouched.
   isPreOrder?: boolean;
   // Percent knocked off this book's lines at checkout while it is a pre-order.
   // Per-book rather than a site-wide constant: an early title may be discounted
-  // harder than a reprint.
+  // harder than a reprint. Superseded by offers.preorder.percent when set.
   preOrderDiscountPercent?: number;
   // Free-text promise shown next to the buy button ("১৫ সেপ্টেম্বর থেকে ডেলিভারি").
   preOrderNote?: string;
