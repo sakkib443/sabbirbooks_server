@@ -37,8 +37,8 @@ const settingsSchema = new Schema<ISiteSettings>(
         heroDescriptionBn: { type: String, default: 'অ্যাপটেক লার্নিং-এ স্বাগতম — IELTS, স্পোকেন ইংলিশ, অফিস ম্যানেজমেন্ট, গ্রাফিক ডিজাইন, ওয়েব ডিজাইন, অটোক্যাড এবং ডিজিটাল মার্কেটিং কোর্সের মাধ্যমে অভিজ্ঞ মেন্টরদের কাছ থেকে শিখে আপনার ক্যারিয়ার গড়ে তুলুন।' },
 
         // Contact Information
-        phoneNumber: { type: String, default: '+880 1711-946614' },
-        whatsappNumber: { type: String, default: '8801711946614' },
+        phoneNumber: { type: String, default: '01799075202' },
+        whatsappNumber: { type: String, default: '8801799075202' },
         email: { type: String, default: 'info@aptechlearning.com' },
         address: { type: String, default: 'House 25, Road - 11, DIT Project, Marul Badda, Badda, Dhaka, Bangladesh' },
         addressBn: { type: String, default: 'বাড়ি ২৫, রোড - ১১, ডিআইটি প্রজেক্ট, মেরুল বাড্ডা, বাড্ডা, ঢাকা' },
