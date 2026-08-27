@@ -2,11 +2,13 @@ import { z } from 'zod';
 
 // One named offer — normal / pre-order / online-payment. All parts optional so a
 // partial edit (just flip `enabled`, say) is accepted; percent is capped to match
-// the schema and the pricing clamp.
+// the schema and the pricing clamp, and `amount` is the fixed-taka alternative.
 const bookOfferSchema = z.object({
   enabled: z.boolean().optional(),
   label: z.string().optional(),
+  type: z.enum(['percent', 'fixed']).optional(),
   percent: z.number().min(0).max(90).optional(),
+  amount: z.number().min(0).optional(),
 });
 
 // ─── Book body schema (simplified) ───────────────────────────

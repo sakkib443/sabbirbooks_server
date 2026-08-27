@@ -68,9 +68,9 @@ async function main() {
     // Named offers, to exercise the new system: a 25% headline "ঈদ অফার" everyone
     // gets, plus 10% more for paying online instead of cash on delivery.
     offers: {
-      normal: { enabled: true, label: 'ঈদ অফার', percent: 25 },
-      preorder: { enabled: false, label: '', percent: 25 },
-      online: { enabled: true, label: 'অনলাইন পেমেন্টে ছাড়', percent: 10 },
+      normal: { enabled: true, label: 'ঈদ অফার', type: 'fixed', amount: 100 },
+      preorder: { enabled: false, label: '', type: 'percent', percent: 25 },
+      online: { enabled: true, label: 'অনলাইন পেমেন্টে ছাড়', type: 'fixed', amount: 50 },
     },
     // The real public assets from the live shop, so the landing page can be
     // looked at as a customer actually sees it. These are served from the

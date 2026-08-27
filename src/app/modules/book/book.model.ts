@@ -14,13 +14,16 @@ const bookFeatureSchema = new Schema<IBookFeature>(
   { _id: false }
 );
 
-// One named discount. `percent` is capped at 90 like the pre-order field — this
-// is applied to real money at checkout, so a typo'd 100 must not zero the price.
+// One named discount — a `percent` (capped at 90 like the pre-order field, so a
+// typo'd 100 can never zero a real price) or a `fixed` number of taka off. Both
+// values are clamped again in book.pricing.ts before they touch an invoice.
 const bookOfferSchema = new Schema<IBookOffer>(
   {
     enabled: { type: Boolean, default: false },
     label: { type: String, default: '' },
+    type: { type: String, enum: ['percent', 'fixed'], default: 'percent' },
     percent: { type: Number, default: 0, min: 0, max: 90 },
+    amount: { type: Number, default: 0, min: 0 },
   },
   { _id: false }
 );

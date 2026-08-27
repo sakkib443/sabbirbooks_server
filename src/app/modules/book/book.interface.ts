@@ -9,11 +9,14 @@ export interface IBookFeature {
 
 // One named, admin-editable discount. `label` is the offer's own name so a
 // campaign can be called anything ("ঈদ অফার", "আগে পেমেন্টে ছাড়") and the
-// storefront shows that name; `percent` is 0–90. See book.pricing.ts.
+// storefront shows that name. `type` picks how the cut is measured: a `percent`
+// (0–90) off, or a `fixed` number of taka (`amount`). See book.pricing.ts.
 export interface IBookOffer {
   enabled?: boolean;
   label?: string;
+  type?: 'percent' | 'fixed';
   percent?: number;
+  amount?: number;
 }
 
 // The three offers a book can run at once. `normal` is the everyday headline
