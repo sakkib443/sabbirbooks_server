@@ -225,17 +225,18 @@ const downloadBook = async (req: Request, res: Response) => {
 
 const getStats = async (req: Request, res: Response) => {
   try {
-    const { year, month } = req.query;
-    const data = await OrderService.getBookOrderStats(
-      year !== undefined ? Number(year) : undefined,
-      month !== undefined ? Number(month) : undefined
-    );
+    const { year, month, from, to } = req.query;
+    const data = await OrderService.getBookOrderStats({
+      year: year !== undefined ? Number(year) : undefined,
+      month: month !== undefined ? Number(month) : undefined,
+      from: from as string | undefined,
+      to: to as string | undefined,
+    });
     res.status(200).json({ success: true, data });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
   }
 };
-
 export const OrderController = {
   createOrder,
   getStats,

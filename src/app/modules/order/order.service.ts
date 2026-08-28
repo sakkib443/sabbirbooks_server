@@ -860,89 +860,170 @@ const BD_OFFSET_MS = 6 * 60 * 60 * 1000;
 const bdMidnightUtc = (y: number, m: number, d: number) =>
   new Date(Date.UTC(y, m, d) - BD_OFFSET_MS);
 
-const getBookOrderStats = async (year?: number, month?: number) => {
+/**
+ * The money behind the book orders, for the dashboard and the analytics page.
+ *
+ * Three numbers, and the rule that separates them — the shop's own accounting:
+ *
+ *   VALUE     every live order's total. What has been sold.
+ *   EARNED    money actually in hand: the parcel was DELIVERED, or the buyer
+ *             paid online up front. A cash-on-delivery order counts only once
+ *             the courier hands it over (updateOrderStatus marks it paid then).
+ *   UPCOMING  sold but not yet collected — value minus earned. What is still
+ *             out with couriers and buyers.
+ *
+ * Cancelled orders are excluded everywhere: they are not a sale.
+ *
+ * The caller may pass a date range (from/to, ISO days in BD time). Without one
+ * the range defaults to the current BD month, which is what the dashboard shows.
+ */
+const getBookOrderStats = async (opts?: {
+  year?: number;
+  month?: number;
+  from?: string;
+  to?: string;
+}) => {
   const now = new Date();
   const bdNow = new Date(now.getTime() + BD_OFFSET_MS);
 
-  // Selected month for the chart; defaults to the current BD month. `month` is
-  // 0-based to match the client's Date.getMonth().
-  const y = Number.isFinite(year) ? (year as number) : bdNow.getUTCFullYear();
-  const m = Number.isFinite(month) ? (month as number) : bdNow.getUTCMonth();
-
   const todayStart = bdMidnightUtc(bdNow.getUTCFullYear(), bdNow.getUTCMonth(), bdNow.getUTCDate());
   const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
-  const monthStart = bdMidnightUtc(y, m, 1);
-  const monthEnd = bdMidnightUtc(y, m + 1, 1);
-  const daysInMonth = new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
 
-  const notCancelled = { status: { $ne: 'cancelled' } };
-  const sum = { orders: { $sum: 1 }, revenue: { $sum: '$total' } };
+  // The window the chart and the range totals cover.
+  const parseDay = (s?: string): Date | null => {
+    if (!s) return null;
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s.trim());
+    if (!m) return null;
+    return bdMidnightUtc(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  };
 
-  const [totalsAgg, todayAgg, newOrders, monthDaily, couponsAgg] = await Promise.all([
-    Order.aggregate([{ $match: notCancelled }, { $group: { _id: null, ...sum } }]),
-    Order.aggregate([
-      { $match: { ...notCancelled, createdAt: { $gte: todayStart, $lt: todayEnd } } },
-      { $group: { _id: null, ...sum } },
-    ]),
-    // "New" = still waiting for the admin to confirm it. A COD order sits at
-    // 'pending' until then; this is the count that needs action.
-    Order.countDocuments({ status: 'pending' }),
-    Order.aggregate([
-      { $match: { ...notCancelled, createdAt: { $gte: monthStart, $lt: monthEnd } } },
-      {
-        $group: {
-          _id: { $dayOfMonth: { date: '$createdAt', timezone: 'Asia/Dhaka' } },
-          ...sum,
+  let rangeStart = parseDay(opts?.from);
+  let rangeEnd = parseDay(opts?.to);
+  if (rangeEnd) rangeEnd = new Date(rangeEnd.getTime() + 24 * 60 * 60 * 1000); // inclusive day
+  if (!rangeStart || !rangeEnd || rangeEnd <= rangeStart) {
+    const y = Number.isFinite(opts?.year) ? (opts!.year as number) : bdNow.getUTCFullYear();
+    const m = Number.isFinite(opts?.month) ? (opts!.month as number) : bdNow.getUTCMonth();
+    rangeStart = bdMidnightUtc(y, m, 1);
+    rangeEnd = bdMidnightUtc(y, m + 1, 1);
+  }
+
+  const live = { status: { $ne: 'cancelled' } };
+  // Money in hand: delivered, or already paid (which is every successful
+  // online payment, and a COD order once it was handed over).
+  const earnedWhen = {
+    $cond: [
+      { $or: [{ $eq: ['$status', 'delivered'] }, { $eq: ['$payment.status', 'paid'] }] },
+      '$total',
+      0,
+    ],
+  };
+  const moneyGroup = {
+    orders: { $sum: 1 },
+    value: { $sum: '$total' },
+    earned: { $sum: earnedWhen },
+  };
+
+  const [totalsAgg, todayAgg, newOrders, dailyAgg, statusAgg, methodAgg, couponsAgg] =
+    await Promise.all([
+      Order.aggregate([{ $match: live }, { $group: { _id: null, ...moneyGroup } }]),
+      Order.aggregate([
+        { $match: { ...live, createdAt: { $gte: todayStart, $lt: todayEnd } } },
+        { $group: { _id: null, ...moneyGroup } },
+      ]),
+      // "New" = still waiting for the admin to confirm it — the work queue.
+      Order.countDocuments({ status: 'pending' }),
+      Order.aggregate([
+        { $match: { ...live, createdAt: { $gte: rangeStart, $lt: rangeEnd } } },
+        {
+          $group: {
+            _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: 'Asia/Dhaka' } },
+            ...moneyGroup,
+          },
         },
-      },
-    ]),
-    // Coupon money, all-time: how many coupon sales, how much discount buyers got,
-    // and how much is owed to coupon owners (the payout snapshots).
-    Order.aggregate([
-      { $match: { ...notCancelled, couponCode: { $nin: [null, ''] } } },
-      {
-        $group: {
-          _id: null,
-          orders: { $sum: 1 },
-          discount: { $sum: { $ifNull: ['$couponDiscount', 0] } },
-          payout: { $sum: { $ifNull: ['$couponPayout', 0] } },
+        { $sort: { _id: 1 } },
+      ]),
+      Order.aggregate([
+        { $match: { createdAt: { $gte: rangeStart, $lt: rangeEnd } } },
+        { $group: { _id: '$status', orders: { $sum: 1 }, value: { $sum: '$total' } } },
+      ]),
+      Order.aggregate([
+        { $match: { ...live, createdAt: { $gte: rangeStart, $lt: rangeEnd } } },
+        {
+          $group: {
+            _id: { $ifNull: ['$payment.method', 'unpaid'] },
+            orders: { $sum: 1 },
+            value: { $sum: '$total' },
+          },
         },
-      },
-    ]),
-  ]);
+      ]),
+      Order.aggregate([
+        { $match: { ...live, couponCode: { $nin: [null, ''] } } },
+        {
+          $group: {
+            _id: null,
+            orders: { $sum: 1 },
+            discount: { $sum: { $ifNull: ['$couponDiscount', 0] } },
+            payout: { $sum: { $ifNull: ['$couponPayout', 0] } },
+          },
+        },
+      ]),
+    ]);
 
+  // Fill every day in the window, so the chart has no gaps to interpolate over.
   const byDay = new Map(
-    (monthDaily as Array<{ _id: number; orders: number; revenue: number }>).map((r) => [r._id, r])
+    (dailyAgg as Array<{ _id: string; orders: number; value: number; earned: number }>).map((r) => [
+      r._id,
+      r,
+    ])
   );
-  const daily = Array.from({ length: daysInMonth }, (_, i) => {
-    const row = byDay.get(i + 1);
-    return { day: i + 1, orders: row?.orders ?? 0, revenue: row?.revenue ?? 0 };
-  });
+  const daily: Array<{ date: string; day: number; orders: number; value: number; earned: number }> = [];
+  for (let t = rangeStart.getTime(); t < rangeEnd.getTime(); t += 24 * 60 * 60 * 1000) {
+    const d = new Date(t);
+    const key = d.toISOString().slice(0, 10);
+    const row = byDay.get(key);
+    daily.push({
+      date: key,
+      day: d.getUTCDate(),
+      orders: row?.orders ?? 0,
+      value: row?.value ?? 0,
+      earned: row?.earned ?? 0,
+    });
+  }
 
-  const pick = (agg: Array<{ orders: number; revenue: number }>) => ({
-    orders: agg[0]?.orders ?? 0,
-    revenue: agg[0]?.revenue ?? 0,
-  });
+  const money = (agg: Array<{ orders: number; value: number; earned: number }>) => {
+    const a = agg[0];
+    const value = a?.value ?? 0;
+    const earned = a?.earned ?? 0;
+    return { orders: a?.orders ?? 0, value, earned, upcoming: Math.max(0, value - earned) };
+  };
+
+  const rangeTotals = daily.reduce(
+    (t, d) => ({ orders: t.orders + d.orders, value: t.value + d.value, earned: t.earned + d.earned }),
+    { orders: 0, value: 0, earned: 0 }
+  );
 
   const c = (couponsAgg as Array<{ orders: number; discount: number; payout: number }>)[0];
 
   return {
     newOrders,
-    today: pick(todayAgg),
-    totals: pick(totalsAgg),
-    month: {
-      year: y,
-      month: m,
-      orders: daily.reduce((s, d) => s + d.orders, 0),
-      revenue: daily.reduce((s, d) => s + d.revenue, 0),
+    today: money(todayAgg),
+    totals: money(totalsAgg),
+    range: {
+      from: rangeStart.toISOString().slice(0, 10),
+      to: new Date(rangeEnd.getTime() - 1).toISOString().slice(0, 10),
+      ...rangeTotals,
+      upcoming: Math.max(0, rangeTotals.value - rangeTotals.earned),
       daily,
     },
-    // All-time coupon money, for the dashboard.
-    coupons: {
-      orders: c?.orders ?? 0,
-      discount: c?.discount ?? 0,
-      payout: c?.payout ?? 0,
-    },
+    byStatus: (statusAgg as Array<{ _id: string; orders: number; value: number }>).reduce(
+      (acc, r) => ({ ...acc, [r._id]: { orders: r.orders, value: r.value } }),
+      {} as Record<string, { orders: number; value: number }>
+    ),
+    byMethod: (methodAgg as Array<{ _id: string; orders: number; value: number }>).reduce(
+      (acc, r) => ({ ...acc, [r._id]: { orders: r.orders, value: r.value } }),
+      {} as Record<string, { orders: number; value: number }>
+    ),
+    coupons: { orders: c?.orders ?? 0, discount: c?.discount ?? 0, payout: c?.payout ?? 0 },
   };
 };
 
