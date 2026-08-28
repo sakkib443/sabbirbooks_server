@@ -23,6 +23,10 @@ const bookCouponSchema = new Schema(
     // Who the code belongs to and how to reach them to hand over the payout.
     ownerName: { type: String, default: '' },
     ownerPhone: { type: String, default: '' },
+    // Optional login for that owner — an 'affiliate' User created alongside the
+    // coupon. When set, they can sign in and see their own sales and earnings.
+    // The coupon still works exactly the same without one.
+    ownerUser: { type: Schema.Types.ObjectId, ref: 'User', default: null },
 
     // The buyer-facing discount. Capped at 90% like the book offers so a typo
     // cannot zero a price; a fixed amount is clamped to the price at checkout.

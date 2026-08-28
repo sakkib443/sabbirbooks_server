@@ -13,6 +13,35 @@ const createOrder = async (req: Request, res: Response) => {
   }
 };
 
+// DELETE one order (owner accounts only) — permanent, and puts any stock this
+// order had taken back on the shelf. See OrderService.deleteOrder.
+const deleteOrder = async (req: Request, res: Response) => {
+  try {
+    await OrderService.deleteOrder(req.params.id);
+    res.status(200).json({ success: true, message: 'Order deleted' });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+// DELETE many orders at once — what the order list's multi-select posts.
+const deleteOrders = async (req: Request, res: Response) => {
+  try {
+    const ids: string[] = Array.isArray(req.body?.ids) ? req.body.ids.map(String) : [];
+    if (ids.length === 0) {
+      return res.status(400).json({ success: false, message: 'No orders selected' });
+    }
+    const result = await OrderService.deleteOrders(ids);
+    res.status(200).json({
+      success: true,
+      message: `${result.deleted} order(s) deleted${result.failed ? `, ${result.failed} failed` : ''}`,
+      data: result,
+    });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
 // GET checkout options (public) — enabled payment methods + delivery charges.
 // Public because the checkout page needs it before the buyer has an order (and
 // it exposes nothing but the shop's own published rates).
@@ -204,4 +233,6 @@ export const OrderController = {
   rejectOrderPayment,
   updateOrderPayment,
   downloadBook,
+  deleteOrder,
+  deleteOrders,
 };

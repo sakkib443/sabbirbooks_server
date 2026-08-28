@@ -42,6 +42,10 @@ export const ROLES = [
   'manager',
   'mentor',
   'student',
+  // A coupon owner — someone who sells books through their own discount code.
+  // They hold NO admin capability at all; their only screen is their own
+  // affiliate dashboard, which shows the sales and earnings of their codes.
+  'affiliate',
 ] as const;
 
 export type Role = (typeof ROLES)[number];
@@ -189,6 +193,9 @@ export const ROLE_DEFAULT_CAPABILITIES: Record<Role, Capability[]> = {
   //   settings.write → cannot change the site
   manager: ['content.write', 'training.manage'],
   student: [],
+  // A coupon owner sees only their own earnings screen, which is gated on being
+  // the coupon's owner — never on a capability. Deliberately empty.
+  affiliate: [],
 };
 
 const isRole = (value: unknown): value is Role =>

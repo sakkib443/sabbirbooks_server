@@ -94,6 +94,21 @@ router.patch(
   OrderController.updateOrderStatus
 );
 
+// ─── Delete orders — owner accounts only ─────────────────────
+//
+// Deleting an order destroys the record of a sale, so it is deliberately the
+// narrowest gate in this file: superAdmin/admin, who alone bypass every
+// capability check. A manager with orders.write can confirm and cancel, but
+// never erase. The bulk route is declared before '/:id' so it is not read as an
+// order id.
+router.post(
+  '/bulk-delete',
+  authMiddleware,
+  authorize('superAdmin', 'admin'),
+  OrderController.deleteOrders
+);
+router.delete('/:id', authMiddleware, authorize('superAdmin', 'admin'), OrderController.deleteOrder);
+
 // ─── Single order (owner or admin) — keep last so specific
 // paths above win over the ':id' wildcard ────────────────────
 router.get('/:id', authMiddleware, OrderController.getOrderById);

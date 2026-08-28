@@ -13,6 +13,11 @@ const write = [authMiddleware, authorize('admin', 'manager'), requireCapability(
 // ── Checkout (any logged-in buyer) ──
 router.post('/validate', authMiddleware, C.validateCoupon);
 
+// ── Coupon owner's own dashboard. Scoped to their coupons by ownerUser, so it
+// needs no role or capability — being the owner is the whole gate. Declared
+// before '/:id' so 'my' is not read as an id.
+router.get('/my', authMiddleware, C.getMyCouponStats);
+
 // ── Admin: report + list. `/payouts` before `/:id` so it is not read as an id. ──
 router.get('/payouts', ...read, C.getPayouts);
 router.get('/', ...read, C.getAllCoupons);

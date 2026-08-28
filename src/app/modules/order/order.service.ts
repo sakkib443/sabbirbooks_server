@@ -497,6 +497,50 @@ const updateOrderStatus = async (
   return order;
 };
 
+// ─── DELETE orders (owner accounts only) ─────────────────────
+//
+// Permanent, and deliberately so — this is the "remove the test orders" button,
+// not a cancellation (cancelling is a status change that keeps the record and
+// restores stock). Deleting an order that had taken stock puts those copies
+// back first, otherwise the shop's stock count would drift every time an admin
+// tidied up.
+const restoreStockIfTaken = async (order: any): Promise<void> => {
+  if (order?.stockAdjusted !== true) return;
+  for (const item of order.items || []) {
+    if (item.format === 'printed') {
+      await Book.findByIdAndUpdate(item.book, {
+        $inc: { stock: item.quantity, totalSold: -item.quantity },
+      });
+    } else {
+      await Book.findByIdAndUpdate(item.book, { $inc: { totalSold: -item.quantity } });
+    }
+  }
+};
+
+const deleteOrder = async (id: string): Promise<void> => {
+  if (!isValidObjectId(id)) throw new Error('Invalid order id');
+  const order: any = await Order.findById(id);
+  if (!order) throw new Error('Order not found');
+  await restoreStockIfTaken(order);
+  await Order.deleteOne({ _id: order._id });
+};
+
+/** Bulk version of the above — one pass, and it reports what actually went. */
+const deleteOrders = async (ids: string[]): Promise<{ deleted: number; failed: number }> => {
+  const valid = (ids || []).filter((id) => isValidObjectId(id));
+  let deleted = 0;
+  let failed = 0;
+  for (const id of valid) {
+    try {
+      await deleteOrder(id);
+      deleted += 1;
+    } catch {
+      failed += 1;
+    }
+  }
+  return { deleted, failed: failed + ((ids?.length || 0) - valid.length) };
+};
+
 // ─── PAY via bKash ───────────────────────────────────────────
 // Reuses the payment module's BkashService (DEMO mode when keys are blank).
 // The order's _id is passed through the service's `courseId` slot as the generic
@@ -879,4 +923,6 @@ export const OrderService = {
   rejectOrderPayment,
   updateOrderPayment,
   getDownloadUrl,
+  deleteOrder,
+  deleteOrders,
 };
