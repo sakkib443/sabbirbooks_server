@@ -61,6 +61,17 @@ const updateOrdersStatus = async (req: Request, res: Response) => {
   }
 };
 
+// PATCH the whole order (owner accounts) — delivery details, payment state and
+// the buyer's contact fields. See OrderService.adminUpdateOrder.
+const adminUpdateOrder = async (req: Request, res: Response) => {
+  try {
+    const order = await OrderService.adminUpdateOrder(req.params.id, req.body || {});
+    res.status(200).json({ success: true, message: 'Order updated', data: order });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
 // GET checkout options (public) — enabled payment methods + delivery charges.
 // Public because the checkout page needs it before the buyer has an order (and
 // it exposes nothing but the shop's own published rates).
@@ -256,4 +267,5 @@ export const OrderController = {
   deleteOrder,
   deleteOrders,
   updateOrdersStatus,
+  adminUpdateOrder,
 };

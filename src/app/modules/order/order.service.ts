@@ -789,6 +789,101 @@ const rejectOrderPayment = async (id: string, reason?: string): Promise<IOrder> 
 };
 
 // ─── ADMIN: edit payment details (correct a typo'd txn id, number, etc.) ─────
+/**
+ * The owner's correction pass over one order.
+ *
+ * Buyers mistype their own address and phone all the time, and a payment gets
+ * recorded against the wrong method often enough that "delete and re-order" was
+ * becoming the workaround. This lets an owner account fix the record in place:
+ * the delivery details, the payment state, and — because the buyer's email and
+ * phone live on the User, not the order — those two fields as well.
+ *
+ * What it deliberately does NOT touch: the money. Prices, discounts, delivery
+ * charge and total are computed from the catalogue at checkout and are the
+ * evidence of what was actually agreed; editing them here would leave an order
+ * whose lines do not add up to its total. Cancel and re-place instead.
+ *
+ * Every field is optional — only what is sent is written, so a form that posts
+ * one changed box cannot blank the rest.
+ */
+const adminUpdateOrder = async (
+  id: string,
+  body: {
+    shippingAddress?: Partial<IShippingAddress>;
+    payment?: {
+      status?: 'pending' | 'paid' | 'failed';
+      method?: 'bkash' | 'sslcommerz' | 'manual' | 'cod' | 'free';
+      transactionId?: string;
+    };
+    buyer?: { email?: string; phoneNumber?: string; whatsappNumber?: string };
+    adminNote?: string;
+  }
+): Promise<IOrder> => {
+  if (!isValidObjectId(id)) throw new Error('Invalid order id');
+  const order: any = await Order.findById(id);
+  if (!order) throw new Error('Order not found');
+
+  // ── Delivery details ──
+  if (body.shippingAddress) {
+    const a = body.shippingAddress;
+    order.shippingAddress = { ...(order.shippingAddress?.toObject?.() ?? order.shippingAddress ?? {}) };
+    for (const k of ['name', 'phone', 'address', 'city', 'district', 'division', 'upazila', 'note'] as const) {
+      if (a[k] !== undefined) (order.shippingAddress as any)[k] = a[k];
+    }
+    // 'city' is the courier-facing line and mirrors the upazila (see
+    // order.interface). Keep them in step when only the upazila is corrected.
+    if (a.upazila !== undefined && a.city === undefined) {
+      (order.shippingAddress as any).city = a.upazila;
+    }
+    order.markModified('shippingAddress');
+  }
+
+  // ── Payment state ──
+  if (body.payment) {
+    const p = body.payment;
+    if (p.status !== undefined) {
+      order.payment.status = p.status;
+      // A payment marked paid by hand still needs a paidAt, or the reports read
+      // it as money that arrived at no particular time.
+      if (p.status === 'paid' && !order.payment.paidAt) order.payment.paidAt = new Date();
+      if (p.status !== 'paid') order.payment.paidAt = undefined;
+    }
+    if (p.method !== undefined) order.payment.method = p.method;
+    if (p.transactionId !== undefined) order.payment.transactionId = p.transactionId;
+    order.markModified('payment');
+  }
+
+  if (body.adminNote !== undefined) order.adminNote = body.adminNote;
+
+  await order.save();
+
+  // ── The buyer's own record ──
+  // Separate document, so a failure here must not lose the order edit above.
+  if (body.buyer && order.user) {
+    const u = body.buyer;
+    const patch: Record<string, string> = {};
+    if (u.email !== undefined) {
+      const email = String(u.email).trim().toLowerCase();
+      if (email) {
+        const clash = await User.findOne({ email, _id: { $ne: order.user } }).select('_id').lean();
+        if (clash) throw new Error('Another account already uses that email');
+        patch.email = email;
+      }
+    }
+    if (u.phoneNumber !== undefined) patch.phoneNumber = String(u.phoneNumber).trim();
+    if (u.whatsappNumber !== undefined) patch.whatsappNumber = String(u.whatsappNumber).trim();
+    if (Object.keys(patch).length > 0) {
+      await User.updateOne({ _id: order.user }, { $set: patch });
+    }
+  }
+
+  // Hand back the order with the buyer populated, the shape the admin list uses.
+  return (await Order.findById(id).populate(
+    'user',
+    'firstName lastName email phoneNumber whatsappNumber medicalCollegeName district division upazila'
+  )) as IOrder;
+};
+
 const updateOrderPayment = async (
   id: string,
   body: {
@@ -1046,4 +1141,5 @@ export const OrderService = {
   deleteOrder,
   deleteOrders,
   updateOrdersStatus,
+  adminUpdateOrder,
 };

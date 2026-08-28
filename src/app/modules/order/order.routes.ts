@@ -106,6 +106,16 @@ router.patch(
   OrderController.updateOrdersStatus
 );
 
+// ─── Owner correction pass over one order ────────────────────
+// Editing a buyer's email and address is a records change, not a fulfilment
+// one, so it sits with delete on the owner-only gate rather than orders.write.
+router.patch(
+  '/:id/admin-edit',
+  authMiddleware,
+  authorize('superAdmin', 'admin'),
+  OrderController.adminUpdateOrder
+);
+
 // ─── Delete orders — owner accounts only ─────────────────────
 //
 // Deleting an order destroys the record of a sale, so it is deliberately the
