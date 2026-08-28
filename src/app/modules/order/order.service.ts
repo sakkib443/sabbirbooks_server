@@ -243,11 +243,20 @@ const createOrder = async (
   // Grand total discount = the book's offers plus the coupon.
   const discount = offersDiscount + couponDiscount;
 
-  // The buyer's college decides the free-local rule. Looked up only when there
-  // is a printed item to charge for; the shipping division comes off the order.
-  const buyerCollege = hasPrinted
-    ? (await User.findById(userId).select('medicalCollegeName').lean())?.medicalCollegeName || ''
-    : '';
+  // The buyer's medical college — required on EVERY order, and the input to the
+  // free-local-delivery rule. Required because the shop is sold to medical
+  // students and the college is how orders are batched and delivered; an account
+  // that never picked one (an old signup, or a Google sign-in that skipped the
+  // profile step) is asked to set it before it can order, rather than silently
+  // producing an order nobody can route.
+  const buyer = await User.findById(userId).select('medicalCollegeName').lean();
+  const buyerCollege = (buyer?.medicalCollegeName || '').trim();
+  if (!buyerCollege) {
+    throw new Error(
+      'আপনার মেডিকেল কলেজ নির্বাচন করা নেই। প্রোফাইল থেকে মেডিকেল কলেজ নির্বাচন করে আবার অর্ডার করুন। ' +
+        '(Please select your medical college in your profile before ordering.)'
+    );
+  }
   const deliveryCharge = await quoteDeliveryCharge({
     hasPrinted,
     subtotal: subtotal - discount,
@@ -385,7 +394,13 @@ const getAllOrders = async (query?: {
   // Populate the buyer so the admin view can show who placed the order — needed
   // for digital orders which carry no shippingAddress contact details.
   const orders = await Order.find(filter)
-    .populate('user', 'firstName lastName email phoneNumber')
+    // The college and its geography ride along: the admin order screen shows the
+    // full picture of who ordered, and a student's college is the one detail the
+    // shipping address never carries.
+    .populate(
+      'user',
+      'firstName lastName email phoneNumber whatsappNumber medicalCollegeName district division upazila'
+    )
     .sort({ createdAt: -1 })
     .skip((page - 1) * limit)
     .limit(limit);

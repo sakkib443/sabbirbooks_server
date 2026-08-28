@@ -77,8 +77,12 @@ export const getMeController = async (req: Request, res: Response) => {
         // very first authenticated request rather than slipping through.
         // Staff accounts are exempt: they are created by an admin, not by
         // signup, and are not customers anyone needs to reach on WhatsApp.
+        // The college is required for the same reason the number is: the shop
+        // sells to medical students, orders are batched and delivered by
+        // college, and the checkout refuses an order without one.
         profileComplete:
-          account?.role !== 'student' || Boolean(account?.whatsappNumber),
+          account?.role !== 'student' ||
+          (Boolean(account?.whatsappNumber) && Boolean(account?.medicalCollegeName)),
         permissions: account?.permissions,
         capabilities: account
           ? UserService.capabilitiesFor(account as any)
