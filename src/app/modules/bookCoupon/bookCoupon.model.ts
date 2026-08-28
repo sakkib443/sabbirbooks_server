@@ -43,6 +43,7 @@ const bookCouponSchema = new Schema(
   { timestamps: true }
 );
 
-bookCouponSchema.index({ code: 1 });
+// `code` already has unique:true above, which creates its index — no separate
+// schema.index() (that is the "Duplicate schema index" Mongoose warns about).
 
 export const BookCoupon = model('BookCoupon', bookCouponSchema);

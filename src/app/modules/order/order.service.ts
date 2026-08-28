@@ -12,6 +12,7 @@ import { BkashService } from '../payment/bkash.service';
 import { SslcommerzService } from '../payment/sslcommerz.service';
 import { SettingsService } from '../settings/settings.services';
 import { OrderAlertService } from '../notification/orderAlert.service';
+import { OrderEmailService } from '../notification/orderEmail.service';
 
 // Resolve a book by slug / numeric id / Mongo _id — same tolerant lookup the
 // book module exposes publicly (client may send either a slug or an _id).
@@ -302,6 +303,10 @@ const createOrder = async (
     console.error('[order-alert] dispatch threw (order unaffected):', e)
   );
 
+  // "Order placed, pending" email to the buyer — same fire-and-forget rule, and a
+  // no-op until SMTP credentials are set.
+  void OrderEmailService.sendOrderPlacedEmail(order);
+
   return order;
 };
 
@@ -407,6 +412,9 @@ const updateOrderStatus = async (
   if (!order) throw new Error('Order not found');
 
   const now = new Date();
+  // Was this order already confirmed before this status change? Drives the
+  // one-time "order confirmed" email below (a COD confirm is the first time).
+  const wasConfirmed = !!order.confirmedAt;
 
   if (extra?.courierName !== undefined) order.courierName = extra.courierName;
   if (extra?.trackingCode !== undefined) order.trackingCode = extra.trackingCode;
@@ -478,6 +486,14 @@ const updateOrderStatus = async (
   }
 
   await order.save();
+
+  // Confirmed for the first time (e.g. an admin confirming a pending COD order) →
+  // the "order confirmed" email. Not on cancellation, and not again once already
+  // confirmed. Fire-and-forget; a no-op until SMTP credentials are set.
+  if (!wasConfirmed && order.confirmedAt && order.status !== 'cancelled') {
+    void OrderEmailService.sendOrderConfirmedEmail(order);
+  }
+
   return order;
 };
 
@@ -566,6 +582,7 @@ const applyStockOnce = async (order: any): Promise<void> => {
 // Shared: mark an order paid, decrement printed stock (once), bump totalSold, and
 // move it to its post-payment state (digital → access-granted, else → processing).
 const applyPaidSideEffects = async (order: any): Promise<void> => {
+  const wasConfirmed = !!order.confirmedAt;
   await applyStockOnce(order);
   order.payment.status = 'paid';
   order.payment.paidAt = new Date();
@@ -575,6 +592,9 @@ const applyPaidSideEffects = async (order: any): Promise<void> => {
     order.status = order.deliveryType === 'digital' ? 'access-granted' : 'processing';
   }
   if (!order.confirmedAt) order.confirmedAt = new Date();
+  // First confirmation (payment settled — gateway or manual approval) → the
+  // "order confirmed" email. Fire-and-forget; the caller saves the order.
+  if (!wasConfirmed) void OrderEmailService.sendOrderConfirmedEmail(order);
 };
 
 // ─── COMPLETE payment (DEMO / gateway callback) ──────────────
