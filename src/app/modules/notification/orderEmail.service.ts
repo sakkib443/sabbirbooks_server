@@ -40,6 +40,18 @@ const clientUrl = () => (config.client_url || 'https://magicviva.com').replace(/
 const supportPhone = () => config.alerts?.whatsapp?.admin_to || '';
 const tk = (n: any) => '৳' + Number(n || 0).toLocaleString('en-US');
 
+/**
+ * Where the email's button sends the buyer: THIS order's tracking page, not the
+ * dashboard home. Landing on the dashboard and then having to hunt for the
+ * order is the one thing someone clicking "track my order" does not want.
+ * Falls back to the order list when an id is somehow missing.
+ */
+const trackUrl = (order: any): string => {
+  const base = `${clientUrl()}/dashboard/user/orders`;
+  const id = order?._id ? String(order._id) : '';
+  return id ? `${base}/${id}` : base;
+};
+
 const bdDate = (d: any): string => {
   try {
     return new Date(d || Date.now()).toLocaleDateString('en-GB', {
@@ -231,7 +243,7 @@ const placedTemplate = (name: string, order: any) => ({
             : ''
       }
       ${addressPanel(order)}
-      ${button(`${clientUrl()}/dashboard/user`, 'অর্ডার দেখুন', BRAND.amber)}
+      ${button(trackUrl(order), 'অর্ডার ট্র্যাক করুন', BRAND.amber)}
     `,
   }),
 });
@@ -277,7 +289,7 @@ const confirmedTemplate = (name: string, order: any) => ({
             : ''
       }
       ${addressPanel(order)}
-      ${button(`${clientUrl()}/dashboard/user`, 'অর্ডার ট্র্যাক করুন', BRAND.green)}
+      ${button(trackUrl(order), 'অর্ডার ট্র্যাক করুন', BRAND.green)}
     `,
   }),
 });
