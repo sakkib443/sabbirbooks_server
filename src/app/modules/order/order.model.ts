@@ -89,6 +89,10 @@ const orderSchema = new Schema<IOrder>(
     subtotal: { type: Number, required: true, min: 0 },
     discount: { type: Number, default: 0, min: 0 },
     couponCode: { type: String, uppercase: true, trim: true },
+    // Coupon breakdown, snapshotted at checkout (see order.interface). Payout is
+    // what the shop owes the coupon owner for this sale; the report sums it.
+    couponDiscount: { type: Number, default: 0, min: 0 },
+    couponPayout: { type: Number, default: 0, min: 0 },
     // Snapshot of the courier fee quoted at checkout. Old orders predate this
     // field, so default 0 keeps their totals reading correctly.
     deliveryCharge: { type: Number, default: 0, min: 0 },

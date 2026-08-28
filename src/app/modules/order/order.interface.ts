@@ -94,8 +94,14 @@ export interface IOrder {
   deliveryType: TDeliveryType;
   shippingAddress?: IShippingAddress;
   subtotal: number;
+  // Every taka off the product price — the book's own offers PLUS any coupon.
   discount: number;
+  // Coupon breakdown, snapshotted at checkout so a later edit to the coupon never
+  // rewrites this order. `couponDiscount` is the buyer's saving from the code;
+  // `couponPayout` is what the shop owes the coupon's owner for this one sale.
   couponCode?: string;
+  couponDiscount?: number;
+  couponPayout?: number;
   // Snapshotted at checkout from the site settings, so changing the rate later
   // never rewrites what an existing customer was quoted.
   deliveryCharge: number;

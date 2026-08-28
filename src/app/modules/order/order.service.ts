@@ -5,6 +5,8 @@ import { getNextSequence, ORDER_SEQ } from './counter.model';
 import { IOrder, IShippingAddress, TDeliveryType, TDeliveryArea } from './order.interface';
 import { Book } from '../book/book.model';
 import { priceBookUnit, hasOffers } from '../book/book.pricing';
+import { BookCoupon } from '../bookCoupon/bookCoupon.model';
+import { evaluateBookCoupon } from '../bookCoupon/bookCoupon.controller';
 import { User } from '../user/user.model';
 import { BkashService } from '../payment/bkash.service';
 import { SslcommerzService } from '../payment/sslcommerz.service';
@@ -110,6 +112,7 @@ const createOrder = async (
     items: { bookSlugOrId: string; quantity: number }[];
     shippingAddress?: IShippingAddress;
     paymentMethod?: 'manual' | 'cod';
+    couponCode?: string;
   }
 ): Promise<IOrder> => {
   const items: IOrder['items'] = [];
@@ -212,7 +215,32 @@ const createOrder = async (
   const subtotal = items.reduce((sum, it) => sum + it.price * it.quantity, 0);
   // Whole taka: nobody hands a courier 62.5tk, and the client renders this row
   // verbatim.
-  const discount = Math.round(orderDiscount);
+  const offersDiscount = Math.round(orderDiscount);
+
+  // ── Coupon — stacks on top of the book's own offers ─────────────────────────
+  // Evaluated against the product total AFTER those offers, so the code discounts
+  // the already-reduced price (the buyer keeps their pre-order / online / normal
+  // saving AND the coupon). Everything is snapshotted onto the order; the coupon's
+  // usage tally is bumped only after the order is safely written.
+  let couponCode: string | undefined;
+  let couponDiscount = 0;
+  let couponPayout = 0;
+  let couponDocId: unknown = null;
+  const rawCoupon = (payload.couponCode || '').trim();
+  if (rawCoupon) {
+    const afterOffers = Math.max(0, subtotal - offersDiscount);
+    // Throws a buyer-friendly Error (invalid / inactive) which fails the order —
+    // the buyer explicitly applied the code and expects its price, so silently
+    // dropping it (and charging more than shown) would be worse.
+    const { coupon, discountAmount } = await evaluateBookCoupon(rawCoupon, afterOffers);
+    couponCode = coupon.code;
+    couponDiscount = discountAmount;
+    couponPayout = Math.max(0, Number(coupon.payoutPerSale) || 0);
+    couponDocId = coupon._id;
+  }
+
+  // Grand total discount = the book's offers plus the coupon.
+  const discount = offersDiscount + couponDiscount;
 
   // The buyer's college decides the free-local rule. Looked up only when there
   // is a printed item to charge for; the shipping division comes off the order.
@@ -241,6 +269,9 @@ const createOrder = async (
     shippingAddress: hasPrinted ? { ...payload.shippingAddress } : undefined,
     subtotal,
     discount,
+    couponCode,
+    couponDiscount,
+    couponPayout,
     deliveryCharge,
     total,
     isPreOrder: hasPreOrder,
@@ -249,6 +280,15 @@ const createOrder = async (
     payment: method === 'cod' ? { method: 'cod', status: 'pending' } : { status: 'pending' },
     status: 'pending',
   });
+
+  // Bump the coupon's usage tally — after the order is safely written, and never
+  // fatal: a failed counter must not 500 a completed order (the payout report
+  // counts orders directly, so this tally is a convenience, not the source).
+  if (couponDocId) {
+    void BookCoupon.updateOne({ _id: couponDocId }, { $inc: { usedCount: 1 } }).catch((e) =>
+      console.error('[coupon] usedCount bump failed (order unaffected):', e)
+    );
+  }
 
   // Tell the admin and the buyer — in-app, Telegram (admin), WhatsApp (both).
   //
@@ -735,7 +775,7 @@ const getBookOrderStats = async (year?: number, month?: number) => {
   const notCancelled = { status: { $ne: 'cancelled' } };
   const sum = { orders: { $sum: 1 }, revenue: { $sum: '$total' } };
 
-  const [totalsAgg, todayAgg, newOrders, monthDaily] = await Promise.all([
+  const [totalsAgg, todayAgg, newOrders, monthDaily, couponsAgg] = await Promise.all([
     Order.aggregate([{ $match: notCancelled }, { $group: { _id: null, ...sum } }]),
     Order.aggregate([
       { $match: { ...notCancelled, createdAt: { $gte: todayStart, $lt: todayEnd } } },
@@ -750,6 +790,19 @@ const getBookOrderStats = async (year?: number, month?: number) => {
         $group: {
           _id: { $dayOfMonth: { date: '$createdAt', timezone: 'Asia/Dhaka' } },
           ...sum,
+        },
+      },
+    ]),
+    // Coupon money, all-time: how many coupon sales, how much discount buyers got,
+    // and how much is owed to coupon owners (the payout snapshots).
+    Order.aggregate([
+      { $match: { ...notCancelled, couponCode: { $nin: [null, ''] } } },
+      {
+        $group: {
+          _id: null,
+          orders: { $sum: 1 },
+          discount: { $sum: { $ifNull: ['$couponDiscount', 0] } },
+          payout: { $sum: { $ifNull: ['$couponPayout', 0] } },
         },
       },
     ]),
@@ -768,6 +821,8 @@ const getBookOrderStats = async (year?: number, month?: number) => {
     revenue: agg[0]?.revenue ?? 0,
   });
 
+  const c = (couponsAgg as Array<{ orders: number; discount: number; payout: number }>)[0];
+
   return {
     newOrders,
     today: pick(todayAgg),
@@ -778,6 +833,12 @@ const getBookOrderStats = async (year?: number, month?: number) => {
       orders: daily.reduce((s, d) => s + d.orders, 0),
       revenue: daily.reduce((s, d) => s + d.revenue, 0),
       daily,
+    },
+    // All-time coupon money, for the dashboard.
+    coupons: {
+      orders: c?.orders ?? 0,
+      discount: c?.discount ?? 0,
+      payout: c?.payout ?? 0,
     },
   };
 };

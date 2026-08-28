@@ -35,6 +35,9 @@ export const createOrderValidationSchema = z.object({
     // 'cod' = pay the courier in cash. Defaults to manual (the pre-existing
     // behaviour) when an older client omits it.
     paymentMethod: z.enum(['manual', 'cod']).optional(),
+    // An optional discount code. Re-evaluated server-side against the post-offer
+    // price; an invalid code fails the order rather than being charged in full.
+    couponCode: z.string().optional(),
   }),
 });
 
