@@ -42,6 +42,25 @@ const deleteOrders = async (req: Request, res: Response) => {
   }
 };
 
+// PATCH many orders to one status — the order list's multi-select.
+const updateOrdersStatus = async (req: Request, res: Response) => {
+  try {
+    const ids: string[] = Array.isArray(req.body?.ids) ? req.body.ids.map(String) : [];
+    const status = String(req.body?.status || '');
+    if (ids.length === 0) {
+      return res.status(400).json({ success: false, message: 'No orders selected' });
+    }
+    const result = await OrderService.updateOrdersStatus(ids, status);
+    res.status(200).json({
+      success: true,
+      message: `${result.updated} order(s) updated${result.failed ? `, ${result.failed} failed` : ''}`,
+      data: result,
+    });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
 // GET checkout options (public) — enabled payment methods + delivery charges.
 // Public because the checkout page needs it before the buyer has an order (and
 // it exposes nothing but the shop's own published rates).
@@ -235,4 +254,5 @@ export const OrderController = {
   downloadBook,
   deleteOrder,
   deleteOrders,
+  updateOrdersStatus,
 };

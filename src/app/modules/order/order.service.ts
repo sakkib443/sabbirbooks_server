@@ -540,6 +540,30 @@ const deleteOrder = async (id: string): Promise<void> => {
   await Order.deleteOne({ _id: order._id });
 };
 
+/**
+ * Move many orders to the same status in one request — what the order list's
+ * multi-select posts. Each one goes through updateOrderStatus, so stock, the
+ * confirm timestamps, the COD-paid rule and the "order confirmed" email all
+ * behave exactly as they do for a single order. One failure does not stop the
+ * rest; the count of each comes back.
+ */
+const updateOrdersStatus = async (
+  ids: string[],
+  status: string
+): Promise<{ updated: number; failed: number }> => {
+  let updated = 0;
+  let failed = 0;
+  for (const id of ids || []) {
+    try {
+      await updateOrderStatus(id, status);
+      updated += 1;
+    } catch {
+      failed += 1;
+    }
+  }
+  return { updated, failed };
+};
+
 /** Bulk version of the above — one pass, and it reports what actually went. */
 const deleteOrders = async (ids: string[]): Promise<{ deleted: number; failed: number }> => {
   const valid = (ids || []).filter((id) => isValidObjectId(id));
@@ -940,4 +964,5 @@ export const OrderService = {
   getDownloadUrl,
   deleteOrder,
   deleteOrders,
+  updateOrdersStatus,
 };

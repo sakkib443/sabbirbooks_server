@@ -94,6 +94,18 @@ router.patch(
   OrderController.updateOrderStatus
 );
 
+// ─── Bulk status change ──────────────────────────────────────
+// Same gate as the single-order status route (orders.write): confirming or
+// cancelling many at once is the same decision, taken in bulk. Declared before
+// '/:id' so 'bulk-status' is not read as an order id.
+router.patch(
+  '/bulk-status',
+  authMiddleware,
+  authorize('admin'),
+  requireCapability('orders.write'),
+  OrderController.updateOrdersStatus
+);
+
 // ─── Delete orders — owner accounts only ─────────────────────
 //
 // Deleting an order destroys the record of a sale, so it is deliberately the
