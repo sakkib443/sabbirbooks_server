@@ -7,8 +7,10 @@
  *   printed item → content opens only at 'delivered' / 'access-granted'
  *   digital item → content opens as soon as payment is 'paid'
  *   cancelled    → never, even if the payment was taken and later refunded
- *   isFree       → grants NOTHING: the free-chapter preview was withdrawn, so a
- *                  flagged chapter is as closed as any other
+ *   isFree       → opens for ANYONE, signed in or not: that chapter's QR is the
+ *                  printed sample, on a page a stranger can photograph in a shop
+ *   staff        → content.write reads any figure; they write this content and
+ *                  never bought the book, so ownership is the wrong question
  *   next-topic   → leaks no titles or codes to someone who may not read them
  *
  * Run:  npx ts-node src/__tests__/book-access.e2e.ts
@@ -224,22 +226,22 @@ async function main() {
     order: 1,
   });
 
-  // The client withdrew the free-chapter preview: what a QR opens is what the
-  // book is sold for, so isFree must not open a door that ownership does not.
-  // The free sample the shop offers is the preview PDF, a separate public file.
-  console.log('\n── isFree grants nothing without an order ──');
+  // A chapter the shop marks isFree is the printed book's sample: its QR is on
+  // a page anyone can photograph in a shop, so it opens for a stranger with no
+  // login at all. Every OTHER chapter stays shut — that is what the book sells.
+  console.log('\n── isFree opens for anyone, signed in or not ──');
   const broke = await mkUser('broke@t.com');
   const brokeId = String(broke._id);
   {
     const r = await BookContentService.scanTopic('FREE0001', brokeId);
-    check(
-      r.ok === false && r.reason === 'no_access',
-      'chapter flagged isFree → still blocked without an order'
-    );
-    check(
-      !JSON.stringify(r).includes('free answer'),
-      'and the refusal carries none of its answers'
-    );
+    check(r.ok === true, 'chapter flagged isFree → opens for a signed-in non-buyer');
+    check(JSON.stringify(r).includes('free answer'), 'and it carries the answers');
+  }
+  {
+    // No userId at all — the stranger who scanned the code off a printed page.
+    const r = await BookContentService.scanTopic('FREE0001', undefined);
+    check(r.ok === true, 'isFree → opens with no user at all');
+    check(JSON.stringify(r).includes('free answer'), 'anonymous reader gets the answers');
   }
   {
     const r = await BookContentService.scanTopic('PAID0001', brokeId);
@@ -395,6 +397,54 @@ async function main() {
       (await BookContentService.canReadProtectedMedia('not-referenced.png', String(buyer._id))) ===
         false,
       'a file no question references is refused (no public bucket)'
+    );
+
+    // The two ways in that are NOT ownership. Both were live bugs: the free
+    // chapter's page opened for a stranger and then rendered every figure
+    // broken, and the admin's own question editor did the same, because the
+    // only question this asked was "did you buy it".
+    await BookQuestion.updateOne(
+      { topicId: freeTopic._id },
+      { $set: { images: ['https://x.test/api/book-content/media/1700000001-free-fig.png'] } }
+    );
+    check(
+      (await BookContentService.canReadProtectedMedia('1700000001-free-fig.png', null)) === true,
+      "a free chapter's figure needs no reader at all"
+    );
+    check(
+      (await BookContentService.canReadProtectedMedia('1700000000-diagram.png', null)) === false,
+      'but a paid chapter\'s figure still refuses an anonymous request'
+    );
+
+    // A real document, not mkUser's bare ObjectId: the staff branch reads the
+    // account's role, so a user who does not exist proves nothing.
+    const { User } = await import('../app/modules/user/user.model');
+    const editor = await User.create({
+      id: 'STAFF-1',
+      firstName: 'Editor',
+      lastName: 'One',
+      email: 'editor@t.com',
+      role: 'contentManager',
+    });
+    check(
+      (await BookContentService.canReadProtectedMedia(
+        '1700000000-diagram.png',
+        String(editor._id)
+      )) === true,
+      'content staff read a paid figure they never bought (admin preview)'
+    );
+    check(
+      (await BookContentService.canReadProtectedMedia('not-referenced.png', String(editor._id))) ===
+        false,
+      'staff still cannot pull a file no question references'
+    );
+    const student = await User.create({ id: 'STU-1', firstName: 'Student', lastName: 'One', email: 'student@t.com', role: 'student' });
+    check(
+      (await BookContentService.canReadProtectedMedia(
+        '1700000000-diagram.png',
+        String(student._id)
+      )) === false,
+      'a plain student account is NOT let through by the staff branch'
     );
     // Prefix confusion: "0000-diagram.png" must not match "1700000000-diagram.png".
     check(

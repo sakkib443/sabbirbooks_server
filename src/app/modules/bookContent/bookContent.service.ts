@@ -2,6 +2,8 @@ import { Types } from 'mongoose';
 import { BookPart, BookChapter, BookTopic, BookQuestion, generateQrCode } from './bookContent.model';
 import { BookAccessService } from '../bookAccess/bookAccess.service';
 import { Book } from '../book/book.model';
+import { User } from '../user/user.model';
+import { hasCapability } from '../../config/permissions';
 import { withMediaTokens } from './mediaToken';
 import { sanitizeQuestionPayload } from './sanitizeAnswer';
 
@@ -23,7 +25,10 @@ export type ScanResult =
  * serialised — "only the scanned topic is visible" is a property of this
  * function, not of the page that renders it.
  */
-const scanTopic = async (qrCode: string, userId: string): Promise<ScanResult> => {
+// userId is optional and always was: the route runs `optionalAuth`, so a
+// stranger scanning a free chapter's printed QR arrives with none. The old
+// `userId: string` was a lie the controller's `as any` hid.
+const scanTopic = async (qrCode: string, userId?: string | null): Promise<ScanResult> => {
   const topic = await BookTopic.findOne({
     qrCode: qrCode.toUpperCase().trim(),
     isDeleted: false,
@@ -51,14 +56,18 @@ const scanTopic = async (qrCode: string, userId: string): Promise<ScanResult> =>
     .lean();
   const isFreeChapter = chapterDoc?.isFree === true;
 
-  const identified = Boolean(userId) && Types.ObjectId.isValid(String(userId));
+  // One narrowed value rather than a separate boolean flag: `reader` is either
+  // an id every call below can take, or null. A boolean would leave userId as
+  // `string | null | undefined` at each of those calls, which is how an
+  // anonymous scan used to reach hasBookAccess as the string "undefined".
+  const reader = userId && Types.ObjectId.isValid(String(userId)) ? String(userId) : null;
   const allowed =
-    isFreeChapter || (identified && (await BookAccessService.hasBookAccess(userId, topic.bookId)));
+    isFreeChapter || (reader !== null && (await BookAccessService.hasBookAccess(reader, topic.bookId)));
   if (!allowed) {
     // Enough to render a "buy this book" card, and nothing from inside it.
     const [book, awaitingDelivery] = await Promise.all([
       Book.findById(topic.bookId).select('title slug author coverImage price offerPrice').lean(),
-      identified ? BookAccessService.hasPendingDelivery(userId, topic.bookId) : Promise.resolve(false),
+      reader ? BookAccessService.hasPendingDelivery(reader, topic.bookId) : Promise.resolve(false),
     ]);
     return {
       ok: false,
@@ -79,8 +88,8 @@ const scanTopic = async (qrCode: string, userId: string): Promise<ScanResult> =>
   await Promise.all([
     // The per-reader history needs a reader; an anonymous free-chapter scan has
     // none, so only the topic's own counter moves.
-    identified
-      ? BookAccessService.recordScan(userId, topic.bookId, topic._id)
+    reader
+      ? BookAccessService.recordScan(reader, topic.bookId, topic._id)
       : Promise.resolve(),
     BookTopic.updateOne({ _id: topic._id }, { $inc: { scanCount: 1 } }),
   ]);
@@ -106,7 +115,10 @@ const scanTopic = async (qrCode: string, userId: string): Promise<ScanResult> =>
       // Media URLs point at the access-checked media route, which an <img> tag
       // cannot authenticate against — so they are stamped with a short-lived
       // token here, on a response that has already passed the access check.
-      questions: withMediaTokens(questions, String(userId)),
+      // An anonymous free-chapter reader gets no token: there is no user to bind
+      // one to, and String(undefined) would stamp every URL with a token for a
+      // user called "undefined". Free media needs none — see canReadProtectedMedia.
+      questions: reader ? withMediaTokens(questions, reader) : questions,
       // Total is fine to expose ("this topic has 7 questions"). answeredCount
       // is deliberately absent: a reader shouldn't be able to see how much of
       // the book is still unfinished — that is an internal admin metric.
@@ -711,7 +723,7 @@ const getNextTopicForReader = async (topicId: string, userId: string) => {
  * book, and nothing else. Unreferenced files are refused outright, so an
  * orphaned upload is not a public bucket.
  */
-const canReadProtectedMedia = async (fileName: string, userId: string): Promise<boolean> => {
+const canReadProtectedMedia = async (fileName: string, userId?: string | null): Promise<boolean> => {
   // Anchored to the end of the stored URL so "12-a.jpg" cannot match a request
   // for "…/912-a.jpg". The filename itself is already sanitised by multer and
   // re-validated by the controller before it reaches here.
@@ -726,6 +738,23 @@ const canReadProtectedMedia = async (fileName: string, userId: string): Promise<
 
   if (!question) return false;
 
+
+  // A chapter the shop has marked FREE is readable by anyone, exactly as its
+  // scan is — otherwise the free page opens for a stranger and then renders
+  // every figure broken, because each <img> asks a route that wanted a reader.
+  const chapter = await BookChapter.findById(question.chapterId).select('isFree').lean();
+  if (chapter?.isFree === true) return true;
+
+  if (!userId) return false;
+
+  // The staff who write this content have to be able to see it. `hasBookAccess`
+  // below asks one question — did this person buy the book — and an admin never
+  // did, so without this branch every figure in the question editor and in the
+  // admin preview renders broken while its text shows fine. Same capability the
+  // editor's own routes require, so nobody gains a view they did not already
+  // have through the panel.
+  const staff = await User.findById(userId).select('role permissions').lean();
+  if (staff && hasCapability(staff.role, staff.permissions, 'content.write')) return true;
 
   return BookAccessService.hasBookAccess(userId, question.bookId);
 };

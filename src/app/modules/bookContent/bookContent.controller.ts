@@ -196,7 +196,9 @@ const serveProtectedMedia = async (req: Request, res: Response) => {
       (queryToken && verifyMediaToken(queryToken)) ||
       (bearer ? verifyBearerUserId(bearer) : null);
 
-    if (!userId) return res.status(401).json({ success: false, message: 'Unauthorized access' });
+    // No 401 here any more: a free chapter's media is readable without a
+    // reader, and only canReadProtectedMedia knows whether this file belongs to
+    // one. Refusing first would break every figure on the free chapter's page.
 
     // path.basename strips any ../ before it can escape the directory; the
     // whitelist then rejects anything multer would never have written.
@@ -207,7 +209,12 @@ const serveProtectedMedia = async (req: Request, res: Response) => {
 
     const allowed = await BookContentService.canReadProtectedMedia(fileName, userId);
     if (!allowed) {
-      return res.status(403).json({ success: false, message: 'No access to this file' });
+      // 401 for a caller we could not identify — their media token has very
+      // likely just expired, and the page should send them to sign in rather
+      // than tell them they do not own a book they may well have bought. 403
+      // for one we could identify: this file is genuinely not theirs.
+      const code = userId ? 403 : 401;
+      return res.status(code).json({ success: false, message: 'No access to this file' });
     }
 
     const filePath = path.join(PROTECTED_MEDIA_DIR, fileName);
