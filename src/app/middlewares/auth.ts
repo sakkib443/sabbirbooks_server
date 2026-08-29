@@ -34,6 +34,31 @@ export const authMiddleware = (req: Request, res: Response, next: NextFunction) 
  * Usage: authorize('admin', 'mentor') → only these roles + superAdmin can access.
  * superAdmin always has access.
  */
+/**
+ * Reads the token when one is sent, and lets the request through either way.
+ *
+ * For routes that serve BOTH a signed-in buyer and an anonymous visitor — today
+ * that is the QR scan, where a chapter the shop has marked free opens for
+ * anyone while every other chapter still needs a purchase. authMiddleware
+ * cannot do this: it answers 401 and the stranger never reaches the handler
+ * that would have decided the chapter is free.
+ *
+ * A bad or expired token is treated as "not signed in" rather than an error:
+ * the visitor gets the anonymous answer, which is the safe direction.
+ */
+export const optionalAuth = (req: Request, _res: Response, next: NextFunction) => {
+  const header = req.headers.authorization;
+  const token = header?.startsWith('Bearer ') ? header.slice(7) : null;
+  if (token) {
+    try {
+      (req as any).user = jwt.verify(token, config.jwt.access_secret as string);
+    } catch {
+      // Ignored on purpose — see the note above.
+    }
+  }
+  next();
+};
+
 export const authorize = (...allowedRoles: string[]) => {
   return (req: Request, res: Response, next: NextFunction) => {
     const user = (req as any).user;

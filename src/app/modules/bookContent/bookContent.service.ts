@@ -32,20 +32,28 @@ const scanTopic = async (qrCode: string, userId: string): Promise<ScanResult> =>
 
   if (!topic) return { ok: false, reason: 'not_found' };
 
-  // Owning the book is the only way in. There is no free-chapter bypass and no
-  // anonymous path: what a QR opens is the thing the book is sold for, so a
-  // visitor who has not bought it sees the "buy this book" card instead — even
-  // for a chapter an admin has flagged isFree. That flag no longer grants
-  // anything; the free sample the shop offers is the preview PDF, which is a
-  // separate file served from the public uploads mount.
+  // Two ways in, and only two:
+  //
+  //   1. the chapter is marked FREE — the shop's own sample. Its QR opens for
+  //      anyone holding the printed page, signed in or not. That is the point of
+  //      a free chapter: a student flips through a friend's copy, scans, and
+  //      sees what the book actually gives them.
+  //   2. the reader owns the book AND it has reached them (hasBookAccess).
+  //
+  // Everything else gets the "buy this book" card and nothing from inside.
   //
   // The id is validated before it is used: hasBookAccess queries by userId, and
   // mongoose answers a malformed one with a CastError — a 500 where a refusal
-  // belongs. The route's authMiddleware means that should never happen, but
-  // "the gate throws instead of saying no" is the wrong failure for the one
-  // function standing between a stranger and the paid content.
+  // belongs. The route lets anonymous callers through now, so this guard is
+  // load-bearing rather than belt-and-braces.
+  const chapterDoc = await BookChapter.findById(topic.chapterId)
+    .select('title titleBn chapterNo isFree')
+    .lean();
+  const isFreeChapter = chapterDoc?.isFree === true;
+
   const identified = Boolean(userId) && Types.ObjectId.isValid(String(userId));
-  const allowed = identified && (await BookAccessService.hasBookAccess(userId, topic.bookId));
+  const allowed =
+    isFreeChapter || (identified && (await BookAccessService.hasBookAccess(userId, topic.bookId)));
   if (!allowed) {
     // Enough to render a "buy this book" card, and nothing from inside it.
     const [book, awaitingDelivery] = await Promise.all([
@@ -59,8 +67,8 @@ const scanTopic = async (qrCode: string, userId: string): Promise<ScanResult> =>
     };
   }
 
-  const [chapter, part, questions] = await Promise.all([
-    BookChapter.findById(topic.chapterId).select('title titleBn chapterNo').lean(),
+  const chapter = chapterDoc;
+  const [part, questions] = await Promise.all([
     BookPart.findById(topic.partId).select('title titleBn').lean(),
     BookQuestion.find({ topicId: topic._id, isDeleted: false, isPublished: true })
       .sort({ order: 1 })
@@ -69,7 +77,11 @@ const scanTopic = async (qrCode: string, userId: string): Promise<ScanResult> =>
   ]);
 
   await Promise.all([
-    BookAccessService.recordScan(userId, topic.bookId, topic._id),
+    // The per-reader history needs a reader; an anonymous free-chapter scan has
+    // none, so only the topic's own counter moves.
+    identified
+      ? BookAccessService.recordScan(userId, topic.bookId, topic._id)
+      : Promise.resolve(),
     BookTopic.updateOne({ _id: topic._id }, { $inc: { scanCount: 1 } }),
   ]);
 

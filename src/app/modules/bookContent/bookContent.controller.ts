@@ -63,10 +63,10 @@ const verifyBearerUserId = (token: string): string | null => {
  */
 const scan = async (req: Request, res: Response) => {
   try {
+    // May be undefined: a free chapter's QR is answered for anyone. The service
+    // decides — it is the only place that knows whether this topic's chapter is
+    // free, and a stranger must reach it for that decision to happen.
     const userId = (req as any).user?._id;
-    if (!userId) {
-      return res.status(401).json({ success: false, message: 'Unauthorized access' });
-    }
 
     const result = await BookContentService.scanTopic(req.params.qrCode, userId);
 
