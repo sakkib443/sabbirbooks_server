@@ -138,6 +138,15 @@ async function main() {
     }
   }
 
+  // The 112-college directory, and the abbreviations coupon codes are built
+  // from. Signup, the checkout address prefill and the Campus Ambassador form
+  // all read this list, and each of them is a blank dropdown without it.
+  const { MedicalCollegeService } = await import(
+    '../app/modules/medicalCollege/medicalCollege.service'
+  );
+  const { inserted } = await MedicalCollegeService.seedFromFile();
+  await MedicalCollegeService.backfillAbbreviations();
+
   // An admin, so the dashboard can be driven against this data too — the
   // content editor is where most of the reported bugs live, and it cannot be
   // reached without one.
@@ -252,6 +261,7 @@ async function main() {
   app.listen(port, () => {
     console.log(`\nDemo API on http://localhost:${port}`);
     console.log(`  ${outline.parts.length} parts · ${topicsMade} topics · ${questionsMade} questions`);
+    console.log(`  ${inserted} medical colleges seeded`);
     console.log(`  free chapter: ${freeTitle}`);
     console.log(`  free topic code: ${freeSample?.qrCode} (${freeSample?.title})`);
     console.log(`  paid topic code: ${paidSample?.qrCode} (${paidSample?.title})`);

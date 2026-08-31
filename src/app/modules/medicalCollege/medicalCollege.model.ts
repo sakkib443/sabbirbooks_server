@@ -31,16 +31,29 @@ const ABBR_STOPWORDS = new Set(['of', 'and', 'the', 'for', 'at', 'in', '&']);
  * rather than getting an empty-looking abbreviation it did not expect.
  */
 export const deriveAbbreviation = (name: string): string => {
-  const initials = String(name || '')
+  const raw = String(name || '');
+
+  // Some names carry their own abbreviation in brackets — "Armed Forces Medical
+  // College (AFMC)". That is not a guess to improve on, it is the answer, and
+  // taking the initials as well produced AFMCAFMC.
+  const bracketed = /\(([A-Z][A-Z0-9]{1,9})\)/.exec(raw);
+  if (bracketed) return bracketed[1];
+
+  // The town in "Army Medical College, Bogura" is kept, deliberately: it is the
+  // only thing separating five Army Medical Colleges, and a fallback that
+  // silently gives all five the same abbreviation would hand five different
+  // campuses the same coupon prefix. AMCB / AMCC / AMCJ is not what students
+  // write, but it identifies the college, which is what the code is for — and
+  // the shop's own list replaces all of this anyway.
+  return raw
     .replace(/[^A-Za-z\s]/g, ' ')
     .split(/\s+/)
     .filter((w) => w && !ABBR_STOPWORDS.has(w.toLowerCase()))
-    // An all-caps word is already an abbreviation inside the name (MAG, AFMC),
-    // so it contributes itself rather than just its first letter.
+    // An all-caps word inside the name is already an abbreviation (MAG in
+    // "Sylhet MAG Osmani"), so it contributes itself, not just its first letter.
     .map((w) => (w.length > 1 && w === w.toUpperCase() ? w : w[0].toUpperCase()))
-    .join('');
-
-  return initials.slice(0, 10);
+    .join('')
+    .slice(0, 10);
 };
 
 const medicalCollegeSchema = new Schema<IMedicalCollege>(
