@@ -14,10 +14,49 @@ export const toSearchKey = (name: string): string =>
     .replace(/\s+/g, ' ')
     .trim();
 
+/** Words that carry no identity, so they never contribute an initial. */
+const ABBR_STOPWORDS = new Set(['of', 'and', 'the', 'for', 'at', 'in', '&']);
+
+/**
+ * A best guess at how students would write this college: the initials of its
+ * significant words. "Dhaka Medical College" → DMC.
+ *
+ * A guess, and only ever a fallback for a row the shop has not given a real
+ * abbreviation for. The real ones do not always follow the rule — Sylhet MAG
+ * Osmani Medical College is SOMC, not SMOMC — which is why anything produced
+ * here is stored with `abbreviationSource: 'derived'` and shown to the admin as
+ * editable rather than treated as fact.
+ *
+ * Returns '' for a name with nothing latin in it; the caller decides what to do
+ * rather than getting an empty-looking abbreviation it did not expect.
+ */
+export const deriveAbbreviation = (name: string): string => {
+  const initials = String(name || '')
+    .replace(/[^A-Za-z\s]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w && !ABBR_STOPWORDS.has(w.toLowerCase()))
+    // An all-caps word is already an abbreviation inside the name (MAG, AFMC),
+    // so it contributes itself rather than just its first letter.
+    .map((w) => (w.length > 1 && w === w.toUpperCase() ? w : w[0].toUpperCase()))
+    .join('');
+
+  return initials.slice(0, 10);
+};
+
 const medicalCollegeSchema = new Schema<IMedicalCollege>(
   {
     name: { type: String, required: true, trim: true, unique: true },
     searchKey: { type: String, required: true, index: true },
+    // Deliberately NOT unique: two colleges can genuinely share initials
+    // (Sir Salimullah and Shaheed Suhrawardy are both SSMC by the naive rule).
+    // Uniqueness belongs to the coupon code, which is built from this plus the
+    // ambassador's own name and is unique there.
+    abbreviation: { type: String, trim: true, uppercase: true, default: '' },
+    abbreviationSource: {
+      type: String,
+      enum: ['official', 'derived'],
+      default: 'derived',
+    },
     type: {
       type: String,
       enum: ['government', 'private', 'army'],
@@ -43,6 +82,16 @@ medicalCollegeSchema.index({ district: 1 });
 
 medicalCollegeSchema.pre('save', function (next) {
   if (this.isModified('name')) this.searchKey = toSearchKey(this.name);
+  // A name change re-derives a guessed abbreviation, but never overwrites one
+  // the shop supplied — that is the whole point of tracking the source.
+  if (!this.abbreviation || (this.isModified('name') && this.abbreviationSource !== 'official')) {
+    this.abbreviation = deriveAbbreviation(this.name);
+    this.abbreviationSource = 'derived';
+  }
+  // An abbreviation typed by an admin is official by definition.
+  if (this.isModified('abbreviation') && !this.isModified('name')) {
+    this.abbreviationSource = 'official';
+  }
   next();
 });
 

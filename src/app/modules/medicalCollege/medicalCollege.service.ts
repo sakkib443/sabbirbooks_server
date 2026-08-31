@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { isValidObjectId } from 'mongoose';
-import { MedicalCollege, toSearchKey } from './medicalCollege.model';
+import { MedicalCollege, toSearchKey, deriveAbbreviation } from './medicalCollege.model';
 import { IMedicalCollege, TCollegeType } from './medicalCollege.interface';
 import { MEDICAL_COLLEGES } from '../../data/medicalColleges';
 
@@ -71,9 +71,39 @@ const listPublic = async (query: { q?: string; type?: string; district?: string 
   if (q) filter.searchKey = { $regex: q.split(' ').join('.*'), $options: 'i' };
 
   return MedicalCollege.find(filter)
-    .select('name type division district area')
+    // abbreviation ships with the list because the ambassador form previews the
+    // coupon code as the applicant types — one payload, no request per keystroke.
+    .select('name type division district area abbreviation')
     .sort({ type: 1, name: 1 })
     .lean();
+};
+
+/**
+ * Give every college an abbreviation, once.
+ *
+ * The 112 rows were seeded before Campus Ambassador coupon codes existed, so
+ * they have none, and a code cannot be built without one. Runs at boot beside
+ * the seed. Only fills blanks — an abbreviation the shop supplied or an admin
+ * typed is never touched, so this is safe to run on every deploy for ever.
+ */
+const backfillAbbreviations = async (): Promise<number> => {
+  const missing = await MedicalCollege.find({
+    $or: [{ abbreviation: { $exists: false } }, { abbreviation: '' }],
+  })
+    .select('_id name')
+    .lean();
+
+  let filled = 0;
+  for (const row of missing) {
+    const abbr = deriveAbbreviation(row.name);
+    if (!abbr) continue;
+    await MedicalCollege.updateOne(
+      { _id: row._id },
+      { $set: { abbreviation: abbr, abbreviationSource: 'derived' } }
+    );
+    filled++;
+  }
+  return filled;
 };
 
 /** Admin view — includes retired rows and the ones flagged for review. */
@@ -101,6 +131,12 @@ const update = async (id: string, payload: Partial<IMedicalCollege>) => {
   if (payload.name) patch.searchKey = toSearchKey(payload.name);
   // Editing a flagged row is what clears the flag.
   if (payload.name && !('needsReview' in payload)) patch.needsReview = false;
+  // An abbreviation an admin typed is authoritative, and must stop being
+  // re-derived from the name afterwards. Set here rather than in the schema
+  // hook because findByIdAndUpdate does not run pre('save').
+  if (typeof payload.abbreviation === 'string' && payload.abbreviation.trim()) {
+    patch.abbreviationSource = 'official';
+  }
   return MedicalCollege.findByIdAndUpdate(id, patch, { new: true, runValidators: true });
 };
 
@@ -124,6 +160,7 @@ const getRegions = async () => {
 
 export const MedicalCollegeService = {
   seedFromFile,
+  backfillAbbreviations,
   listPublic,
   listAll,
   getById,

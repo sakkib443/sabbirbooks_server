@@ -10,6 +10,18 @@ export interface IMedicalCollege {
   name: string;
   /** Lower-cased, punctuation-stripped name — what the search box matches on. */
   searchKey: string;
+  /**
+   * How students write the college: DMC, SSMC, RMC. It is the first part of a
+   * Campus Ambassador's coupon code (DMC + SAKIB + 20), so it is short, upper
+   * case and letters only.
+   *
+   * Derived from the name where the shop has not supplied one — see
+   * deriveAbbreviation. A derived value is a guess, and `abbreviationSource`
+   * says so, because the real ones are not always the initials (Sylhet MAG
+   * Osmani is SOMC, not SMOMC).
+   */
+  abbreviation?: string;
+  abbreviationSource?: 'official' | 'derived';
   type: TCollegeType;
   division: string;
   district: string;

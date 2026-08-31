@@ -63,6 +63,11 @@ async function startServer() {
       );
       const { inserted } = await MedicalCollegeService.seedFromFile();
       if (inserted) console.log(`🎓 Medical college directory — ${inserted} added.`);
+      // Campus Ambassador coupon codes start with the college's abbreviation
+      // (DMC + SAKIB + 20), and the 112 rows were seeded before that existed.
+      // Fills blanks only, so a corrected abbreviation survives every deploy.
+      const filled = await MedicalCollegeService.backfillAbbreviations();
+      if (filled) console.log(`🔤 College abbreviations — ${filled} filled in.`);
     } catch (error) {
       console.error('⚠️  College seed failed (server still starting):', error);
     }
