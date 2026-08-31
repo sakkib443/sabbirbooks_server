@@ -341,6 +341,137 @@ async function main() {
     check(r.body?.counts?.approved >= 2, `and the status counts are there (${JSON.stringify(r.body?.counts)})`);
   }
 
+  // ───────────────────────────────────────────────────────────
+  // The half that turns the programme into money: someone buys the book with
+  // an ambassador's code, and the ৳30 has to reach the right person, once, and
+  // only for a sale that actually happened.
+  // ───────────────────────────────────────────────────────────
+  console.log('\n── A student buys with the code ──');
+  const { Book } = await import('../app/modules/book/book.model');
+  const { Order } = await import('../app/modules/order/order.model');
+  const book = await Book.create({
+    id: 1,
+    title: 'Anatomy MAGIC VIVA',
+    slug: 'anatomy-magic-viva',
+    price: 500,
+    author: 'Sabbir',
+    category: 'medical',
+    description: 'test',
+    format: 'printed',
+    stock: 100,
+  });
+
+  const buyer = await registerLogin('buyer-amb@test.com', 'by1');
+  await User.updateOne(
+    { email: 'buyer-amb@test.com' },
+    { medicalCollegeName: 'Dhaka Medical College' }
+  );
+
+  let orderId = '';
+  {
+    const r = await api()
+      .post('/api/orders')
+      .set('Authorization', `Bearer ${buyer}`)
+      .send({
+        items: [{ bookSlugOrId: 'anatomy-magic-viva', quantity: 1 }],
+        shippingAddress: { name: 'B', phone: '01700000000', address: 'Rd', city: 'Dhaka' },
+        paymentMethod: 'cod',
+        couponCode: 'DMCSAKIB20',
+      });
+    check(r.status === 201 || r.status === 200, `order placed with the code (${r.status})`, r.body?.message);
+    orderId = r.body?.data?._id;
+
+    const o: any = await Order.findById(orderId).lean();
+    check(o.couponCode === 'DMCSAKIB20', `the code is snapshotted onto the order (${o.couponCode})`);
+    check(o.couponDiscount === 20, `৳20 came off the buyer (got ৳${o.couponDiscount})`);
+    check(
+      o.couponPayout === 30,
+      `৳30 is owed to the ambassador, snapshotted (got ৳${o.couponPayout})`
+    );
+    check(o.subtotal - o.discount + o.deliveryCharge === o.total, 'and the total adds up');
+  }
+
+  console.log('\n── Editing the coupon later must not rewrite a past order ──');
+  {
+    await BookCoupon.updateOne({ code: 'DMCSAKIB20' }, { $set: { payoutPerSale: 999 } });
+    const o: any = await Order.findById(orderId).lean();
+    check(o.couponPayout === 30, `the placed order still owes ৳30, not ৳999 (got ৳${o.couponPayout})`);
+    await BookCoupon.updateOne({ code: 'DMCSAKIB20' }, { $set: { payoutPerSale: 30 } });
+  }
+
+  console.log('\n── An unpaid, undelivered sale is not earned yet ──');
+  {
+    // Real money only. The admin table and the payout report both filter on the
+    // same "delivered or paid" test the revenue figures use.
+    const r = await api().get('/api/ambassador').set('Authorization', `Bearer ${admin}`);
+    const row = r.body.data.find((x: any) => x.couponCode === 'DMCSAKIB20');
+    check(row?.stats?.orders === 0, `a pending COD order counts 0 orders (got ${row?.stats?.orders})`);
+    check(row?.stats?.commission === 0, `and ৳0 commission (got ৳${row?.stats?.commission})`);
+  }
+
+  console.log('\n── Delivered — now it counts ──');
+  {
+    await api()
+      .patch(`/api/orders/${orderId}/status`)
+      .set('Authorization', `Bearer ${admin}`)
+      .send({ status: 'delivered' });
+
+    const r = await api().get('/api/ambassador').set('Authorization', `Bearer ${admin}`);
+    const row = r.body.data.find((x: any) => x.couponCode === 'DMCSAKIB20');
+    check(row?.stats?.orders === 1, `1 order (got ${row?.stats?.orders})`);
+    check(row?.stats?.commission === 30, `৳30 commission (got ৳${row?.stats?.commission})`);
+    check(row?.stats?.sales > 0, `and the sale value is counted (৳${row?.stats?.sales})`);
+  }
+
+  console.log('\n── The ambassador sees the same numbers ──');
+  {
+    const amb = await api()
+      .post('/api/auth/login')
+      .set('x-device-id', 'amb2')
+      .send({ email: 'sakib@test.com', password: '01711112233' });
+    const token = amb.body?.data?.accessToken;
+
+    const r = await api().get('/api/book-coupons/my').set('Authorization', `Bearer ${token}`);
+    check(r.status === 200, `their own dashboard loads (${r.status})`, r.body?.message);
+    check(r.body?.data?.totals?.sales === 1, `1 sale on their dashboard (got ${r.body?.data?.totals?.sales})`);
+    check(
+      r.body?.data?.totals?.earned === 30,
+      `৳30 earned on their dashboard (got ৳${r.body?.data?.totals?.earned})`
+    );
+  }
+
+  console.log('\n── And the payout report owes it ──');
+  {
+    const r = await api().get('/api/book-coupons/payouts').set('Authorization', `Bearer ${admin}`);
+    check(r.status === 200, `the payout report loads (${r.status})`);
+    const body = JSON.stringify(r.body);
+    check(body.includes('DMCSAKIB20'), 'the ambassador is in it');
+  }
+
+  console.log('\n── Suspending stops the code at the checkout ──');
+  {
+    await api()
+      .patch(`/api/ambassador/${appId}/status`)
+      .set('Authorization', `Bearer ${admin}`)
+      .send({ status: 'suspended' });
+
+    const r = await api()
+      .post('/api/orders')
+      .set('Authorization', `Bearer ${buyer}`)
+      .send({
+        items: [{ bookSlugOrId: 'anatomy-magic-viva', quantity: 1 }],
+        shippingAddress: { name: 'B', phone: '01700000000', address: 'Rd', city: 'Dhaka' },
+        paymentMethod: 'cod',
+        couponCode: 'DMCSAKIB20',
+      });
+    check(r.status >= 400, `a suspended ambassador's code is refused (${r.status})`);
+
+    // The sale they already made is still theirs — suspension is not clawback.
+    const q = await api().get('/api/ambassador?status=all').set('Authorization', `Bearer ${admin}`);
+    const row = q.body.data.find((x: any) => x.couponCode === 'DMCSAKIB20');
+    check(row?.stats?.commission === 30, `their earned ৳30 survives suspension (got ৳${row?.stats?.commission})`);
+  }
+
   await mongoose.disconnect();
   await mongod.stop();
 
