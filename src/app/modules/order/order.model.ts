@@ -123,6 +123,13 @@ const orderSchema = new Schema<IOrder>(
     // delivery, which would otherwise decrement the same copies twice.
     stockAdjusted: { type: Boolean, default: false },
 
+    // When the "new order" alerts went out (admin Telegram/WhatsApp + the
+    // buyer's own email). A COD order raises them the moment it is placed; an
+    // order paid at a hosted gateway raises them when the money actually
+    // arrives, because until then there may be no order at all. One stamp so
+    // that whichever moment comes first, the second one stays quiet.
+    alertsSentAt: { type: Date },
+
     // Fulfillment trail — stamped by the admin actions, read by the order
     // timeline on both the admin page and the buyer's "my orders" list.
     confirmedAt: { type: Date },

@@ -78,7 +78,14 @@ async function main() {
         password: 'pass1234',
         whatsappNumber: '01712345678',
       });
-    if (role) await User.updateOne({ email }, { role });
+    // A medical college is required before anyone can order (createOrder
+    // refuses without one — it is how deliveries are routed). Registration does
+    // not ask for it, so every fixture below would otherwise get a 400 from
+    // /api/orders and fail for a reason that has nothing to do with orders.
+    await User.updateOne(
+      { email },
+      { ...(role ? { role } : {}), medicalCollegeName: 'Khulna Medical College' }
+    );
     const res = await api()
       .post('/api/auth/login')
       .set('x-device-id', device)

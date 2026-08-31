@@ -300,23 +300,50 @@ const createOrder = async (
     );
   }
 
-  // Tell the admin and the buyer — in-app, Telegram (admin), WhatsApp (both).
+  // Tell the admin and the buyer — but only for an order that already exists as
+  // far as everyone is concerned.
   //
-  // Deliberately NOT awaited. The order is already written and this response is
-  // what unblocks the buyer's checkout; making them wait on graph.facebook.com,
-  // or worse, 500ing their completed order because Telegram is down, would be a
-  // far worse failure than a message that did not arrive. dispatchNewOrderAlerts
-  // resolves in every case, so the .catch is only here so that a bug inside it
-  // can never become an unhandled rejection.
-  void OrderAlertService.dispatchNewOrderAlerts(order).catch((e) =>
-    console.error('[order-alert] dispatch threw (order unaffected):', e)
-  );
-
-  // "Order placed, pending" email to the buyer — same fire-and-forget rule, and a
-  // no-op until SMTP credentials are set.
-  void OrderEmailService.sendOrderPlacedEmail(order);
+  // A COD order is real the moment it is placed: nothing more is owed before it
+  // gets packed. An order about to be sent to a hosted gateway is not — the
+  // buyer may look at the payment page and close it, and announcing "your order
+  // is placed" to someone who then pays nothing, and paging the shop about it,
+  // is how the pending queue filled up with orders that were never orders. For
+  // those, the alerts go out from applyPaidSideEffects when the money lands.
+  if (method === 'cod') {
+    void raiseNewOrderAlerts(order);
+  }
 
   return order;
+};
+
+/**
+ * The "there is a new order" fan-out: admin Telegram/WhatsApp, and the buyer's
+ * own "order placed" email.
+ *
+ * Deliberately NOT awaited by its callers. The order is already written, and
+ * making a buyer's checkout wait on graph.facebook.com — or worse, 500ing their
+ * completed order because Telegram is down — would be a far worse failure than
+ * a message that did not arrive. Every path inside resolves, so the .catch is
+ * only here so a bug in one can never become an unhandled rejection.
+ *
+ * Stamps `alertsSentAt` so the COD path and the payment-settled path cannot
+ * both announce the same order.
+ */
+const raiseNewOrderAlerts = async (order: any): Promise<void> => {
+  if (order?.alertsSentAt) return;
+  order.alertsSentAt = new Date();
+  // Written straight to the collection rather than through the document: the
+  // callers are mid-save at different points, and a second save() here would
+  // race whatever they are about to write.
+  await Order.updateOne({ _id: order._id }, { $set: { alertsSentAt: order.alertsSentAt } }).catch(
+    (e: any) => console.error('[order-alert] could not stamp alertsSentAt:', e)
+  );
+
+  await OrderAlertService.dispatchNewOrderAlerts(order).catch((e) =>
+    console.error('[order-alert] dispatch threw (order unaffected):', e)
+  );
+  // No-op until SMTP credentials are set.
+  void OrderEmailService.sendOrderPlacedEmail(order);
 };
 
 /**
@@ -678,6 +705,10 @@ const applyPaidSideEffects = async (order: any): Promise<void> => {
   // First confirmation (payment settled — gateway or manual approval) → the
   // "order confirmed" email. Fire-and-forget; the caller saves the order.
   if (!wasConfirmed) void OrderEmailService.sendOrderConfirmedEmail(order);
+  // A gateway order held its "new order" alerts back until the money arrived —
+  // this is that moment. Already-alerted orders (COD, manual) fall straight
+  // through on the alertsSentAt stamp.
+  void raiseNewOrderAlerts(order);
 };
 
 // ─── COMPLETE payment (DEMO / gateway callback) ──────────────
@@ -786,6 +817,100 @@ const rejectOrderPayment = async (id: string, reason?: string): Promise<IOrder> 
   (order as any).cancelledAt = new Date();
   await order.save();
   return order;
+};
+
+// ─── A hosted-gateway checkout that never produced a payment ────────────────
+
+/**
+ * Payment methods where the buyer leaves the site to pay, and where an order
+ * with no payment against it means nothing happened.
+ *
+ * NOT 'manual': that buyer sends money from their own wallet and types the
+ * transaction id back in minutes later, so their order is *supposed* to sit
+ * unpaid waiting for them and then for an admin. NOT 'cod': a COD order is a
+ * real order from the moment it is placed. Sweeping either would delete work.
+ */
+const HOSTED_GATEWAYS = ['sslcommerz', 'bkash'];
+
+/**
+ * Close an order whose hosted-gateway payment never happened.
+ *
+ * An order is written before the buyer is sent to SSLCommerz — deliberately, so
+ * that a buyer who closes the tab after paying still gets the order the IPN
+ * settles. The cost of that design is this case: a buyer who reaches SSLCommerz
+ * and comes back without paying leaves a fully-formed order sitting in the
+ * admin's pending queue, indistinguishable from one that is genuinely waiting
+ * to be confirmed.
+ *
+ * Marking only `payment.status = 'failed'` was not enough — the order's own
+ * status stayed 'pending', which is what the queue filters on.
+ *
+ * Idempotent, and refuses anything that is not exactly this case: an order that
+ * was paid (a decline racing a success must never cancel a banked payment), one
+ * that has moved past pending, or one paid by a method where "unpaid" is a
+ * normal resting state.
+ */
+const abandonUnpaidGatewayOrder = async (
+  id: string,
+  reason: string
+): Promise<IOrder | null> => {
+  const order: any = await Order.findById(id);
+  if (!order) return null;
+  if (order.payment?.status === 'paid') return null;
+  if (order.status !== 'pending') return null;
+  if (!HOSTED_GATEWAYS.includes(order.payment?.method)) return null;
+
+  // Today nothing reaches here with stock taken — a gateway order only reserves
+  // on payment — but a cancellation that silently ate inventory would be a very
+  // quiet bug to carry, and this is the same guard rejectOrderPayment uses.
+  await restoreStockIfTaken(order);
+  if (order.stockAdjusted === true) order.stockAdjusted = false;
+
+  order.payment.status = 'failed';
+  order.payment.note = reason;
+  order.status = 'cancelled';
+  order.cancelledAt = new Date();
+  await order.save();
+  return order;
+};
+
+/**
+ * The buyers who never came back at all.
+ *
+ * SSLCommerz calls fail_url or cancel_url when someone presses those buttons,
+ * but the commonest abandonment presses nothing: the tab is closed, the phone
+ * locks, the back button is used. No callback is ever sent, so without a sweep
+ * those orders stay pending for ever.
+ *
+ * The window is generous on purpose. A gateway session is good for about half
+ * an hour, and a buyer switching to their banking app to fetch an OTP can be
+ * gone a long time — cancelling an order out from under someone mid-payment
+ * would be far worse than showing a stale one for an extra hour.
+ */
+const expireAbandonedGatewayOrders = async (
+  olderThanMinutes = 90
+): Promise<number> => {
+  const cutoff = new Date(Date.now() - olderThanMinutes * 60_000);
+  const stale = await Order.find({
+    status: 'pending',
+    'payment.status': 'pending',
+    'payment.method': { $in: HOSTED_GATEWAYS },
+    createdAt: { $lt: cutoff },
+  })
+    .select('_id')
+    .lean();
+
+  let closed = 0;
+  for (const { _id } of stale) {
+    // Through the same function the callbacks use, so there is one definition of
+    // what closing an unpaid order means.
+    const done = await abandonUnpaidGatewayOrder(
+      String(_id),
+      'Payment was never completed at the gateway'
+    );
+    if (done) closed++;
+  }
+  return closed;
 };
 
 // ─── ADMIN: edit payment details (correct a typo'd txn id, number, etc.) ─────
@@ -1136,6 +1261,8 @@ export const OrderService = {
   submitManualPayment,
   approveOrderPayment,
   rejectOrderPayment,
+  abandonUnpaidGatewayOrder,
+  expireAbandonedGatewayOrders,
   updateOrderPayment,
   getDownloadUrl,
   deleteOrder,

@@ -68,6 +68,32 @@ async function startServer() {
     }
   }
 
+  // ─── Close checkouts that were abandoned at the gateway ────────
+  //
+  // An order is written before the buyer is sent to SSLCommerz, so a buyer who
+  // opens the payment page and closes the tab leaves one behind. SSLCommerz
+  // only calls back when someone presses Cancel or the payment is declined —
+  // the commonest abandonment presses nothing at all, so nothing ever tells us.
+  // Without this those orders sit in the admin's pending queue for ever.
+  //
+  // An interval rather than a cron container: one process runs this service, the
+  // sweep is idempotent, and a missed tick costs nothing but a later cleanup.
+  // unref() so it never holds the process open during a shutdown.
+  if (dbReady) {
+    const SWEEP_EVERY_MS = 15 * 60_000;
+    const sweep = async () => {
+      try {
+        const { OrderService } = await import('./app/modules/order/order.service');
+        const closed = await OrderService.expireAbandonedGatewayOrders();
+        if (closed) console.log(`🧹 Closed ${closed} abandoned gateway checkout(s).`);
+      } catch (error) {
+        console.error('⚠️  Abandoned-order sweep failed (server unaffected):', error);
+      }
+    };
+    void sweep(); // once at boot, to clear whatever accumulated before this shipped
+    setInterval(sweep, SWEEP_EVERY_MS).unref();
+  }
+
   app.listen(PORT, () => {
     console.log(`🚀 Sabbir Book Server is running on http://localhost:${PORT}`);
   });

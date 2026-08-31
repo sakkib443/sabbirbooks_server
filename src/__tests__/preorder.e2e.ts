@@ -62,7 +62,20 @@ async function main() {
     onlinePaymentEnabled: true,
   });
 
-  const buyer = new mongoose.Types.ObjectId().toString();
+  // A real User document, not a bare id: createOrder refuses an order from a
+  // buyer with no medical college (it is how deliveries are routed), so a
+  // stand-in id makes every order below fail for a reason unrelated to
+  // pre-orders.
+  const { User } = await import('../app/modules/user/user.model');
+  const buyerDoc = await User.create({
+    id: 'PREORDER-BUYER',
+    firstName: 'Pre',
+    lastName: 'Buyer',
+    email: 'preorder-buyer@test.local',
+    role: 'student',
+    medicalCollegeName: 'Khulna Medical College',
+  });
+  const buyer = String(buyerDoc._id);
 
   await Book.create([
     // 1000tk pre-order on the default 25%.

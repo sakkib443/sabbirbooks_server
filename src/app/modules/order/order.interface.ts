@@ -116,6 +116,8 @@ export interface IOrder {
   // True once this order's copies have been taken out of stock. Guards the
   // decrement against running twice on the COD confirm → deliver path.
   stockAdjusted?: boolean;
+  // When the "new order" alerts went out — see the note on the schema field.
+  alertsSentAt?: Date;
   // Admin bookkeeping for the fulfillment timeline shown on the orders page.
   confirmedAt?: Date;
   shippedAt?: Date;

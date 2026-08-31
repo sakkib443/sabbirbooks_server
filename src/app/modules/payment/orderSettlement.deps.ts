@@ -57,13 +57,16 @@ export const mongoSettlementDeps: SettlementDeps = {
     await OrderService.completePayment(orderId, userId, { method, transactionId });
   },
 
-  async markFailed({ orderId }) {
-    // Guarded on the write itself rather than read-then-write: two callbacks can
-    // land at once, and `payment.status: { $ne: 'paid' }` means a decline that
-    // races a success can never overwrite a banked payment.
-    await Order.updateOne(
-      { _id: orderId, 'payment.status': { $ne: 'paid' } },
-      { $set: { 'payment.status': 'failed' } }
-    );
+  async markFailed({ orderId, reason }) {
+    // Delegated rather than written here, for the reason at the top of this
+    // file: closing an unpaid order also has to cancel the ORDER, not only its
+    // payment. Setting `payment.status: 'failed'` alone left `status: 'pending'`
+    // — and the admin queue filters on that — so every buyer who reached
+    // SSLCommerz and came back without paying left a pending order behind.
+    //
+    // The guards that used to live in the update's filter now live in that
+    // function: a decline racing a success still cannot overwrite a banked
+    // payment, and a COD or manual order is never touched.
+    await OrderService.abandonUnpaidGatewayOrder(orderId, reason);
   },
 };
