@@ -245,8 +245,12 @@ async function main() {
       .lean(),
   ]);
 
-  app.listen(5000, () => {
-    console.log(`\nDemo API on http://localhost:5000`);
+  // Overridable: 5000 is a popular port, and another project's dev server
+  // sitting on it made this one bind nothing while still looking alive — every
+  // request answered by the wrong API.
+  const port = Number(process.env.DEMO_PORT || 5000);
+  app.listen(port, () => {
+    console.log(`\nDemo API on http://localhost:${port}`);
     console.log(`  ${outline.parts.length} parts · ${topicsMade} topics · ${questionsMade} questions`);
     console.log(`  free chapter: ${freeTitle}`);
     console.log(`  free topic code: ${freeSample?.qrCode} (${freeSample?.title})`);
