@@ -155,6 +155,48 @@ const review = async (req: Request, res: Response) => {
   }
 };
 
+/**
+ * POST /api/ambassador — add an affiliate by hand.
+ *
+ * Not everyone who sells for the shop comes through the public form. This
+ * creates the record, the coupon and the login in one step, because an admin
+ * typing someone in IS the approval.
+ */
+const create = async (req: Request, res: Response) => {
+  try {
+    const data = await AmbassadorService.createManual(req.body, String(uid(req) || ''));
+    res.status(201).json({ success: true, message: 'Affiliate added', data });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+/** PATCH /api/ambassador/:id — edit everything the shop knows about them. */
+const update = async (req: Request, res: Response) => {
+  try {
+    const data = await AmbassadorService.update(req.params.id, req.body);
+    res.status(200).json({ success: true, message: 'Affiliate updated', data });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+/** DELETE /api/ambassador/:id — remove the record; the coupon is kept, dark. */
+const remove = async (req: Request, res: Response) => {
+  try {
+    const data = await AmbassadorService.remove(req.params.id);
+    res.status(200).json({
+      success: true,
+      message: data.couponKept
+        ? `Removed. Coupon ${data.couponKept} was switched off, not deleted — past orders still reference it.`
+        : 'Removed',
+      data,
+    });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
 const setNote = async (req: Request, res: Response) => {
   try {
     const data = await AmbassadorService.setAdminNote(req.params.id, req.body.adminNote);
@@ -177,6 +219,9 @@ const getMine = async (req: Request, res: Response) => {
 
 export const AmbassadorController = {
   apply,
+  create,
+  update,
+  remove,
   uploadIdCard,
   serveIdCard,
   list,

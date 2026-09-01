@@ -20,30 +20,46 @@ const ambassadorSchema = new Schema<IAmbassadorApplication>(
     applicationId: { type: String, required: true, unique: true, trim: true },
     applicationSeq: { type: Number, required: true },
 
+    /**
+     * How this affiliate got here.
+     *
+     * 'application' — they filled in the public Campus Ambassador form, and
+     *   every field on it is present because that form insists.
+     * 'manual' — an admin added them from the Affiliates screen. The shop knows
+     *   their name, phone and email; it does not necessarily know their batch,
+     *   their Facebook profile or how many students they can reach.
+     *
+     * This is why the form-only fields above are optional at the schema level:
+     * the PUBLIC form's own validation is what requires them, and requiring them
+     * here too would mean an admin could not add a bookseller who is not a
+     * student at all.
+     */
+    source: { type: String, enum: ['application', 'manual'], default: 'application' },
+
     fullName: { type: String, required: true, trim: true },
     phone: { type: String, required: true, trim: true },
     whatsapp: { type: String, trim: true, default: '' },
     // Lower-cased so "Sakib@Gmail.com" and "sakib@gmail.com" cannot both apply.
     email: { type: String, required: true, trim: true, lowercase: true },
-    facebookUrl: { type: String, required: true, trim: true },
+    facebookUrl: { type: String, trim: true, default: '' },
     instagramUrl: { type: String, trim: true, default: '' },
 
     medicalCollege: { type: Schema.Types.ObjectId, ref: 'MedicalCollege' },
-    medicalCollegeName: { type: String, required: true, trim: true },
+    medicalCollegeName: { type: String, trim: true, default: '' },
     collegeAbbreviation: { type: String, trim: true, uppercase: true, default: '' },
-    batch: { type: String, required: true, trim: true },
+    batch: { type: String, trim: true, default: '' },
     academicYear: {
       type: String,
-      enum: ['1st Year', '2nd Year', '3rd Year', '4th Year', '5th Year', 'Intern'],
-      required: true,
+      enum: ['1st Year', '2nd Year', '3rd Year', '4th Year', '5th Year', 'Intern', ''],
+      default: '',
     },
-    city: { type: String, required: true, trim: true },
+    city: { type: String, trim: true, default: '' },
     idCardUrl: { type: String, trim: true, default: '' },
 
     reach: {
       type: String,
-      enum: ['<25', '25-50', '50-100', '100-200', '200-300', '300+'],
-      required: true,
+      enum: ['<25', '25-50', '50-100', '100-200', '200-300', '300+', ''],
+      default: '',
     },
     promoteChannels: {
       type: [String],
@@ -69,7 +85,7 @@ const ambassadorSchema = new Schema<IAmbassadorApplication>(
     comfortableSharingContent: { type: Boolean, default: true },
     suggestions: { type: String, trim: true, default: '' },
 
-    agreedAt: { type: Date, required: true },
+    agreedAt: { type: Date },
 
     status: {
       type: String,

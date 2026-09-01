@@ -49,6 +49,12 @@ router.patch(
   validateRequest(reviewValidationSchema),
   AmbassadorController.review
 );
+// Adding, editing and removing an affiliate all change what the shop owes
+// people, so they sit behind users.write like the review actions do.
+router.post('/', ...reviewer, AmbassadorController.create);
+router.patch('/:id', ...reviewer, AmbassadorController.update);
+router.delete('/:id', ...reviewer, requireCapability('records.delete'), AmbassadorController.remove);
+
 router.patch(
   '/:id/note',
   ...reviewer,

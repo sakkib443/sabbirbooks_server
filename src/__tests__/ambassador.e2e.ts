@@ -513,6 +513,121 @@ async function main() {
     check(row?.stats?.commission === 30, `their earned ৳30 survives suspension (got ৳${row?.stats?.commission})`);
   }
 
+  // ───────────────────────────────────────────────────────────
+  // Managing affiliates from the admin panel: add someone who never applied,
+  // edit everything about them, and remove them.
+  // ───────────────────────────────────────────────────────────
+  console.log('\n── Adding an affiliate by hand ──');
+  let manualId = '';
+  {
+    const r = await api()
+      .post('/api/ambassador')
+      .set('Authorization', `Bearer ${admin}`)
+      .send({
+        fullName: 'Nusrat Jahan',
+        phone: '01555667788',
+        email: 'nusrat@test.com',
+        medicalCollege: String(dmc._id),
+        // Deliberately none of the form-only fields — an admin adding a
+        // bookseller does not know their batch or how many students they reach.
+      });
+    check(r.status === 201, `added without an application (${r.status})`, r.body?.message);
+    manualId = r.body?.data?._id;
+
+    const doc: any = await AmbassadorApplication.findById(manualId).lean();
+    check(doc.source === 'manual', `marked as added by hand (got '${doc.source}')`);
+    check(doc.status === 'approved', 'approved straight away — an admin typing them in IS the approval');
+    check(doc.couponCode === 'DMCNUSRAT20', `built from their college: DMCNUSRAT20 (got ${doc.couponCode})`);
+    check(doc.couponCode !== 'DMCSAKIB20', 'a different one from the Sakib who already has that code');
+
+    const coupon: any = await BookCoupon.findOne({ code: doc.couponCode }).lean();
+    check(coupon.isActive === true, 'live');
+    check(coupon.discountValue === 20 && coupon.payoutPerSale === 30, 'on the same ৳20 / ৳30 terms');
+
+    const login = await api()
+      .post('/api/auth/login')
+      .set('x-device-id', 'manual1')
+      .send({ email: 'nusrat@test.com', password: '01555667788' });
+    check(login.status === 200, `and can sign in with their phone number (${login.status})`);
+  }
+
+  console.log('\n── Editing everything about them ──');
+  {
+    const r = await api()
+      .patch(`/api/ambassador/${manualId}`)
+      .set('Authorization', `Bearer ${admin}`)
+      .send({
+        fullName: 'Nusrat Jahan Mim',
+        phone: '01555660000',
+        city: 'Khulna',
+        batch: 'DMC-K76',
+        adminNote: 'sells at the college gate',
+      });
+    check(r.status === 200, `edited (${r.status})`, r.body?.message);
+
+    const doc: any = await AmbassadorApplication.findById(manualId).lean();
+    check(doc.fullName === 'Nusrat Jahan Mim', 'name updated');
+    check(doc.city === 'Khulna' && doc.batch === 'DMC-K76', 'and the fields an admin left blank can be filled in later');
+
+    // The person's own login has to follow, or an order alert prints a name the
+    // admin has just corrected.
+    const user: any = await User.findById(doc.user).lean();
+    check(user.firstName === 'Nusrat', `their login's name follows (got ${user.firstName})`);
+    check(user.phoneNumber === '01555660000', 'and their phone number');
+  }
+
+  console.log('\n── What editing must NOT touch ──');
+  {
+    const before: any = await AmbassadorApplication.findById(manualId).lean();
+    const r = await api()
+      .patch(`/api/ambassador/${manualId}`)
+      .set('Authorization', `Bearer ${admin}`)
+      .send({ status: 'rejected', couponCode: 'FREEBOOK', applicationId: 'MVA-AMB-9999' });
+    check(r.status === 200, 'the request is accepted');
+
+    const after: any = await AmbassadorApplication.findById(manualId).lean();
+    check(after.status === before.status, `status is not editable here (still '${after.status}')`);
+    check(after.couponCode === before.couponCode, 'nor the coupon code');
+    check(after.applicationId === before.applicationId, 'nor the application id');
+  }
+
+  console.log('\n── An email already in use is refused ──');
+  {
+    const r = await api()
+      .patch(`/api/ambassador/${manualId}`)
+      .set('Authorization', `Bearer ${admin}`)
+      .send({ email: 'sakib@test.com' });
+    check(r.status === 400, `refused (${r.status})`);
+  }
+
+  console.log('\n── Removing an affiliate keeps what the shop owes ──');
+  {
+    const doc: any = await AmbassadorApplication.findById(manualId).lean();
+    const code = doc.couponCode;
+
+    const r = await api()
+      .delete(`/api/ambassador/${manualId}`)
+      .set('Authorization', `Bearer ${admin}`);
+    check(r.status === 200, `removed (${r.status})`, r.body?.message);
+    check((await AmbassadorApplication.countDocuments({ _id: manualId })) === 0, 'the record is gone');
+
+    const coupon: any = await BookCoupon.findOne({ code }).lean();
+    check(!!coupon, 'but the coupon row is KEPT — past orders reference it');
+    check(coupon.isActive === false, 'switched off, so nobody can use it again');
+
+    const user: any = await User.findById(doc.user).lean();
+    check(user.status === 'blocked', 'and their login is blocked rather than deleted');
+  }
+
+  console.log('\n── Removing is not something every reviewer may do ──');
+  {
+    const outsider = await registerLogin('nodelete@test.com', 'nd1');
+    const r = await api()
+      .delete(`/api/ambassador/${String((await AmbassadorApplication.findOne({}).lean())!._id)}`)
+      .set('Authorization', `Bearer ${outsider}`);
+    check(r.status === 403, `a student cannot remove an affiliate (${r.status})`);
+  }
+
   await mongoose.disconnect();
   await mongod.stop();
 

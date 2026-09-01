@@ -56,33 +56,35 @@ export interface IAmbassadorApplication {
   applicationId: string;
   /** The raw counter behind applicationId, for sorting without string maths. */
   applicationSeq: number;
+  /** Public form, or added by an admin. See the note on the schema field. */
+  source?: 'application' | 'manual';
 
   // ── Section 1 — who they are ──────────────────────────────────
   fullName: string;
   phone: string;
   whatsapp?: string;
   email: string;
-  facebookUrl: string;
+  facebookUrl?: string;
   instagramUrl?: string;
 
   // ── Section 2 — where they study ──────────────────────────────
   /** The directory row. The name is snapshotted beside it so an application
    *  still reads correctly if a college is later renamed or retired. */
   medicalCollege?: Types.ObjectId;
-  medicalCollegeName: string;
+  medicalCollegeName?: string;
   /** The college abbreviation used to build the coupon code, snapshotted at
    *  approval so a later edit to the directory cannot change a live code. */
   collegeAbbreviation?: string;
   /** As the student writes it: "KMC-33". */
-  batch: string;
-  academicYear: TAcademicYear;
-  city: string;
+  batch?: string;
+  academicYear?: TAcademicYear | '';
+  city?: string;
   /** Their college ID card. Stored in the protected upload directory and served
    *  through an access check — it is a personal document, not a public file. */
   idCardUrl?: string;
 
   // ── Section 3 — reach ─────────────────────────────────────────
-  reach: TReachBand;
+  reach?: TReachBand | '';
   promoteChannels: TPromoChannel[];
   promoteChannelOther?: string;
   isGroupAdmin: boolean;
@@ -98,7 +100,7 @@ export interface IAmbassadorApplication {
   // ── Section 7 — agreement ─────────────────────────────────────
   /** All six boxes, as one acceptance. The form refuses to submit without every
    *  one of them, and the timestamp is what the shop can point at later. */
-  agreedAt: Date;
+  agreedAt?: Date;
 
   // ── Review ────────────────────────────────────────────────────
   status: TAmbassadorStatus;

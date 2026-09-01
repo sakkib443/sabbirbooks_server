@@ -18,6 +18,36 @@ export const AMBASSADOR_SEQ = 'ambassador';
 
 const pad = (n: number) => String(n).padStart(4, '0');
 
+/**
+ * The college's name and abbreviation, snapshotted onto the record.
+ *
+ * Snapshotted rather than joined: the directory can be renamed and an
+ * abbreviation corrected later, and neither must silently rewrite an
+ * application that was already submitted or a coupon code already in print.
+ *
+ * A free-typed name with no directory row behind it is accepted — an admin
+ * adding a bookseller by hand is not choosing from a list of medical colleges.
+ */
+const resolveCollege = async (
+  payload: Partial<IAmbassadorApplication>
+): Promise<{ collegeName: string; abbreviation: string; collegeId?: Types.ObjectId }> => {
+  let collegeName = String(payload.medicalCollegeName || '').trim();
+  let abbreviation = '';
+  let collegeId: Types.ObjectId | undefined;
+
+  if (payload.medicalCollege && isValidObjectId(String(payload.medicalCollege))) {
+    const college = await MedicalCollege.findById(payload.medicalCollege)
+      .select('name abbreviation')
+      .lean();
+    if (college) {
+      collegeId = college._id as Types.ObjectId;
+      collegeName = college.name;
+      abbreviation = college.abbreviation || '';
+    }
+  }
+  return { collegeName, abbreviation, collegeId };
+};
+
 // ─── Applying ────────────────────────────────────────────────
 
 /**
@@ -47,22 +77,7 @@ const apply = async (payload: Partial<IAmbassadorApplication>) => {
     );
   }
 
-  // Snapshot the college's name and abbreviation. The directory can be renamed
-  // or an abbreviation corrected later; an application must still read the way
-  // it was submitted, and a live coupon code must not change under anyone.
-  let collegeName = String(payload.medicalCollegeName || '').trim();
-  let abbreviation = '';
-  let collegeId: Types.ObjectId | undefined;
-  if (payload.medicalCollege && isValidObjectId(String(payload.medicalCollege))) {
-    const college = await MedicalCollege.findById(payload.medicalCollege)
-      .select('name abbreviation')
-      .lean();
-    if (college) {
-      collegeId = college._id as Types.ObjectId;
-      collegeName = college.name;
-      abbreviation = college.abbreviation || '';
-    }
-  }
+  const { collegeName, abbreviation, collegeId } = await resolveCollege(payload);
   if (!collegeName) throw new Error('Medical college is required');
 
   const seq = await getNextSequence(AMBASSADOR_SEQ);
@@ -100,7 +115,7 @@ const apply = async (payload: Partial<IAmbassadorApplication>) => {
  * already bought the book and then becomes an ambassador keeps their orders,
  * their password and their history. Only their role is widened.
  */
-const ensureAmbassadorUser = async (app: any): Promise<Types.ObjectId> => {
+const ensureAmbassadorUser = async (app: any, password?: string): Promise<Types.ObjectId> => {
   const existing: any = await User.findOne({ email: app.email });
   if (existing) {
     // Never demote: an admin who applies stays an admin.
@@ -121,7 +136,9 @@ const ensureAmbassadorUser = async (app: any): Promise<Types.ObjectId> => {
     whatsappNumber: app.whatsapp || app.phone,
     // The phone number as the opening password. Stored hashed by the User
     // model's own pre-save hook, exactly like any other password.
-    password: String(app.phone || '').trim(),
+    // An admin adding someone by hand may set a password; otherwise it is
+    // their phone number, which they already know.
+    password: (password || '').trim() || String(app.phone || '').trim(),
     isPasswordChanged: false,
     role: 'affiliate',
     status: 'active',
@@ -139,11 +156,11 @@ const ensureAmbassadorUser = async (app: any): Promise<Types.ObjectId> => {
  * orphan every order already placed under the first, because orders snapshot
  * the code they were bought with.
  */
-const approve = async (id: string, reviewerId?: string) => {
+const approve = async (id: string, reviewerId?: string, opts: { password?: string } = {}) => {
   const app: any = await AmbassadorApplication.findById(id);
   if (!app) throw new Error('Application not found');
 
-  const userId = await ensureAmbassadorUser(app);
+  const userId = await ensureAmbassadorUser(app, opts.password);
 
   let coupon: any = app.coupon ? await BookCoupon.findById(app.coupon) : null;
   if (!coupon) {
@@ -214,6 +231,188 @@ const setStatus = async (
   return app;
 };
 
+// ─── Admin: add, edit, remove ────────────────────────────────
+
+/**
+ * Add an affiliate by hand, without an application.
+ *
+ * Not everyone who sells for the shop comes through the public form — a
+ * bookseller, a teacher, someone the owner met. They need the same thing an
+ * approved ambassador gets: a code, a login, and a line in the earnings report.
+ *
+ * Approved immediately, because an admin typing someone in IS the approval;
+ * there is nobody else to review it.
+ */
+const createManual = async (
+  payload: Partial<IAmbassadorApplication> & { password?: string },
+  reviewerId?: string
+) => {
+  const email = String(payload.email || '').trim().toLowerCase();
+  if (!email) throw new Error('Email is required');
+  if (!String(payload.fullName || '').trim()) throw new Error('Name is required');
+  if (!String(payload.phone || '').trim()) throw new Error('Phone number is required');
+
+  const live = await AmbassadorApplication.findOne({
+    email,
+    status: { $in: ['pending', 'approved', 'suspended'] },
+  })
+    .select('applicationId status')
+    .lean();
+  if (live) {
+    throw new Error(
+      `এই ইমেইলে ইতিমধ্যে একজন অ্যাফিলিয়েট আছেন (${live.applicationId})। (An affiliate with this email already exists.)`
+    );
+  }
+
+  const { collegeName, abbreviation, collegeId } = await resolveCollege(payload);
+  const seq = await getNextSequence(AMBASSADOR_SEQ);
+
+  const doc = await AmbassadorApplication.create({
+    ...payload,
+    email,
+    source: 'manual',
+    applicationSeq: seq,
+    applicationId: `MVA-AMB-${pad(seq)}`,
+    medicalCollege: collegeId,
+    medicalCollegeName: collegeName,
+    // The directory's abbreviation wins, then anything the admin typed. Reading
+    // only the typed value meant a manual add picked up no abbreviation at all
+    // and fell back to the generic MVA prefix — MVANUSRAT20 for a DMC student.
+    collegeAbbreviation: abbreviation || (payload as any).collegeAbbreviation || '',
+    // Never from the request — approve() sets these.
+    status: 'pending',
+    coupon: null,
+    couponCode: '',
+    user: null,
+  });
+
+  // Straight to approved: the code and the login are the whole point of adding
+  // someone, and a manually-added affiliate has nothing left to review.
+  return approve(String(doc._id), reviewerId, { password: payload.password });
+};
+
+/**
+ * Edit an affiliate.
+ *
+ * Everything the shop knows about the person is editable — they mistype their
+ * own email, they change college, a phone number changes hands. What is NOT
+ * editable here is anything that decides money or identity: the status (that is
+ * the approve/reject action, which has side effects), the application id, the
+ * coupon it points at, and the login it belongs to.
+ *
+ * The coupon's own terms are edited on the coupon, not here, so there is one
+ * place where what the shop pays is set.
+ */
+const EDITABLE = [
+  'fullName',
+  'phone',
+  'whatsapp',
+  'email',
+  'facebookUrl',
+  'instagramUrl',
+  'medicalCollege',
+  'medicalCollegeName',
+  'batch',
+  'academicYear',
+  'city',
+  'reach',
+  'promoteChannels',
+  'promoteChannelOther',
+  'isGroupAdmin',
+  'hasPriorExperience',
+  'experienceNote',
+  'comfortableSharingContent',
+  'suggestions',
+  'adminNote',
+  'idCardUrl',
+] as const;
+
+const update = async (id: string, payload: Record<string, unknown>) => {
+  if (!isValidObjectId(id)) throw new Error('Invalid affiliate id');
+  const app: any = await AmbassadorApplication.findById(id);
+  if (!app) throw new Error('Affiliate not found');
+
+  for (const key of EDITABLE) {
+    if (key in payload) app[key] = payload[key];
+  }
+
+  if (typeof payload.email === 'string') {
+    const email = payload.email.trim().toLowerCase();
+    if (!email) throw new Error('Email is required');
+    const clash = await AmbassadorApplication.findOne({
+      _id: { $ne: app._id },
+      email,
+      status: { $in: ['pending', 'approved', 'suspended'] },
+    })
+      .select('applicationId')
+      .lean();
+    if (clash) throw new Error(`এই ইমেইল ইতিমধ্যে ${clash.applicationId}-এর। (Email already in use.)`);
+    app.email = email;
+  }
+
+  // Re-snapshot the college, so a change of college also changes the
+  // abbreviation the NEXT code would be built from. An existing code is left
+  // alone — orders reference it.
+  if ('medicalCollege' in payload || 'medicalCollegeName' in payload) {
+    const { collegeName, collegeId } = await resolveCollege(payload as never);
+    if (collegeName) {
+      app.medicalCollege = collegeId;
+      app.medicalCollegeName = collegeName;
+      const college = collegeId
+        ? await MedicalCollege.findById(collegeId).select('abbreviation').lean()
+        : null;
+      if (college?.abbreviation) app.collegeAbbreviation = college.abbreviation;
+    }
+  }
+
+  await app.save();
+
+  // Keep the person's own login in step with their record, so the name on an
+  // order alert is the name the admin just corrected.
+  if (app.user) {
+    const [firstName, ...rest] = String(app.fullName || '').trim().split(/\s+/);
+    await User.updateOne(
+      { _id: app.user },
+      {
+        $set: {
+          email: app.email,
+          firstName: firstName || 'Affiliate',
+          lastName: rest.join(' '),
+          phoneNumber: app.phone,
+          whatsappNumber: app.whatsapp || app.phone,
+          medicalCollegeName: app.medicalCollegeName,
+        },
+      }
+    );
+  }
+
+  return getById(id);
+};
+
+/**
+ * Remove an affiliate.
+ *
+ * The coupon is deactivated, never deleted: orders placed under it reference
+ * that code, the payout report still owes them for those sales, and deleting
+ * the row would take money off the books. Their login is deactivated for the
+ * same reason — an account with orders against it is not a row to drop.
+ */
+const remove = async (id: string) => {
+  if (!isValidObjectId(id)) throw new Error('Invalid affiliate id');
+  const app: any = await AmbassadorApplication.findById(id);
+  if (!app) throw new Error('Affiliate not found');
+
+  if (app.coupon) {
+    await BookCoupon.updateOne({ _id: app.coupon }, { $set: { isActive: false } });
+  }
+  if (app.user) {
+    await User.updateOne({ _id: app.user }, { $set: { status: 'blocked' } });
+  }
+
+  await AmbassadorApplication.deleteOne({ _id: app._id });
+  return { deleted: app.applicationId, couponKept: app.couponCode || null };
+};
+
 const setAdminNote = async (id: string, adminNote: string) => {
   const app = await AmbassadorApplication.findByIdAndUpdate(
     id,
@@ -233,7 +432,9 @@ const setAdminNote = async (id: string, adminNote: string) => {
  * `usedCount` tally: an order that was cancelled or never paid must not count
  * towards what the shop owes anybody. Same rule the payouts report uses.
  */
-const list = async (query: { status?: string; q?: string; college?: string } = {}) => {
+const list = async (
+  query: { status?: string; q?: string; college?: string; from?: string; to?: string } = {}
+) => {
   const filter: Record<string, unknown> = {};
   if (query.status && query.status !== 'all') filter.status = query.status;
   if (query.college) filter.medicalCollegeName = query.college;
@@ -254,7 +455,10 @@ const list = async (query: { status?: string; q?: string; college?: string } = {
     .populate('coupon', 'code isActive discountValue payoutPerSale')
     .lean();
 
-  const stats = await earningsByCode(apps.map((a: any) => a.couponCode).filter(Boolean));
+  const stats = await earningsByCode(
+    apps.map((a: any) => a.couponCode).filter(Boolean),
+    { from: query.from, to: query.to }
+  );
 
   return apps.map((a: any) => ({
     ...a,
@@ -274,9 +478,29 @@ const list = async (query: { status?: string; q?: string; college?: string } = {
  * orders are excluded by that test rather than by a separate rule that could
  * drift from it.
  */
-const earningsByCode = async (codes: string[]) => {
+const earningsByCode = async (
+  codes: string[],
+  range: { from?: string; to?: string } = {}
+) => {
   const map = new Map<string, { orders: number; sales: number; commission: number }>();
   if (!codes.length) return map;
+
+  // An optional window, so the shop can ask "what did this affiliate bring in
+  // last month" rather than only ever seeing a lifetime total. Dates are read as
+  // whole days:  includes the day named, which is what someone typing a date
+  // into a filter means by it.
+  const createdAt: Record<string, Date> = {};
+  if (range.from) {
+    const d = new Date(range.from);
+    if (!Number.isNaN(d.getTime())) createdAt.$gte = d;
+  }
+  if (range.to) {
+    const d = new Date(range.to);
+    if (!Number.isNaN(d.getTime())) {
+      d.setHours(23, 59, 59, 999);
+      createdAt.$lte = d;
+    }
+  }
 
   const rows = await Order.aggregate([
     {
@@ -284,6 +508,7 @@ const earningsByCode = async (codes: string[]) => {
         couponCode: { $in: codes.map((c) => String(c).toUpperCase()) },
         status: { $ne: 'cancelled' },
         $or: [{ status: 'delivered' }, { 'payment.status': 'paid' }],
+        ...(Object.keys(createdAt).length ? { createdAt } : {}),
       },
     },
     {
@@ -354,6 +579,9 @@ const getCounts = async () => {
 
 export const AmbassadorService = {
   apply,
+  createManual,
+  update,
+  remove,
   approve,
   setStatus,
   setAdminNote,
