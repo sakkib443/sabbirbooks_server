@@ -4,6 +4,7 @@ import { isValidObjectId } from 'mongoose';
 import { BookCoupon } from './bookCoupon.model';
 import { Order } from '../order/order.model';
 import { User } from '../user/user.model';
+import { AmbassadorApplication } from '../ambassador/ambassador.model';
 
 const uid = (req: Request) => (req as any).user?._id || (req as any).user?.id;
 
@@ -106,10 +107,43 @@ export const validateCoupon = async (req: Request, res: Response) => {
 // can sign in — never the password hash.
 const OWNER_FIELDS = 'email firstName lastName';
 
+/**
+ * Every coupon, each one saying whether it belongs to an affiliate.
+ *
+ * There are two kinds of code in this collection and they are managed on two
+ * different screens. A plain coupon is a discount the shop is running — a
+ * launch offer, a book fair — and the coupon screen owns it end to end. An
+ * affiliate's code is the instrument of somebody's earnings, and the affiliate
+ * screen owns it, because that is where the person, their sales and what they
+ * are owed all live together.
+ *
+ * The link is read from the affiliate side rather than stored twice, so it can
+ * never go stale: the affiliate record already points at its coupon.
+ */
 export const getAllCoupons = async (_req: Request, res: Response) => {
   try {
-    const list = await BookCoupon.find().populate('ownerUser', OWNER_FIELDS).sort({ createdAt: -1 });
-    res.json({ success: true, data: list });
+    const list = await BookCoupon.find()
+      .populate('ownerUser', OWNER_FIELDS)
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const affiliates = await AmbassadorApplication.find({ coupon: { $ne: null } })
+      .select('coupon applicationId fullName status')
+      .lean();
+    const byCoupon = new Map(affiliates.map((a: any) => [String(a.coupon), a]));
+
+    res.json({
+      success: true,
+      data: list.map((c: any) => {
+        const a = byCoupon.get(String(c._id));
+        return {
+          ...c,
+          affiliate: a
+            ? { _id: a._id, applicationId: a.applicationId, fullName: a.fullName, status: a.status }
+            : null,
+        };
+      }),
+    });
   } catch (e: any) {
     res.status(500).json({ success: false, message: e.message });
   }
@@ -185,6 +219,21 @@ export const updateCoupon = async (req: Request, res: Response) => {
 export const deleteCoupon = async (req: Request, res: Response) => {
   try {
     if (!isValidObjectId(req.params.id)) return res.status(404).json({ success: false, message: 'Coupon not found' });
+
+    // An affiliate's code is not the shop's to throw away from here: their
+    // earnings are counted from orders that carry it, so deleting it would
+    // quietly erase what they are owed. Removing the person removes the code —
+    // that path switches it off and keeps the history.
+    const owner = await AmbassadorApplication.findOne({ coupon: req.params.id })
+      .select('fullName applicationId')
+      .lean();
+    if (owner) {
+      return res.status(409).json({
+        success: false,
+        message: `This code belongs to ${(owner as any).fullName} (${(owner as any).applicationId}). Manage it from Affiliates — deleting it here would erase their earnings history.`,
+      });
+    }
+
     const coupon = await BookCoupon.findByIdAndDelete(req.params.id);
     if (!coupon) return res.status(404).json({ success: false, message: 'Coupon not found' });
     res.json({ success: true, message: 'Deleted' });

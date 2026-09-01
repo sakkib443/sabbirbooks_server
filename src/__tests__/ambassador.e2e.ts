@@ -600,6 +600,55 @@ async function main() {
     check(r.status === 400, `refused (${r.status})`);
   }
 
+  console.log('\n── The coupon screen tells the two kinds of code apart ──');
+  {
+    // A plain shop coupon: a discount the shop is running, belonging to nobody.
+    const made = await api()
+      .post('/api/book-coupons')
+      .set('Authorization', `Bearer ${admin}`)
+      .send({ code: 'BOIMELA25', name: 'বইমেলা ছাড়', discountType: 'percent', discountValue: 25 });
+    check(made.status === 201, `a plain coupon is created (${made.status})`, made.body?.message);
+    const plainId = String(made.body?.data?._id);
+
+    const list = await api().get('/api/book-coupons').set('Authorization', `Bearer ${admin}`);
+    check(list.status === 200, `the list loads (${list.status})`);
+
+    const rows: any[] = list.body?.data || [];
+    const plain = rows.find((c) => c.code === 'BOIMELA25');
+    const owned = rows.find((c) => c.code === 'DMCSAKIB20');
+
+    check(plain?.affiliate === null, 'a shop coupon is marked as belonging to nobody');
+    check(!!owned?.affiliate, "an affiliate's code says so");
+    check(
+      owned?.affiliate?.fullName === 'Md Sakib Hasan',
+      `and names the person (got ${owned?.affiliate?.fullName})`
+    );
+    check(
+      /^MVA-AMB-\d{4}$/.test(owned?.affiliate?.applicationId || ''),
+      'with the application id the affiliate screen is keyed by'
+    );
+
+    // The plain one is the shop's to throw away.
+    const gone = await api()
+      .delete(`/api/book-coupons/${plainId}`)
+      .set('Authorization', `Bearer ${admin}`);
+    check(gone.status === 200, `a shop coupon can be deleted here (${gone.status})`);
+
+    // The affiliate's is not: their earnings are counted from orders carrying it.
+    const refused = await api()
+      .delete(`/api/book-coupons/${String(owned._id)}`)
+      .set('Authorization', `Bearer ${admin}`);
+    check(refused.status === 409, `an affiliate's code is refused (${refused.status})`);
+    check(
+      String(refused.body?.message || '').includes('Md Sakib Hasan'),
+      'and the refusal says whose it is'
+    );
+    check(
+      !!(await BookCoupon.findOne({ code: 'DMCSAKIB20' }).lean()),
+      'so the code — and their earnings history — survives'
+    );
+  }
+
   console.log('\n── Removing an affiliate keeps what the shop owes ──');
   {
     const doc: any = await AmbassadorApplication.findById(manualId).lean();
