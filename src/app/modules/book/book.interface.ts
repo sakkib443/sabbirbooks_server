@@ -8,7 +8,7 @@ export interface IBookFeature {
 }
 
 // One named, admin-editable discount. `label` is the offer's own name so a
-// campaign can be called anything ("ঈদ অফার", "আগে পেমেন্টে ছাড়") and the
+// campaign can be called anything ("নতুন সংস্করণে ছাড়", "আগে পেমেন্টে ছাড়") and the
 // storefront shows that name. `type` picks how the cut is measured: a `percent`
 // (0–90) off, or a `fixed` number of taka (`amount`). See book.pricing.ts.
 export interface IBookOffer {

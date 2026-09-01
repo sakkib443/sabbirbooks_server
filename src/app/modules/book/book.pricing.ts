@@ -10,7 +10,7 @@
 //              of cash on delivery. It stacks on top of the headline.
 //
 // Each offer has { enabled, label, percent }. `label` is the offer's own name so
-// the shop can call it whatever a campaign needs ("ঈদ অফার", "আগে পেমেন্টে ছাড়")
+// the shop can call it whatever a campaign needs ("নতুন সংস্করণে ছাড়", "আগে পেমেন্টে ছাড়")
 // and the storefront shows that name.
 //
 // resolveOffers() also reads the LEGACY fields (isPreOrder / preOrderDiscountPercent

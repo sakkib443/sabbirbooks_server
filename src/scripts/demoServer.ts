@@ -65,12 +65,16 @@ async function main() {
     stock: 500,
     status: 'published',
     isFeatured: true,
-    // Named offers, to exercise the new system: a 25% headline "ঈদ অফার" everyone
-    // gets, plus 10% more for paying online instead of cash on delivery.
+    // Offers shaped like the live shop's: a headline discount with NO name, and
+    // an extra for paying online. The label is blank on purpose — an unnamed
+    // offer is the normal case, and the demo previously carried a festival name
+    // ("ঈদ অফার") that then appeared in screenshots of a medical book shop and
+    // read as a real campaign nobody had agreed to. Test data is looked at; it
+    // should look like what it is testing.
     offers: {
-      normal: { enabled: true, label: 'ঈদ অফার', type: 'fixed', amount: 100 },
+      normal: { enabled: true, label: '', type: 'fixed', amount: 100 },
       preorder: { enabled: false, label: '', type: 'percent', percent: 25 },
-      online: { enabled: true, label: 'অনলাইন পেমেন্টে ছাড়', type: 'fixed', amount: 50 },
+      online: { enabled: true, label: '', type: 'fixed', amount: 50 },
     },
     // The real public assets from the live shop, so the landing page can be
     // looked at as a customer actually sees it. These are served from the
