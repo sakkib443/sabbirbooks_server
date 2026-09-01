@@ -425,34 +425,107 @@ const setAdminNote = async (id: string, adminNote: string) => {
 
 // ─── Reading ─────────────────────────────────────────────────
 
+export interface AmbassadorListQuery {
+  status?: string;
+  q?: string;
+  /** The earnings window — which orders count towards sales and commission. */
+  from?: string;
+  to?: string;
+  /** When they joined. A different question from the one above, so its own pair. */
+  joinedFrom?: string;
+  joinedTo?: string;
+  college?: string;
+  division?: string;
+  district?: string;
+  academicYear?: string;
+  batch?: string;
+  city?: string;
+  reach?: string;
+  /** 'application' (they applied) or 'manual' (an admin added them). */
+  source?: string;
+  /** 'active' / 'inactive' — the coupon's own switch, not the person's status. */
+  coupon?: string;
+  /** 'selling' / 'idle' — did they bring in anything in the earnings window. */
+  performance?: string;
+  sort?: string;
+}
+
 /**
  * The admin table.
  *
  * Sales and commission come from the orders themselves, not from the coupon's
  * `usedCount` tally: an order that was cancelled or never paid must not count
  * towards what the shop owes anybody. Same rule the payouts report uses.
+ *
+ * Two things here are worth saying out loud, because they look like bugs
+ * otherwise. First, there are two date ranges and they answer different
+ * questions: `from`/`to` narrow which ORDERS count, so the same person can show
+ * ৳0 for July and ৳4,500 for August; `joinedFrom`/`joinedTo` narrow which
+ * PEOPLE are listed at all. Second, the coupon and performance filters are
+ * applied after the query rather than inside it — one lives on another
+ * collection and the other is a sum over orders, so neither is a field Mongo
+ * could match on. The set is small (people, not orders), so this is cheap.
  */
-const list = async (
-  query: { status?: string; q?: string; college?: string; from?: string; to?: string } = {}
-) => {
+const list = async (query: AmbassadorListQuery = {}) => {
   const filter: Record<string, unknown> = {};
-  if (query.status && query.status !== 'all') filter.status = query.status;
-  if (query.college) filter.medicalCollegeName = query.college;
-  if (query.q) {
-    const rx = { $regex: String(query.q).trim(), $options: 'i' };
+  const val = (v?: string) => (v && String(v).trim() ? String(v).trim() : '');
+
+  if (val(query.status) && query.status !== 'all') filter.status = query.status;
+  if (val(query.source) && query.source !== 'all') filter.source = query.source;
+  if (val(query.academicYear)) filter.academicYear = query.academicYear;
+  if (val(query.reach)) filter.reach = query.reach;
+  if (val(query.batch)) filter.batch = { $regex: val(query.batch), $options: 'i' };
+  if (val(query.city)) filter.city = { $regex: `^${val(query.city)}$`, $options: 'i' };
+
+  // A college can arrive as its id (the picker) or its name (a saved link).
+  if (val(query.college)) {
+    filter[isValidObjectId(query.college) ? 'medicalCollege' : 'medicalCollegeName'] =
+      isValidObjectId(query.college) ? query.college : query.college;
+  }
+
+  // Division and district live on the college, not on the person — so they are
+  // resolved to the colleges they cover and matched by name, which is the field
+  // every record carries even when its college reference is missing.
+  if (val(query.division) || val(query.district)) {
+    const where: Record<string, unknown> = {};
+    if (val(query.division)) where.division = query.division;
+    if (val(query.district)) where.district = query.district;
+    const colleges = await MedicalCollege.find(where).select('name').lean();
+    filter.medicalCollegeName = { $in: colleges.map((c: any) => c.name) };
+  }
+
+  // When they joined — the row's own createdAt, read as whole days.
+  const joined: Record<string, Date> = {};
+  if (val(query.joinedFrom)) {
+    const d = new Date(query.joinedFrom as string);
+    if (!Number.isNaN(d.getTime())) joined.$gte = d;
+  }
+  if (val(query.joinedTo)) {
+    const d = new Date(query.joinedTo as string);
+    if (!Number.isNaN(d.getTime())) {
+      d.setHours(23, 59, 59, 999);
+      joined.$lte = d;
+    }
+  }
+  if (Object.keys(joined).length) filter.createdAt = joined;
+
+  if (val(query.q)) {
+    const rx = { $regex: val(query.q), $options: 'i' };
     filter.$or = [
       { fullName: rx },
       { email: rx },
       { phone: rx },
+      { whatsapp: rx },
       { applicationId: rx },
       { couponCode: rx },
       { batch: rx },
+      { medicalCollegeName: rx },
+      { city: rx },
     ];
   }
 
   const apps = await AmbassadorApplication.find(filter)
-    .sort({ createdAt: -1 })
-    .populate('coupon', 'code isActive discountValue payoutPerSale')
+    .populate('coupon', 'code isActive discountType discountValue payoutPerSale usedCount')
     .lean();
 
   const stats = await earningsByCode(
@@ -460,7 +533,7 @@ const list = async (
     { from: query.from, to: query.to }
   );
 
-  return apps.map((a: any) => ({
+  let rows = apps.map((a: any) => ({
     ...a,
     stats: stats.get(String(a.couponCode || '').toUpperCase()) || {
       orders: 0,
@@ -468,6 +541,72 @@ const list = async (
       commission: 0,
     },
   }));
+
+  // Whether their code works right now. Normally this tracks their status, but
+  // an admin can switch a coupon off from the coupon screen, so it is asked of
+  // the coupon.
+  if (val(query.coupon) && query.coupon !== 'all') {
+    const wantLive = query.coupon === 'active';
+    rows = rows.filter((r: any) => Boolean(r.coupon?.isActive) === wantLive);
+  }
+
+  // Who is actually selling — in the window, if one is set. This is the filter
+  // behind "who do I owe money to this month" and "who have I signed up and
+  // never heard from".
+  if (val(query.performance) && query.performance !== 'all') {
+    rows =
+      query.performance === 'selling'
+        ? rows.filter((r: any) => r.stats.orders > 0)
+        : rows.filter((r: any) => r.stats.orders === 0);
+  }
+
+  const SORTS: Record<string, (a: any, b: any) => number> = {
+    recent: (a, b) => +new Date(b.createdAt) - +new Date(a.createdAt),
+    oldest: (a, b) => +new Date(a.createdAt) - +new Date(b.createdAt),
+    name: (a, b) => String(a.fullName).localeCompare(String(b.fullName)),
+    college: (a, b) =>
+      String(a.medicalCollegeName || '').localeCompare(String(b.medicalCollegeName || '')),
+    orders: (a, b) => b.stats.orders - a.stats.orders,
+    sales: (a, b) => b.stats.sales - a.stats.sales,
+    commission: (a, b) => b.stats.commission - a.stats.commission,
+  };
+  rows.sort(SORTS[val(query.sort)] || SORTS.recent);
+
+  return rows;
+};
+
+/**
+ * The values the filter dropdowns may offer.
+ *
+ * Read from the affiliates themselves rather than from the enums, so the shop
+ * is never offered "Barishal" when nobody from Barishal has signed up. An empty
+ * dropdown is a truthful answer; a dropdown that filters to nothing is not.
+ */
+const getFacets = async () => {
+  const rows = await AmbassadorApplication.find({})
+    .select('medicalCollege medicalCollegeName academicYear batch city reach source')
+    .lean();
+
+  const uniq = (xs: unknown[]) =>
+    [...new Set(xs.map((x) => String(x || '').trim()).filter(Boolean))].sort((a, b) =>
+      a.localeCompare(b)
+    );
+
+  // Division and district come from the colleges these people actually attend.
+  const collegeIds = [...new Set(rows.map((r: any) => String(r.medicalCollege || '')).filter(Boolean))];
+  const colleges = await MedicalCollege.find({ _id: { $in: collegeIds } })
+    .select('name division district')
+    .lean();
+
+  return {
+    colleges: uniq(rows.map((r: any) => r.medicalCollegeName)),
+    divisions: uniq(colleges.map((c: any) => c.division)),
+    districts: uniq(colleges.map((c: any) => c.district)),
+    academicYears: uniq(rows.map((r: any) => r.academicYear)),
+    batches: uniq(rows.map((r: any) => r.batch)),
+    cities: uniq(rows.map((r: any) => r.city)),
+    reaches: uniq(rows.map((r: any) => r.reach)),
+  };
 };
 
 /**
@@ -531,22 +670,65 @@ const earningsByCode = async (
   return map;
 };
 
+/**
+ * Everything about one affiliate, including the orders behind the number.
+ *
+ * The list shows what somebody earned; this shows the sales that add up to it,
+ * which is what gets looked at when the figure is questioned or when a payment
+ * is being prepared. Orders arrive newest first and carry their own payout
+ * snapshot, so what is shown per order is what that order actually earned —
+ * not today's rate applied backwards.
+ *
+ * `notCounted` is the other half of the same answer: orders placed under their
+ * code that are cancelled or unpaid. They are excluded from the earnings on
+ * purpose, and saying so is the difference between a total that looks wrong and
+ * one that explains itself.
+ */
 const getById = async (id: string) => {
   if (!isValidObjectId(id)) throw new Error('Invalid application id');
   const app: any = await AmbassadorApplication.findById(id)
     .populate('coupon', 'code isActive discountType discountValue payoutPerSale usedCount')
     .populate('reviewedBy', 'firstName lastName email')
+    .populate('user', 'email role status createdAt')
+    .populate('medicalCollege', 'name abbreviation division district type')
     .lean();
   if (!app) throw new Error('Application not found');
 
-  const stats = await earningsByCode(app.couponCode ? [app.couponCode] : []);
+  const code = String(app.couponCode || '').toUpperCase();
+  const stats = await earningsByCode(code ? [code] : []);
+
+  const ORDER_FIELDS =
+    'orderNumber createdAt total status payment couponCode couponDiscount couponPayout shippingAddress';
+
+  const [orders, notCounted] = code
+    ? await Promise.all([
+        Order.find({
+          couponCode: code,
+          status: { $ne: 'cancelled' },
+          $or: [{ status: 'delivered' }, { 'payment.status': 'paid' }],
+        })
+          .select(ORDER_FIELDS)
+          .sort({ createdAt: -1 })
+          .limit(200)
+          .lean(),
+        Order.find({
+          couponCode: code,
+          $nor: [
+            { status: { $ne: 'cancelled' }, $or: [{ status: 'delivered' }, { 'payment.status': 'paid' }] },
+          ],
+        })
+          .select(ORDER_FIELDS)
+          .sort({ createdAt: -1 })
+          .limit(50)
+          .lean(),
+      ])
+    : [[], []];
+
   return {
     ...app,
-    stats: stats.get(String(app.couponCode || '').toUpperCase()) || {
-      orders: 0,
-      sales: 0,
-      commission: 0,
-    },
+    stats: stats.get(code) || { orders: 0, sales: 0, commission: 0 },
+    orders,
+    notCounted,
   };
 };
 
@@ -589,4 +771,5 @@ export const AmbassadorService = {
   getById,
   getMine,
   getCounts,
+  getFacets,
 };

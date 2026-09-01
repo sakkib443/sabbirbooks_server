@@ -600,6 +600,271 @@ async function main() {
     check(r.status === 400, `refused (${r.status})`);
   }
 
+  // ───────────────────────────────────────────────────────────
+  // Narrowing the list. Two people exist by now: Sakib, who applied and has one
+  // delivered order under DMCSAKIB20, and Nusrat, whom an admin typed in and
+  // who has sold nothing. Every filter below is checked against that pair.
+  // ───────────────────────────────────────────────────────────
+  const listWith = async (qs: string) => {
+    const r = await api().get(`/api/ambassador?${qs}`).set('Authorization', `Bearer ${admin}`);
+    return r.body as { data: any[]; facets: any; counts: any };
+  };
+  const names = (rows: any[]) => rows.map((r) => r.fullName).sort().join(', ');
+
+  console.log('\n── The dropdowns only offer what exists ──');
+  {
+    const { facets } = await listWith('status=all');
+    check(Array.isArray(facets?.colleges), 'facets come back with the list');
+    check(
+      facets.colleges.includes('Dhaka Medical College'),
+      `colleges are the ones people actually attend (${facets.colleges.join(' | ')})`
+    );
+    check(
+      !facets.colleges.includes('Rajshahi Medical College'),
+      'a college nobody signed up from is not offered'
+    );
+    check(
+      facets.divisions.includes('ঢাকা'),
+      `divisions come from those colleges (${facets.divisions.join(' | ')})`
+    );
+    check(
+      facets.academicYears.includes('3rd Year'),
+      `years are the ones on file (${facets.academicYears.join(' | ')})`
+    );
+    check(
+      !facets.batches.includes(''),
+      'and a blank is never offered as a choice'
+    );
+  }
+
+  console.log('\n── Who is selling, and who is not ──');
+  {
+    // Note the status: the one person with a sale was suspended earlier in this
+    // run. That is exactly why "has sold" and "is approved" are separate
+    // filters — money already earned does not disappear when a code is
+    // switched off, and the shop still owes it.
+    const selling = await listWith('status=all&performance=selling');
+    check(selling.data.length === 1, `one person has sold something (${selling.data.length})`);
+    check(selling.data[0].couponCode === 'DMCSAKIB20', `and it is Sakib's code (${names(selling.data)})`);
+    check(
+      selling.data[0].status === 'suspended',
+      'a suspended affiliate with earnings is still found — the shop owes them'
+    );
+
+    const idle = await listWith('status=all&performance=idle');
+    check(
+      idle.data.every((r: any) => r.stats.orders === 0),
+      `the idle list has no sales in it (${names(idle.data)})`
+    );
+    check(
+      idle.data.some((r: any) => r.fullName === 'Nusrat Jahan Mim'),
+      'and Nusrat, signed up but quiet, is in it'
+    );
+    check(
+      idle.data.length + selling.data.length === (await listWith('status=all')).data.length,
+      'and the two halves account for everybody'
+    );
+  }
+
+  console.log('\n── The earnings window moves the numbers, not the roster ──');
+  {
+    // A window that ends before anything was ordered. The people are still
+    // there — they just did nothing in that window.
+    const past = await listWith('status=all&from=2000-01-01&to=2000-12-31');
+    const sakib = past.data.find((r: any) => r.couponCode === 'DMCSAKIB20');
+    check(!!sakib, 'Sakib is still listed for a window he sold nothing in');
+    check(sakib.stats.orders === 0, `with 0 orders in that window (got ${sakib.stats.orders})`);
+    check(sakib.stats.commission === 0, `and ৳0 owed for it (got ৳${sakib.stats.commission})`);
+
+    // And the performance filter reads the window too, which is the point of it.
+    const sellingThen = await listWith('status=all&from=2000-01-01&to=2000-12-31&performance=selling');
+    check(sellingThen.data.length === 0, `nobody sold anything in 2000 (${sellingThen.data.length})`);
+  }
+
+  console.log('\n── Who joined when ──');
+  {
+    const old = await listWith('status=all&joinedTo=2000-01-01');
+    check(old.data.length === 0, `nobody joined before 2000 (${old.data.length})`);
+
+    const recent = await listWith('status=all&joinedFrom=2020-01-01');
+    check(recent.data.length > 0, `but everyone joined after 2020 (${recent.data.length})`);
+  }
+
+  console.log('\n── How they got here ──');
+  {
+    const manual = await listWith('status=all&source=manual');
+    check(
+      manual.data.every((r: any) => r.source === 'manual'),
+      `only admin-added people (${names(manual.data)})`
+    );
+    check(manual.data.some((r: any) => r.fullName === 'Nusrat Jahan Mim'), 'Nusrat is one of them');
+
+    const applied = await listWith('status=all&source=application');
+    check(
+      applied.data.every((r: any) => r.source !== 'manual'),
+      'and the other way round keeps them out'
+    );
+  }
+
+  console.log('\n── College, division and year ──');
+  {
+    const byCollege = await listWith('status=all&college=Dhaka%20Medical%20College');
+    check(byCollege.data.length > 0, `the college filter finds people (${byCollege.data.length})`);
+    check(
+      byCollege.data.every((r: any) => r.medicalCollegeName === 'Dhaka Medical College'),
+      'and only that college'
+    );
+
+    // Division lives on the college, not the person — it is resolved through it.
+    const byDivision = await listWith('status=all&division=' + encodeURIComponent('ঢাকা'));
+    check(byDivision.data.length > 0, `division resolves through the college (${byDivision.data.length})`);
+
+    const byYear = await listWith('status=all&academicYear=3rd%20Year');
+    check(
+      byYear.data.every((r: any) => r.academicYear === '3rd Year'),
+      `year filters exactly (${names(byYear.data)})`
+    );
+    check(
+      !byYear.data.some((r: any) => r.fullName === 'Nusrat Jahan Mim'),
+      'so the admin-added person with no year set is left out'
+    );
+  }
+
+  console.log('\n── The coupon switch is asked of the coupon ──');
+  {
+    // Someone approved, whose code an admin turned off from the coupon screen.
+    // Their status still says approved, so only the coupon knows.
+    await BookCoupon.updateOne({ code: 'DMCNUSRAT20' }, { $set: { isActive: false } });
+
+    const off = await listWith('status=approved&coupon=inactive');
+    check(
+      off.data.some((r: any) => r.couponCode === 'DMCNUSRAT20'),
+      `a switched-off code is found even though the person is approved (${names(off.data)})`
+    );
+
+    const on = await listWith('status=approved&coupon=active');
+    check(
+      !on.data.some((r: any) => r.couponCode === 'DMCNUSRAT20'),
+      'and is not in the live list'
+    );
+    await BookCoupon.updateOne({ code: 'DMCNUSRAT20' }, { $set: { isActive: true } });
+  }
+
+  console.log('\n── Sorting ──');
+  {
+    const byCommission = await listWith('status=all&sort=commission');
+    check(
+      byCommission.data[0]?.fullName === 'Md Sakib Hasan',
+      `the biggest earner is first (${byCommission.data[0]?.fullName})`
+    );
+
+    const byName = await listWith('status=all&sort=name');
+    const sorted = [...byName.data.map((r: any) => r.fullName)].sort((a, b) => a.localeCompare(b));
+    check(
+      JSON.stringify(byName.data.map((r: any) => r.fullName)) === JSON.stringify(sorted),
+      `by name is actually alphabetical (${byName.data.map((r: any) => r.fullName).join(' | ')})`
+    );
+  }
+
+  console.log('\n── Searching reaches more than the name ──');
+  {
+    // A partial code matches, which is the point — the shop types what it can
+    // read off a screenshot. DMCSAKIB20 also matches DMCSAKIB2066.
+    const byCode = await listWith('status=all&q=DMCSAKIB20');
+    check(byCode.data.length >= 1, `by coupon code (${byCode.data.length})`);
+    check(
+      byCode.data.every((r: any) => r.couponCode.includes('DMCSAKIB20')),
+      'and only codes that contain what was typed'
+    );
+
+    const byPhone = await listWith('status=all&q=01711112233');
+    check(byPhone.data.length >= 1, `by phone number (${byPhone.data.length})`);
+
+    const byId = await listWith('status=all&q=MVA-AMB-0001');
+    check(byId.data.length === 1, `by application id (${byId.data.length})`);
+
+    check((await listWith('status=all&q=Chittagong')).data.length === 0, 'a college nobody is at finds nobody');
+    check((await listWith('status=all&q=Dhaka%20Medical')).data.length > 0, 'and by college name');
+  }
+
+  console.log('\n── Two filters together narrow, not widen ──');
+  {
+    const both = await listWith('status=all&source=application&performance=selling');
+    check(both.data.length === 1, `applied AND selling is one person (${both.data.length})`);
+    const impossible = await listWith('status=all&source=manual&performance=selling');
+    check(impossible.data.length === 0, 'admin-added AND selling is nobody, so far');
+  }
+
+  console.log('\n── The detail panel shows the orders behind the number ──');
+  {
+    const sakib: any = await AmbassadorApplication.findOne({ couponCode: 'DMCSAKIB20' }).lean();
+    const r = await api()
+      .get(`/api/ambassador/${String(sakib._id)}`)
+      .set('Authorization', `Bearer ${admin}`);
+    check(r.status === 200, `the detail loads (${r.status})`);
+
+    const d = r.body.data;
+    check(Array.isArray(d.orders), 'it carries the orders list');
+    check(d.orders.length === 1, `the one delivered order is in it (${d.orders.length})`);
+    check(d.orders[0].couponPayout === 30, `carrying its own ৳30 snapshot (got ৳${d.orders[0]?.couponPayout})`);
+    check(
+      d.orders.reduce((n: number, o: any) => n + (o.couponPayout || 0), 0) === d.stats.commission,
+      'and the listed orders add up to the commission shown'
+    );
+    check(Array.isArray(d.notCounted), 'the orders that did NOT count are listed too');
+    check(!!d.user?.email, `their login is included (${d.user?.email})`);
+    check(!d.user?.password, 'but never a password');
+    check(!!d.medicalCollege?.division, 'and the college is populated, so division shows');
+  }
+
+  console.log('\n── An unpaid order is shown, and shown as not counted ──');
+  {
+    // Nusrat's code, because it is the live one — a suspended affiliate's code
+    // is refused at checkout, which is the whole point of suspending them.
+    const buyer2 = await registerLogin('buyer2-amb@test.com', 'by2');
+    await User.updateOne(
+      { email: 'buyer2-amb@test.com' },
+      { medicalCollegeName: 'Dhaka Medical College' }
+    );
+    const placed = await api()
+      .post('/api/orders')
+      .set('Authorization', `Bearer ${buyer2}`)
+      .send({
+        items: [{ bookSlugOrId: 'anatomy-magic-viva', quantity: 1 }],
+        shippingAddress: { name: 'C', phone: '01700000001', address: 'Rd', city: 'Dhaka' },
+        paymentMethod: 'cod',
+        couponCode: 'DMCNUSRAT20',
+        medicalCollegeName: 'Dhaka Medical College',
+      });
+    check(placed.status === 201 || placed.status === 200, `a COD order is placed (${placed.status})`, placed.body?.message);
+
+    const nusrat: any = await AmbassadorApplication.findOne({ couponCode: 'DMCNUSRAT20' }).lean();
+    const d = (
+      await api().get(`/api/ambassador/${String(nusrat._id)}`).set('Authorization', `Bearer ${admin}`)
+    ).body.data;
+
+    check(d.stats.orders === 0, `she has earned nothing yet (got ${d.stats.orders} counted orders)`);
+    check(d.orders.length === 0, 'so the earning list is empty');
+    check(d.notCounted.length === 1, `but the pending order is shown (${d.notCounted.length})`);
+    check(
+      d.notCounted[0].couponCode === 'DMCNUSRAT20',
+      'under her code — so "1 person used my code, ৳0 earned" explains itself'
+    );
+
+    // And once it is delivered, it moves across on its own.
+    await api()
+      .patch(`/api/orders/${placed.body?.data?._id}/status`)
+      .set('Authorization', `Bearer ${admin}`)
+      .send({ status: 'delivered' });
+
+    const after = (
+      await api().get(`/api/ambassador/${String(nusrat._id)}`).set('Authorization', `Bearer ${admin}`)
+    ).body.data;
+    check(after.stats.orders === 1, `delivered — now it counts (${after.stats.orders})`);
+    check(after.notCounted.length === 0, 'and it has left the not-counted list');
+    check(after.stats.commission === 30, `৳30 owed to her (got ৳${after.stats.commission})`);
+  }
+
   console.log('\n── The coupon screen tells the two kinds of code apart ──');
   {
     // A plain shop coupon: a discount the shop is running, belonging to nobody.

@@ -115,13 +115,21 @@ const serveIdCard = async (req: Request, res: Response) => {
 
 // ─── Admin ───────────────────────────────────────────────────
 
+/**
+ * The affiliate list, with everything the filter bar needs to draw itself.
+ *
+ * `counts` are the status chips and `facets` are the dropdown options — both
+ * describe the whole roster, not the filtered slice, so narrowing the list
+ * never empties the controls used to widen it again.
+ */
 const list = async (req: Request, res: Response) => {
   try {
-    const [data, counts] = await Promise.all([
+    const [data, counts, facets] = await Promise.all([
       AmbassadorService.list(req.query as any),
       AmbassadorService.getCounts(),
+      AmbassadorService.getFacets(),
     ]);
-    res.status(200).json({ success: true, data, counts });
+    res.status(200).json({ success: true, data, counts, facets });
   } catch (error: any) {
     res.status(400).json({ success: false, message: error.message });
   }
