@@ -66,7 +66,15 @@ const scanTopic = async (qrCode: string, userId?: string | null): Promise<ScanRe
   if (!allowed) {
     // Enough to render a "buy this book" card, and nothing from inside it.
     const [book, awaitingDelivery] = await Promise.all([
-      Book.findById(topic.bookId).select('title slug author coverImage price offerPrice').lean(),
+      // The same fields the landing page prices from. `price` and `offerPrice`
+      // alone are the LEGACY pair, and on a book that has moved to named offers
+      // they are stale — this book's offerPrice still reads 600 while its live
+      // pre-order price is 550, so the QR card was quoting the undiscounted
+      // price to everyone who scanned a locked topic. Shipping the offers lets
+      // the client run the one pricing function the rest of the site uses.
+      Book.findById(topic.bookId)
+        .select('title slug author coverImage price offerPrice offers isPreOrder preOrderDiscountPercent expectedReleaseDate')
+        .lean(),
       reader ? BookAccessService.hasPendingDelivery(reader, topic.bookId) : Promise.resolve(false),
     ]);
     return {
