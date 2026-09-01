@@ -130,6 +130,13 @@ const orderSchema = new Schema<IOrder>(
     // that whichever moment comes first, the second one stays quiet.
     alertsSentAt: { type: Date },
 
+    // Which SMS this order has already sent: 'placed' | 'paid' | 'confirmed' |
+    // 'delivered'. Stored on the order rather than held in memory because the
+    // events are days apart, an admin can walk a status backwards and forwards,
+    // and the shop runs more than one replica — none of which an in-process
+    // guard survives. See notification/orderSms.service.ts.
+    smsSent: { type: [String], default: [] },
+
     // Fulfillment trail — stamped by the admin actions, read by the order
     // timeline on both the admin page and the buyer's "my orders" list.
     confirmedAt: { type: Date },

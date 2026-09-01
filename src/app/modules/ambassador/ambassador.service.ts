@@ -12,6 +12,7 @@ import { MedicalCollege } from '../medicalCollege/medicalCollege.model';
 import { User } from '../user/user.model';
 import { Order } from '../order/order.model';
 import { getNextSequence } from '../order/counter.model';
+import { AffiliateSmsService } from '../notification/affiliateSms.service';
 
 /** The counter the MVA-AMB-#### numbers come from. */
 export const AMBASSADOR_SEQ = 'ambassador';
@@ -189,6 +190,8 @@ const approve = async (id: string, reviewerId?: string, opts: { password?: strin
     await coupon.save();
   }
 
+  const wasApproved = app.status === 'approved';
+
   app.status = 'approved';
   app.user = userId;
   app.coupon = coupon._id;
@@ -196,6 +199,21 @@ const approve = async (id: string, reviewerId?: string, opts: { password?: strin
   app.reviewedBy = reviewerId && isValidObjectId(reviewerId) ? reviewerId : undefined;
   app.reviewedAt = new Date();
   await app.save();
+
+  /**
+   * The one text an affiliate ever gets: their code, and where to sign in.
+   *
+   * Only on the transition, so re-approving somebody who is already approved —
+   * which happens whenever an admin edits a live affiliate — sends nothing. A
+   * suspend-then-approve DOES text again, and should: their code was dead and
+   * is now working, which is news they need.
+   *
+   * Not awaited, and it cannot throw. Approving an affiliate must not fail
+   * because a gateway had a bad minute.
+   */
+  if (!wasApproved) {
+    void AffiliateSmsService.sendApproved(app);
+  }
 
   return app;
 };

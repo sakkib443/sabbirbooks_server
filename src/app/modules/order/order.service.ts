@@ -13,6 +13,7 @@ import { SslcommerzService } from '../payment/sslcommerz.service';
 import { SettingsService } from '../settings/settings.services';
 import { OrderAlertService } from '../notification/orderAlert.service';
 import { OrderEmailService } from '../notification/orderEmail.service';
+import { OrderSmsService } from '../notification/orderSms.service';
 
 // Resolve a book by slug / numeric id / Mongo _id — same tolerant lookup the
 // book module exposes publicly (client may send either a slug or an _id).
@@ -311,6 +312,10 @@ const createOrder = async (
   // those, the alerts go out from applyPaidSideEffects when the money lands.
   if (method === 'cod') {
     void raiseNewOrderAlerts(order);
+    // "We got your order" — the same reasoning as the alerts above decides who
+    // gets it, so it rides in the same branch. A gateway order's first text
+    // goes out from applyPaidSideEffects instead.
+    void OrderSmsService.send(order, 'placed');
   }
 
   return order;
@@ -534,6 +539,17 @@ const updateOrderStatus = async (
   // confirmed. Fire-and-forget; a no-op until SMTP credentials are set.
   if (!wasConfirmed && order.confirmedAt && order.status !== 'cancelled') {
     void OrderEmailService.sendOrderConfirmedEmail(order);
+    // The COD buyer's second text: what to have ready when the rider knocks.
+    // A prepaid order was confirmed by its own payment, and shouldSend keeps
+    // this quiet for it.
+    void OrderSmsService.send(order, 'confirmed');
+  }
+
+  // The parcel arrived. Sent on the transition, not on every save of a
+  // delivered order — the guard on the order document is what makes that true
+  // even for an admin who clicks through shipped and delivered twice.
+  if (order.status === 'delivered') {
+    void OrderSmsService.send(order, 'delivered');
   }
 
   return order;
@@ -709,6 +725,13 @@ const applyPaidSideEffects = async (order: any): Promise<void> => {
   // this is that moment. Already-alerted orders (COD, manual) fall straight
   // through on the alertsSentAt stamp.
   void raiseNewOrderAlerts(order);
+
+  // "We have your money, the order is confirmed." For a prepaid buyer this is
+  // both the receipt and the confirmation, which is why they never get the
+  // separate 'confirmed' text. A COD order reaching here has been marked paid
+  // on delivery, and shouldSend keeps it quiet — its 'delivered' text says the
+  // same thing better.
+  void OrderSmsService.send(order, 'paid');
 };
 
 // ─── COMPLETE payment (DEMO / gateway callback) ──────────────

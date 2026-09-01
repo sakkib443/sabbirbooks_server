@@ -118,6 +118,8 @@ export interface IOrder {
   stockAdjusted?: boolean;
   // When the "new order" alerts went out — see the note on the schema field.
   alertsSentAt?: Date;
+  /** Which order SMS have already gone out — see notification/orderSms.service.ts. */
+  smsSent?: string[];
   // Admin bookkeeping for the fulfillment timeline shown on the orders page.
   confirmedAt?: Date;
   shippedAt?: Date;

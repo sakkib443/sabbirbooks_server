@@ -93,9 +93,27 @@ export default {
 
   // SMS — real sending switches on as soon as an API key exists (no source-level
   // DEMO flag; see notification/sms.service.ts).
+  // SMS — MiMSMS (sms.mimsms.com).
+  //
+  // The username is the email the shop signs into the panel with; there is no
+  // separate API username. The key is minted in the panel's Developer menu and
+  // must be activated there, and MiMSMS will refuse calls from a server whose
+  // IP is not whitelisted — so an unset key and a live key that returns 403
+  // are both normal states this has to survive. See notification/sms.service.ts.
+  //
+  // Nothing here has a real default: an empty key means "log the message and
+  // skip", which is what a dev machine should do, and what production should do
+  // rather than crash.
   sms: {
-    api_key: process.env.BULKSMS_API_KEY,
-    sender_id: process.env.BULKSMS_SENDER_ID || 'SabbirBook',
+    username: process.env.SMS_USERNAME || '',
+    api_key: process.env.SMS_API_KEY || '',
+    // The non-masking numeric sender the shop's pack was bought under. A
+    // masking (brand-name) sender is the same field with a different value.
+    sender_id: process.env.SMS_SENDER_ID || '',
+    // 'T' is transactional — order and account messages, which is all we send.
+    transaction_type: process.env.SMS_TRANSACTION_TYPE || 'T',
+    // Overridable so a gateway path change does not need a redeploy.
+    endpoint: process.env.SMS_ENDPOINT || 'https://api.mimsms.com/api/SmsSending/OneToMany',
   },
 
   // Order alerts (WhatsApp + Telegram).
