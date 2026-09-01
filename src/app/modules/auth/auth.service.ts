@@ -152,6 +152,12 @@ const loginUser = async (
       email: user.email,
       role: user.role,
       status: user.status,
+      // False for an account whose password was set FOR them and never changed
+      // since — a Campus Ambassador starts with their own phone number, which
+      // anyone holding their business card can guess. The dashboard reads this
+      // to open its change-password card already expanded. It was being written
+      // at signup and never sent, so nothing could act on it.
+      isPasswordChanged: user.isPasswordChanged !== false,
       // Resolved server-side so the browser never has to work it out. Refreshed
       // on every dashboard mount via GET /api/auth/me.
       capabilities: resolveCapabilities(user.role, user.permissions),
@@ -303,7 +309,15 @@ const changePassword = async (userId: string, currentPassword: string, newPasswo
     throw new Error('Current password is incorrect');
   }
   const hashedPassword = await bcrypt.hash(newPassword, 10);
-  await User.findByIdAndUpdate(userId, { password: hashedPassword });
+  // isPasswordChanged is the whole point of the flag and was never being set
+  // here, so an account created with a password chosen FOR it — a Campus
+  // Ambassador starts with their own phone number — stayed flagged as
+  // still-on-the-default no matter how many times they changed it, and the
+  // dashboard's "you should change this" card never went away.
+  await User.findByIdAndUpdate(userId, {
+    password: hashedPassword,
+    isPasswordChanged: true,
+  });
 };
 
 export const AuthService = {

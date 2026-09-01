@@ -232,6 +232,45 @@ async function main() {
       .send({ email: 'sakib@test.com', password: '01711112233' });
     check(r.status === 200, `the ambassador can sign in with their phone number (${r.status})`, r.body?.message);
     check(r.body?.data?.accessToken, 'and gets a token');
+    // The dashboard opens its change-password card on this. It was being
+    // written at signup and never returned, so nothing could act on it.
+    check(
+      r.body?.data?.user?.isPasswordChanged === false,
+      'and is told the password is still the one chosen for them'
+    );
+  }
+
+  console.log('\n── …and can change it themselves ──');
+  {
+    const login = async (password: string, device: string) =>
+      api().post('/api/auth/login').set('x-device-id', device).send({ email: 'sakib@test.com', password });
+
+    const first = await login('01711112233', 'amb-pw1');
+    const token = first.body?.data?.accessToken;
+
+    const wrong = await api()
+      .post('/api/auth/change-password')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ currentPassword: 'not-their-phone', newPassword: 'brandnew123' });
+    check(wrong.status >= 400, `the wrong current password is refused (${wrong.status})`);
+
+    const ok = await api()
+      .post('/api/auth/change-password')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ currentPassword: '01711112233', newPassword: 'brandnew123' });
+    check(ok.status === 200, `changed (${ok.status})`, ok.body?.message);
+
+    const old = await login('01711112233', 'amb-pw2');
+    check(old.status >= 400, `the phone number no longer signs them in (${old.status})`);
+
+    const fresh = await login('brandnew123', 'amb-pw3');
+    check(fresh.status === 200, `the new password does (${fresh.status})`, fresh.body?.message);
+    // Without this the dashboard would keep telling them to change a password
+    // they have already changed.
+    check(
+      fresh.body?.data?.user?.isPasswordChanged === true,
+      'and the "still on the default" flag is finally cleared'
+    );
   }
 
   console.log('\n── A second Sakib at the same college ──');
@@ -425,10 +464,12 @@ async function main() {
 
   console.log('\n── The ambassador sees the same numbers ──');
   {
+    // 'brandnew123', not their phone number: the change-password case above
+    // already moved them off the default, which is the whole point of it.
     const amb = await api()
       .post('/api/auth/login')
       .set('x-device-id', 'amb2')
-      .send({ email: 'sakib@test.com', password: '01711112233' });
+      .send({ email: 'sakib@test.com', password: 'brandnew123' });
     const token = amb.body?.data?.accessToken;
 
     const r = await api().get('/api/book-coupons/my').set('Authorization', `Bearer ${token}`);

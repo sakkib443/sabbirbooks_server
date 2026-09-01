@@ -71,6 +71,11 @@ export const getMeController = async (req: Request, res: Response) => {
         district: account?.district ?? '',
         division: account?.division ?? '',
         upazila: account?.upazila ?? '',
+        // False while the account is still on a password chosen FOR it — see
+        // the note where login returns the same field. Sent here too so a
+        // dashboard mounted from a stale localStorage copy still learns the
+        // truth on its next request.
+        isPasswordChanged: account?.isPasswordChanged !== false,
         // The client blocks a student behind a "complete your profile" step
         // until this is true. Computed here, from the document, so a Google
         // sign-in — which cannot supply a WhatsApp number — is caught on its
