@@ -165,12 +165,24 @@ export const priceBookUnit = (book: BookLike, opts: { online?: boolean } = {}): 
   const offers = resolveOffers(book);
   const list = Number(book?.price) || 0;
 
-  const headlineOffer = offers.preorder.enabled
-    ? offers.preorder
-    : offers.normal.enabled
-      ? offers.normal
-      : null;
-  const mode: HeadlineMode = offers.preorder.enabled ? 'preorder' : offers.normal.enabled ? 'normal' : 'none';
+  // The headline is the offer that actually takes money off — not merely the
+  // one that is switched on.
+  //
+  // "Pre-order" is two separate facts wearing one switch: this book is sold
+  // before it is printed (no stock check, a delivery date), and there is a
+  // discount for pre-ordering. A shop can want the first without the second.
+  // Keying the headline on `enabled` alone meant a pre-order with a zero
+  // discount became the headline anyway, and SWALLOWED a normal discount that
+  // was running underneath it — the buyer was quietly charged full price while
+  // an everyday offer sat enabled and ignored.
+  //
+  // Pre-order still wins when both discount, because it is the more specific
+  // campaign; it just has to actually discount to win.
+  const preorderOff = offers.preorder.enabled ? offerDiscount(list, offers.preorder) : 0;
+  const normalOff = offers.normal.enabled ? offerDiscount(list, offers.normal) : 0;
+
+  const headlineOffer = preorderOff > 0 ? offers.preorder : normalOff > 0 ? offers.normal : null;
+  const mode: HeadlineMode = preorderOff > 0 ? 'preorder' : normalOff > 0 ? 'normal' : 'none';
 
   const headlineOff = headlineOffer ? offerDiscount(list, headlineOffer) : 0;
   const unit = list - headlineOff;
