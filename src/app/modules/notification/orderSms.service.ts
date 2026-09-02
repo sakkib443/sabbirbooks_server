@@ -133,6 +133,27 @@ const claim = async (order: any, event: OrderSmsEvent): Promise<boolean> => {
 };
 
 /**
+ * Give the claim back, so a failed send can be tried again.
+ *
+ * The claim has to be taken BEFORE the send — that is what makes two replicas
+ * racing the same status change produce one winner. But a claim that survives a
+ * failure means the gateway being down for an hour silently costs every order
+ * in that hour its text, permanently, with the order marked as if it had one.
+ * That is exactly what happened the first day this went live: the account's IP
+ * was not yet whitelisted, six sends were refused, and the orders were left
+ * looking notified.
+ *
+ * So: hold it while sending, hand it back if the send did not happen.
+ */
+const release = async (order: any, event: OrderSmsEvent): Promise<void> => {
+  try {
+    await Order.updateOne({ _id: order._id }, { $pull: { smsSent: event } });
+  } catch (e) {
+    console.error(`[order-sms] could not release ${event} for retry:`, e);
+  }
+};
+
+/**
  * Send one order text. Always resolves.
  *
  *   void OrderSmsService.send(order, 'delivered');
@@ -145,7 +166,10 @@ const send = async (order: any, event: OrderSmsEvent): Promise<boolean> => {
 
     const phone = await resolvePhone(order);
     if (!phone) {
+      // Not a failure that retrying fixes — the order has no number on it — but
+      // the claim goes back anyway, so adding a number later can still work.
       console.warn(`[order-sms] ${event}: no phone on ${order?.orderNumber} — skipped.`);
+      await release(order, event);
       return false;
     }
 
@@ -155,9 +179,11 @@ const send = async (order: any, event: OrderSmsEvent): Promise<boolean> => {
       `[order-sms] ${event} → ${order?.orderNumber}: ${r.success ? (r.demo ? 'demo' : 'sent') : 'FAILED'}` +
         (r.error ? ` (${r.error})` : '')
     );
+    if (!r.success) await release(order, event);
     return r.success;
   } catch (e) {
     console.error(`[order-sms] ${event} threw (order unaffected):`, e);
+    await release(order, event);
     return false;
   }
 };

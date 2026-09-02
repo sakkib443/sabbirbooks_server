@@ -363,6 +363,51 @@ async function main() {
     );
   }
 
+  console.log('\n── A refused send can be tried again ──');
+  {
+    // What actually happened on the first live day: the account's IP was not
+    // whitelisted, every send was refused, and the orders were left marked as
+    // if they had been texted — so fixing the gateway would not have rescued
+    // them. The claim now goes back when the send does not happen.
+    const { OrderSmsService } = await import('../app/modules/notification/orderSms.service');
+    const { SmsService: Sms } = await import('../app/modules/notification/sms.service');
+
+    const RETRY_PHONE = '01711110005';
+    const placed = await placeOrder(RETRY_PHONE, 'cod');
+    await new Promise((r) => setTimeout(r, 300));
+    check(textsFor(RETRY_PHONE).length === 1, 'the first text went out normally');
+
+    const order: any = await Order.findById(placed.id);
+
+    // Stand in for a refusing gateway.
+    const realSend = Sms.send;
+    (Sms as any).send = async () => ({ success: false, error: 'IP Black List.' });
+
+    const before = sent.length;
+    await OrderSmsService.send(order, 'delivered');
+    check(sent.length === before, 'a refused send delivers nothing');
+
+    const afterFail: any = await Order.findById(placed.id).lean();
+    check(
+      !afterFail.smsSent.includes('delivered'),
+      `and does NOT leave the order marked as texted (${JSON.stringify(afterFail.smsSent)})`
+    );
+
+    // Gateway comes back.
+    (Sms as any).send = realSend;
+    await OrderSmsService.send(order, 'delivered');
+    await new Promise((r) => setTimeout(r, 200));
+
+    check(textsFor(RETRY_PHONE).length === 2, 'so the same event goes through once it works');
+    const afterOk: any = await Order.findById(placed.id).lean();
+    check(afterOk.smsSent.includes('delivered'), 'and only then is it marked sent');
+
+    // And it is still sent exactly once.
+    await OrderSmsService.send(order, 'delivered');
+    await new Promise((r) => setTimeout(r, 200));
+    check(textsFor(RETRY_PHONE).length === 2, 'a third attempt after success still sends nothing');
+  }
+
   console.log('\n── An order with no phone number is skipped, not crashed ──');
   {
     const before = sent.length;
