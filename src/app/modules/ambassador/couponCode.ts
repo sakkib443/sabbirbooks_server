@@ -14,22 +14,34 @@ import { BookCoupon } from '../bookCoupon/bookCoupon.model';
 import { AMBASSADOR_DISCOUNT_TK } from './ambassador.model';
 
 /** Letters only, upper case — what a coupon code may contain. */
-const letters = (s: string): string =>
+const letters = (s?: string): string =>
   String(s || '')
     .toUpperCase()
     .replace(/[^A-Z]/g, '');
 
 /**
- * The name part: the applicant's last word, which in Bangladesh is the name
- * people actually call each other by ("Md. Sakib Hasan" → HASAN is the family
- * name, but SAKIB is who he is). So: the longest of the words that is not an
- * honorific, falling back to the first.
+ * The name part of the code.
  *
- * Capped at 8 letters — "MOSTAFIZURRAHMAN20" is not a code anyone types twice.
+ * The applicant's own call-name wins when they give one. The form asks for it
+ * ("ডাক নাম") precisely because guessing is unreliable: "Md. Sakib Al Hasan"
+ * could reasonably become SAKIB, HASAN or AL, and the person selling under the
+ * code is the one who knows which one their classmates would recognise.
+ *
+ * With no nickname we still have to guess, and the guess is: the longest word
+ * that is not an honorific. In Bangladesh that lands on the given name far more
+ * often than taking the first or last word does.
+ *
+ * Capped at 8 letters either way — "MOSTAFIZURRAHMAN20" is not a code anyone
+ * types twice.
  */
 const HONORIFICS = new Set(['MD', 'MOHAMMAD', 'MOHAMMED', 'MST', 'MRS', 'MR', 'DR', 'MISS']);
 
-export const namePart = (fullName: string): string => {
+export const namePart = (fullName: string, nickname?: string): string => {
+  // A nickname is a deliberate answer to "what should the code say?", so it is
+  // taken as given — no honorific filtering, no longest-word guessing.
+  const nick = letters(nickname);
+  if (nick.length >= 2) return nick.slice(0, 8);
+
   const words = String(fullName || '')
     .split(/\s+/)
     .map(letters)
@@ -43,8 +55,12 @@ export const namePart = (fullName: string): string => {
 };
 
 /** `DMC` + `SAKIB` + `20`, before any uniqueness suffix. */
-export const baseCouponCode = (collegeAbbr: string, fullName: string): string =>
-  `${letters(collegeAbbr) || 'MVA'}${namePart(fullName)}${AMBASSADOR_DISCOUNT_TK}`;
+export const baseCouponCode = (
+  collegeAbbr: string,
+  fullName: string,
+  nickname?: string
+): string =>
+  `${letters(collegeAbbr) || 'MVA'}${namePart(fullName, nickname)}${AMBASSADOR_DISCOUNT_TK}`;
 
 /**
  * A code no other coupon holds.
@@ -62,9 +78,10 @@ export const baseCouponCode = (collegeAbbr: string, fullName: string): string =>
 export const uniqueCouponCode = async (
   collegeAbbr: string,
   fullName: string,
-  phone: string
+  phone: string,
+  nickname?: string
 ): Promise<string> => {
-  const base = baseCouponCode(collegeAbbr, fullName);
+  const base = baseCouponCode(collegeAbbr, fullName, nickname);
   const digits = String(phone || '').replace(/\D/g, '');
 
   const candidates = [base];

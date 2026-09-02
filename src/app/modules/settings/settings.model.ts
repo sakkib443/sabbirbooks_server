@@ -77,7 +77,7 @@ const settingsSchema = new Schema<ISiteSettings>(
         // Shown on the checkout page and the order confirmation.
         deliveryNote: {
             type: String,
-            default: 'ঢাকার ভেতরে ১-২ দিন, ঢাকার বাইরে ২-৪ কর্মদিবসের মধ্যে বই পৌঁছে যাবে।',
+            default: 'সারা দেশে ১-৩ কর্মদিবসের ভিতরে পৌঁছে যাবে ইনশাআল্লাহ।',
         },
         // Support number printed on the order confirmation screen.
         orderSupportPhone: { type: String, default: '' },

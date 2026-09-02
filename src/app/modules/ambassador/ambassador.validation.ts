@@ -43,6 +43,9 @@ const agreement = z.object({
 export const applyValidationSchema = z.object({
   body: z.object({
     fullName: z.string().trim().min(2, 'Full name is required'),
+    // What the coupon code is built from. Optional — the full name is guessed
+    // from when it is absent.
+    nickname: z.string().trim().max(20).optional(),
     phone,
     whatsapp: z
       .string()

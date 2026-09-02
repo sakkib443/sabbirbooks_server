@@ -611,6 +611,53 @@ async function main() {
   };
   const names = (rows: any[]) => rows.map((r) => r.fullName).sort().join(', ');
 
+  console.log('\n── The call name is what the code is built from ──');
+  {
+    // Guessing gets this wrong often enough to matter: "Md. Tanvir Al Mahmud"
+    // guesses MAHMUD (longest non-honorific), but everyone calls him Tanvir.
+    // The form asks, and the answer wins.
+    const r = await api()
+      .post('/api/ambassador')
+      .set('Authorization', `Bearer ${admin}`)
+      .send({
+        fullName: 'Md Tanvir Al Mahmud',
+        nickname: 'Tanvir',
+        phone: '01999001122',
+        email: 'tanvir-nick@test.com',
+        medicalCollege: String(dmc._id),
+      });
+    check(r.status === 201, `added (${r.status})`, r.body?.message);
+
+    const doc: any = await AmbassadorApplication.findById(r.body?.data?._id).lean();
+    check(doc.nickname === 'Tanvir', `the call name is kept (${doc.nickname})`);
+    check(
+      doc.couponCode === 'DMCTANVIR20',
+      `code follows the call name: DMCTANVIR20 (got ${doc.couponCode})`
+    );
+    check(
+      doc.couponCode !== 'DMCMAHMUD20',
+      'not the longest word, which is what guessing would have picked'
+    );
+  }
+
+  console.log('\n── With no call name, the guess still runs ──');
+  {
+    const r = await api()
+      .post('/api/ambassador')
+      .set('Authorization', `Bearer ${admin}`)
+      .send({
+        fullName: 'Md Rakib Hossain',
+        phone: '01999003344',
+        email: 'rakib-noname@test.com',
+        medicalCollege: String(dmc._id),
+      });
+    const doc: any = await AmbassadorApplication.findById(r.body?.data?._id).lean();
+    check(
+      doc.couponCode === 'DMCHOSSAIN20',
+      `falls back to the longest non-honorific word (got ${doc.couponCode})`
+    );
+  }
+
   console.log('\n── The dropdowns only offer what exists ──');
   {
     const { facets } = await listWith('status=all');

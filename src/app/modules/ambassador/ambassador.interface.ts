@@ -61,6 +61,8 @@ export interface IAmbassadorApplication {
 
   // ── Section 1 — who they are ──────────────────────────────────
   fullName: string;
+  /** Call-name the coupon code is built from. See the model note. */
+  nickname?: string;
   phone: string;
   whatsapp?: string;
   email: string;

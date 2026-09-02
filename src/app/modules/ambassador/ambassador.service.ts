@@ -168,7 +168,8 @@ const approve = async (id: string, reviewerId?: string, opts: { password?: strin
     const code = await uniqueCouponCode(
       app.collegeAbbreviation || '',
       app.fullName,
-      app.phone
+      app.phone,
+      app.nickname
     );
     coupon = await BookCoupon.create({
       code,
@@ -323,6 +324,9 @@ const createManual = async (
  */
 const EDITABLE = [
   'fullName',
+  // Editable, but only useful before approval — the code is minted once and
+  // never rebuilt, because orders reference it.
+  'nickname',
   'phone',
   'whatsapp',
   'email',

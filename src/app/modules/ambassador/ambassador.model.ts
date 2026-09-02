@@ -37,6 +37,16 @@ const ambassadorSchema = new Schema<IAmbassadorApplication>(
     source: { type: String, enum: ['application', 'manual'], default: 'application' },
 
     fullName: { type: String, required: true, trim: true },
+    /**
+     * What their classmates call them — and what the coupon code is built from.
+     *
+     * Asked for rather than guessed: 'Md. Sakib Al Hasan' could reasonably
+     * become SAKIB, HASAN or AL, and only they know which one a batchmate
+     * would recognise on a Facebook post. Optional, because the guess from the
+     * full name is a decent fallback and an admin adding a bookseller by hand
+     * may not know it.
+     */
+    nickname: { type: String, trim: true, default: '' },
     phone: { type: String, required: true, trim: true },
     whatsapp: { type: String, trim: true, default: '' },
     // Lower-cased so "Sakib@Gmail.com" and "sakib@gmail.com" cannot both apply.
