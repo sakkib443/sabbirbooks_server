@@ -164,7 +164,7 @@ async function main() {
 
   console.log('\n── Every template fits one 160-character SMS ──');
   {
-    const o = { shopName: 'Magic Viva', orderNumber: 'ORD-1788284255628-LKB6BR', total: 1220 };
+    const o = { shopName: 'Magic Viva', siteUrl: 'magicviva.com', orderNumber: 'ORD-1788284255628-LKB6BR', total: 1220 };
     const a = {
       shopName: 'Magic Viva',
       // The longest a generated code realistically gets: abbreviation + name +
@@ -226,7 +226,7 @@ async function main() {
     const texts = textsFor(COD_PHONE);
     check(texts.length === 3, `delivering sends the third (${texts.length})`);
     check(/delivered/i.test(texts[2]?.body || ''), 'which says it arrived');
-    check(/QR/i.test(texts[2]?.body || ''), 'and points them at the QR codes');
+    check(/code/i.test(texts[2]?.body || ''), 'and tells them the book has a code inside — the only way in now');
   }
 
   console.log('\n── Clicking a status twice does not text twice ──');

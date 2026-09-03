@@ -142,14 +142,16 @@ export const smsTest = async (req: Request, res: Response) => {
  * nothing. Useful for checking the shop name and the wording before a campaign.
  */
 export const smsPreview = async (_req: Request, res: Response) => {
-  const order = {
-    shopName: config.alerts.shop_name,
-    orderNumber: 'ORD-1788284255628-LKB6BR',
-    total: 610,
-  };
   const site = String(config.client_url || 'magicviva.com')
     .replace(/^https?:\/\//i, '')
     .replace(/\/+$/, '');
+
+  const order = {
+    shopName: config.alerts.shop_name,
+    siteUrl: site,
+    orderNumber: 'ORD-1788284255628-LKB6BR',
+    total: 610,
+  };
 
   const samples = {
     orderPlaced: SmsMessage.orderPlaced(order),

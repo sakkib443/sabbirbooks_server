@@ -81,18 +81,38 @@ async function main() {
       status: opts.status,
     });
 
-  console.log('\n── PRINTED book: access must wait for delivery ──');
-  for (const status of ['pending', 'paid', 'processing', 'shipped']) {
+  /**
+   * A PRINTED book is opened by the code inside it, never by the order.
+   *
+   * This used to be "access waits for delivery", and delivery granted it. That
+   * is wrong for how this shop sells: one student orders six copies on one
+   * account to pay the delivery charge once, hands five to classmates, and the
+   * ordering account could read all six while five people holding a paid-for
+   * book could read none. The book carries its own proof now — see
+   * bookAccess.service and book-copy.e2e.
+   */
+  console.log('\n── PRINTED book: the order never opens it, at any status ──');
+  for (const status of ['pending', 'paid', 'processing', 'shipped', 'delivered', 'access-granted']) {
     const u = await mkUser(`printed-${status}@t.com`);
     await mkOrder(String(u._id), { status, paymentStatus: 'paid', format: 'printed' });
     const ok = await BookAccessService.hasBookAccess(String(u._id), bookId);
     check(ok === false, `printed + status '${status}' + payment paid → NO access`);
   }
-  for (const status of ['delivered', 'access-granted']) {
-    const u = await mkUser(`printed-${status}@t.com`);
-    await mkOrder(String(u._id), { status, paymentStatus: 'paid', format: 'printed' });
+  {
+    // …and what DOES open it: a grant, which is what redeeming a code creates.
+    const u = await mkUser('printed-with-code@t.com');
+    await mkOrder(String(u._id), { status: 'delivered', paymentStatus: 'paid', format: 'printed' });
+    check(
+      (await BookAccessService.hasBookAccess(String(u._id), bookId)) === false,
+      'delivered and no code → still nothing'
+    );
+    await BookAccessService.grantAccess({
+      userId: String(u._id),
+      bookId,
+      note: 'Book code MV-TEST',
+    });
     const ok = await BookAccessService.hasBookAccess(String(u._id), bookId);
-    check(ok === true, `printed + status '${status}' → access`);
+    check(ok === true, 'the code redeemed → access');
   }
 
   console.log('\n── DIGITAL book: paid is enough (nothing to deliver) ──');
@@ -135,21 +155,43 @@ async function main() {
     );
   }
   {
+    /**
+     * A printed order being cancelled takes nothing away, because it granted
+     * nothing in the first place — the code did.
+     *
+     * Which raises the real question: somebody redeems their code, then the
+     * order is refunded. The grant SURVIVES, deliberately. A redeemed code is
+     * spent and cannot be given back, and the shop taking a book back is a
+     * conversation, not a database rule — an admin blocks the grant from the
+     * access screen when that is what actually happened. Wiring a refund to
+     * silently revoke would also punish the classmate who redeemed a code from
+     * a copy the buyer later returned.
+     */
     const u = await mkUser('cancelled-printed@t.com');
     const o = await mkOrder(String(u._id), {
       status: 'delivered',
       paymentStatus: 'paid',
       format: 'printed',
     });
+    await BookAccessService.grantAccess({
+      userId: String(u._id),
+      bookId,
+      note: 'Book code MV-REFUND',
+    });
     check(
       (await BookAccessService.hasBookAccess(String(u._id), bookId)) === true,
-      'printed delivered → access (control)'
+      'code redeemed → access (control)'
     );
     o.status = 'cancelled';
     await o.save();
     check(
+      (await BookAccessService.hasBookAccess(String(u._id), bookId)) === true,
+      'the order is cancelled but the redeemed code still opens the book'
+    );
+    await BookAccessService.revokeAccess(String(u._id), bookId);
+    check(
       (await BookAccessService.hasBookAccess(String(u._id), bookId)) === false,
-      'printed delivered then CANCELLED → NO access'
+      'and an admin blocking the grant is what actually closes it'
     );
   }
 
@@ -315,18 +357,21 @@ async function main() {
     );
     check(leak === null, 'no-access user gets null (no title, no QR code) from next-topic');
 
-    // A buyer walking the same path must still get their navigation.
+    // A reader who HAS the book — code redeemed — must still get their
+    // navigation. An order alone no longer counts, so the grant is what makes
+    // this reader a reader.
     const buyer = await mkUser('buyer@t.com');
     await mkOrder(String(buyer._id), {
       status: 'delivered',
       paymentStatus: 'paid',
       format: 'printed',
     });
+    await BookAccessService.grantAccess({ userId: String(buyer._id), bookId, note: 'Book code' });
     const ok = await BookContentService.getNextTopicForReader(
       String(freeTopic._id),
       String(buyer._id)
     );
-    check(ok?.allowed === true, 'delivered buyer still gets a working next-topic link');
+    check(ok?.allowed === true, 'a reader who redeemed their code gets a working next-topic link');
   }
 
   console.log('\n── isFree changes nothing for a buyer either ──');
@@ -378,13 +423,15 @@ async function main() {
       paymentStatus: 'paid',
       format: 'printed',
     });
+    // The order is not what opens a figure any more — the code is.
+    await BookAccessService.grantAccess({ userId: String(buyer._id), bookId, note: 'Book code' });
 
     check(
       (await BookContentService.canReadProtectedMedia(
         '1700000000-diagram.png',
         String(buyer._id)
       )) === true,
-      'delivered buyer can read the figure'
+      'a reader who redeemed their code can read the figure'
     );
     check(
       (await BookContentService.canReadProtectedMedia(

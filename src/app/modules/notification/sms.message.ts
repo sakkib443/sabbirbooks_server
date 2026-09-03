@@ -29,6 +29,8 @@ const lines = (...xs: (string | false | null | undefined)[]) =>
 
 export interface OrderSmsInput {
   shopName: string;
+  /** The site, bare — where a code is redeemed. See orderDelivered. */
+  siteUrl: string;
   orderNumber: string;
   total: number;
   /** 'cod' | 'bkash' | 'sslcommerz' | … — decides which of the two paths ran. */
@@ -84,12 +86,20 @@ export const SmsMessage = {
       'Please keep the amount ready. Thank you!'
     ),
 
-  /** 4. Delivered — and a nudge towards the thing that makes the book work. */
+  /**
+   * 4. Delivered — and the one instruction that has to reach them.
+   *
+   * A delivered parcel no longer opens the book by itself; the code printed
+   * inside it does. Nobody looks for a code they were never told about, so this
+   * is the message that stops "I paid and it says I have not bought it" from
+   * becoming the shop's most common support call. It is the reason this text
+   * exists at all now, so the code line comes before the thank-you.
+   */
   orderDelivered: (i: OrderSmsInput) =>
     lines(
-      `${i.shopName}`,
-      `Order ${i.orderNumber} delivered. Thank you for your purchase!`,
-      'Scan the QR codes in the book to open the answers.'
+      `${i.shopName}: order ${i.orderNumber} delivered!`,
+      'Scratch the panel inside the book for your code.',
+      `Enter it at ${i.siteUrl} to unlock every answer.`
     ),
 
   /**

@@ -22,4 +22,20 @@ router.delete(
 );
 router.get('/book/:bookId', authMiddleware, authorize('admin'), requireCapability('orders.read'), BookAccessController.list);
 
+// ─── The access screen ──────────────────────────────────────
+//
+// Reading who can open a book is orders.read — it is the fulfilment question,
+// "did what we sold reach who we sold it to". Changing it is orders.write:
+// blocking somebody takes away something they paid for, and granting gives
+// away something the shop sells, so both are the same weight as editing an
+// order. Declared before '/book/:bookId' would not matter (different paths),
+// but they are grouped so the screen's endpoints read together.
+const read = [authMiddleware, authorize('admin', 'manager'), requireCapability('orders.read')];
+const write = [authMiddleware, authorize('admin', 'manager'), requireCapability('orders.write')];
+
+router.get('/report', ...read, BookAccessController.report);
+router.get('/waiting', ...read, BookAccessController.waiting);
+router.patch('/:id/active', ...write, BookAccessController.setActive);
+router.post('/grant-by-email', ...write, BookAccessController.grantByEmail);
+
 export const BookAccessRoutes = router;

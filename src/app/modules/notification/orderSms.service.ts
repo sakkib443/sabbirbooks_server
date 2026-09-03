@@ -64,8 +64,20 @@ const resolvePhone = async (order: any): Promise<string> => {
   }
 };
 
+/**
+ * The site as it belongs in a text — no scheme, no trailing slash.
+ *
+ * 'https://magicviva.com/' spends eight characters saying nothing, and a phone
+ * links a bare domain on its own.
+ */
+const siteForSms = (): string =>
+  String(config.client_url || 'magicviva.com')
+    .replace(/^https?:\/\//i, '')
+    .replace(/\/+$/, '');
+
 const buildInput = (order: any): OrderSmsInput => ({
   shopName: config.alerts.shop_name,
+  siteUrl: siteForSms(),
   orderNumber: order?.orderNumber || String(order?._id || ''),
   total: Number(order?.total) || 0,
   paymentMethod: order?.payment?.method ?? null,
