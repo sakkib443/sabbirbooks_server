@@ -32,6 +32,16 @@ const TARGET = {
   // given deploy happens to read.
   deliveryChargeInsideDhaka: 120,
   deliveryChargeOutsideDhaka: 120,
+
+  /**
+   * The delivery promise on the order-confirmation screen.
+   *
+   * The schema default was changed to this wording, but a default only applies
+   * to a field that is ABSENT — this one has the old two-zone sentence saved in
+   * it, so the new default never showed. Same trap as deliveryCharge above, and
+   * the same fix: write the value explicitly.
+   */
+  deliveryNote: 'সারা দেশে ১-৩ কর্মদিবসের ভিতরে পৌঁছে যাবে ইনশাআল্লাহ।',
 };
 
 (async () => {
