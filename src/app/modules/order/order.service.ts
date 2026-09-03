@@ -11,6 +11,7 @@ import { User } from '../user/user.model';
 import { BkashService } from '../payment/bkash.service';
 import { SslcommerzService } from '../payment/sslcommerz.service';
 import { SettingsService } from '../settings/settings.services';
+import { MedicalCollege } from '../medicalCollege/medicalCollege.model';
 import { OrderAlertService } from '../notification/orderAlert.service';
 import { OrderEmailService } from '../notification/orderEmail.service';
 import { OrderSmsService } from '../notification/orderSms.service';
@@ -61,7 +62,32 @@ const quoteDeliveryCharge = async (opts: {
     return 0;
   }
 
-  // One flat rate everywhere. deliveryCharge is the live field; the old
+  /**
+   * The shop's own city, at a reduced rate.
+   *
+   * Every other medical college in the same district as the shop is a short
+   * courier hop rather than a national one. The free college above is already
+   * handled and cannot reach here, so this is exactly "the others in town".
+   *
+   * The buyer's district comes from their COLLEGE, not from the address they
+   * typed: a Khulna student ordering a book to their family home in Barishal
+   * is a national parcel and should pay the national rate, and a student who
+   * types their hostel address badly should not lose the local rate for it.
+   * The college is the thing the shop can check.
+   */
+  const localDistrict = String(s?.localDeliveryDistrict || '').trim();
+  const localRate = Number(s?.localDeliveryCharge);
+  if (localDistrict && Number.isFinite(localRate) && opts.college) {
+    const college: any = await MedicalCollege.findOne({ name: opts.college.trim() })
+      .select('district')
+      .lean();
+    if (college && String(college.district || '').trim() === localDistrict) {
+      const codExtraLocal = opts.isCod ? Number(s?.codExtraCharge) || 0 : 0;
+      return Math.max(0, Math.round(localRate + codExtraLocal));
+    }
+  }
+
+  // One flat rate everywhere else. deliveryCharge is the live field; the old
   // inside-Dhaka value is the fallback for a settings doc written before it
   // existed, then the documented default.
   const flat = Number(s?.deliveryCharge);

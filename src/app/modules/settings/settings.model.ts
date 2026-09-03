@@ -69,6 +69,23 @@ const settingsSchema = new Schema<ISiteSettings>(
         // their own division. Empty college = rule off. See order.service.
         freeDeliveryCollege: { type: String, default: 'Khulna Medical College' },
         freeDeliveryDivision: { type: String, default: 'খুলনা' },
+
+        /**
+         * The shop's own city, at a reduced rate.
+         *
+         * Three tiers, not two. The shop is run out of Khulna Medical College,
+         * so its own students pay nothing — the book is handed over on campus.
+         * Every OTHER college in the same district is a short courier hop
+         * rather than a national one, and costs the shop less to serve, so it
+         * gets its own rate between free and the flat one.
+         *
+         * Matched on the buyer's DISTRICT rather than their division: a
+         * division is a quarter of the country, and a parcel to the far side
+         * of it costs the same as one to Dhaka. Khulna city is the actual
+         * unit of "near us".
+         */
+        localDeliveryDistrict: { type: String, default: 'খুলনা' },
+        localDeliveryCharge: { type: Number, default: 100 },
         // Order subtotal at or above which delivery is free. 0 = never free.
         freeDeliveryAbove: { type: Number, default: 0 },
         // Extra fee some sellers add for collecting cash. 0 = no surcharge.

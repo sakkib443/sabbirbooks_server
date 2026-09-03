@@ -57,6 +57,9 @@ export interface ISiteSettings {
     // division pays the flat charge. Empty college turns the rule off.
     freeDeliveryCollege: string;
     freeDeliveryDivision: string;
+    /** The shop's own district, and its reduced rate. See the model note. */
+    localDeliveryDistrict: string;
+    localDeliveryCharge: number;
     freeDeliveryAbove: number;
     codExtraCharge: number;
     deliveryNote: string;
