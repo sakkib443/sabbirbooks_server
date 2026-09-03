@@ -1,4 +1,5 @@
 import express from 'express';
+import { trackByPhone } from './orderTrack.controller';
 import { OrderController } from './order.controller';
 import validateRequest from '../../middlewares/validateRequest';
 import {
@@ -15,6 +16,11 @@ const router = express.Router();
 // Which payment methods are on + what delivery costs. Declared before '/:id'
 // so the wildcard route below never swallows it.
 router.get('/checkout-options', OrderController.getCheckoutOptions);
+
+// Track a parcel from the home page, no account needed. POST so the phone
+// number stays out of history and access logs — see the controller's note on
+// what it deliberately does not return.
+router.post('/track', trackByPhone);
 
 // ─── Create + list own orders (any logged-in user) ───────────
 router.post(
