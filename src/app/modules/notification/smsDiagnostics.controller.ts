@@ -39,6 +39,78 @@ const fingerprint = (s: string) => {
  * What the server read, and what it has been doing with it. No gateway call —
  * safe to hit as often as you like.
  */
+/**
+ * What IP address the outside world sees this server as.
+ *
+ * The whitelist is the commonest reason texts stop, and it is the one nobody
+ * can check from the panel: MiMSMS is told an address, but what actually
+ * matters is the address THIS container leaves from — and behind Docker, a
+ * proxy, or a rebuilt VPS those two drift apart silently. Asking an echo
+ * service costs nothing and turns "we whitelisted it, it should work" into a
+ * number that can be compared side by side with the one in the panel.
+ *
+ * Never throws. An unreachable echo service is a missing nicety, not an error.
+ */
+const outgoingIp = async (): Promise<string | null> => {
+  try {
+    const res = await fetch('https://api.ipify.org?format=json', {
+      signal: AbortSignal.timeout(4000),
+    });
+    const body: any = await res.json();
+    return body?.ip ? String(body.ip) : null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * What a balance check tells us, in the shop's terms.
+ *
+ * The balance call and the send call go through the same gate, so whether the
+ * cheap one gets through says which of the two remaining problems this is —
+ * without spending a message to find out.
+ */
+const readVerdict = (b: { ok: boolean; reachable: boolean; error?: string }, senderSet: boolean) => {
+  if (b.ok && senderSet) {
+    return {
+      state: 'ok',
+      bn: 'গেটওয়ে সাড়া দিচ্ছে আর sender ID বসানো আছে। নিচে একটা টেস্ট পাঠিয়ে দেখুন।',
+      en: 'The gateway answers and a sender ID is set. Send the test below.',
+    };
+  }
+  if (b.ok && !senderSet) {
+    return {
+      state: 'sender-missing',
+      bn:
+        'গেটওয়ে সাড়া দিচ্ছে — অর্থাৎ key ঠিক আছে আর এই সার্ভারের IP whitelist করা আছে। ' +
+        'বাকি শুধু SMS_SENDER_ID — সেটা ফাঁকা, তাই প্রতিটা মেসেজ ফিরিয়ে দিচ্ছে। ' +
+        'MiMSMS প্যানেলের Sender ID মেনু থেকে মানটা নিয়ে Coolify-তে বসান।',
+      en:
+        'The gateway answers, so the key and this server\'s IP are both fine. ' +
+        'SMS_SENDER_ID is empty, which is why every message is refused. Copy it ' +
+        'from the panel\'s Sender ID menu into Coolify.',
+    };
+  }
+  if (!b.reachable) {
+    return {
+      state: 'ip-blocked',
+      bn:
+        'গেটওয়ে এই সার্ভারকেই ফিরিয়ে দিচ্ছে — IP whitelist হয়নি। ' +
+        'সার্ভারে `curl ifconfig.me` চালিয়ে যে IP আসে সেটা MiMSMS-কে whitelist করতে বলুন। ' +
+        'প্যানেলে অন্য কোনো IP বসানো থাকলে সেটাই সমস্যা।',
+      en:
+        'The gateway is refusing this server outright — the IP is not whitelisted. ' +
+        'Run `curl ifconfig.me` here and give MiMSMS the address it prints.',
+    };
+  }
+  return {
+    state: 'credentials',
+    bn:
+      'গেটওয়ে শুনছে কিন্তু ইউজারনেম/key মানছে না। প্যানেলে key টা Activate করা আছে কিনা দেখুন।',
+    en: 'The gateway hears us but rejects the credentials — check the key is activated in the panel.',
+  };
+};
+
 export const smsStatus = async (_req: Request, res: Response) => {
   try {
     // How many orders are sitting there with a text still owed. After the
@@ -57,10 +129,18 @@ export const smsStatus = async (_req: Request, res: Response) => {
         .lean(),
     ]);
 
+    // The two free questions, asked before anybody is told to spend a message.
+    const [balance, ip] = await Promise.all([SmsService.checkBalance(), outgoingIp()]);
+
     res.json({
       success: true,
       data: {
         demoMode: SmsService.isDemo(),
+        gateway: {
+          ...balance,
+          outgoingIp: ip,
+          verdict: readVerdict(balance, Boolean(config.sms.sender_id)),
+        },
         config: {
           username: config.sms.username || null,
           apiKey: fingerprint(config.sms.api_key),

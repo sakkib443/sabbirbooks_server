@@ -112,6 +112,58 @@ const send = async (phone: string, message: string): Promise<SmsResult> => {
 };
 
 /**
+ * Ask the gateway how much credit is left — and, incidentally, whether it will
+ * talk to us at all.
+ *
+ * This is the diagnostic that matters, because it separates the two failures
+ * that otherwise look identical. Both leave "no text arrived" as the only
+ * symptom:
+ *
+ *   the IP is not whitelisted    → this call is refused too
+ *   the sender name is wrong     → this call SUCCEEDS, and only sending fails
+ *
+ * And it costs nothing. Working that out by sending a real message spends a
+ * message and still leaves the shop reading a refusal string; asking here
+ * answers "can we reach them at all" for free, before anybody types a phone
+ * number in.
+ */
+const checkBalance = async (): Promise<{
+  ok: boolean;
+  reachable: boolean;
+  balance?: string;
+  error?: string;
+}> => {
+  if (isDemo()) return { ok: false, reachable: false, error: 'demo mode — no key set' };
+
+  try {
+    const res = await fetch('https://api.mimsms.com/api/SmsSending/balanceCheck', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ UserName: config.sms.username, Apikey: config.sms.api_key }),
+    });
+    const body: any = await res.json().catch(() => ({}));
+    const ok = String(body?.statusCode) === '200' || String(body?.status).toLowerCase() === 'success';
+
+    if (ok) {
+      // The credentials are accepted AND this server is allowed to call. Any
+      // remaining failure is about the message itself, not the connection.
+      return { ok: true, reachable: true, balance: String(body?.balance ?? body?.responseResult ?? '') };
+    }
+
+    const reason = String(body?.responseResult || body?.status || `HTTP ${res.status}`);
+    return {
+      ok: false,
+      // "IP Black List" is the gateway refusing the CALLER. Anything else means
+      // it heard us and disliked the credentials, which is a different fix.
+      reachable: !/black\s*list|whitelist/i.test(reason),
+      error: reason,
+    };
+  } catch (err: any) {
+    return { ok: false, reachable: false, error: err?.message || 'could not reach the gateway' };
+  }
+};
+
+/**
  * Log what SMS can and cannot do, once per process.
  *
  * "Why did nobody get a text?" should be answerable from the boot log rather
@@ -131,4 +183,4 @@ const logConfigOnce = (): void => {
   }
 };
 
-export const SmsService = { isDemo, normalizePhone, send, logConfigOnce };
+export const SmsService = { isDemo, normalizePhone, send, checkBalance, logConfigOnce };
