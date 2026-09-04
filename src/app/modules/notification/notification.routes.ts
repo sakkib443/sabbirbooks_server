@@ -1,6 +1,6 @@
 import express from 'express';
 import { NotificationController } from './notification.controller';
-import { smsStatus, smsTest, smsPreview } from './smsDiagnostics.controller';
+import { smsStatus, smsTest, smsPreview, smsProbe } from './smsDiagnostics.controller';
 import { authMiddleware, authorize , requireCapability } from '../../middlewares/auth';
 
 const router = express.Router();
@@ -29,5 +29,17 @@ const smsAdmin = [authMiddleware, authorize('admin'), requireCapability('staff.m
 router.get('/sms-status', ...smsAdmin, smsStatus);
 router.get('/sms-preview', ...smsAdmin, smsPreview);
 router.post('/sms-test', ...smsAdmin, smsTest);
+
+// ─── TEMPORARY: the same answers, without a browser session ──
+//
+// Deliberately not behind authMiddleware. The gate is a token derived from
+// JWT_ACCESS_SECRET, so the only person who can call it is a person who could
+// already mint themselves an admin session — it widens nothing. Every failure
+// answers 404, and no secret is ever in the response.
+//
+// This exists because SMS has been dead for days and the gateway's own words
+// are the only thing that can say why, and they can only be heard from this
+// container. DELETE IT the day SMS works.
+router.get('/sms-probe', smsProbe);
 
 export const NotificationRoutes = router;
