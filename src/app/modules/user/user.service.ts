@@ -104,9 +104,14 @@ const createUserServices = async (payload: IUser): Promise<CreateUserResponse> =
   // Public signup is ALWAYS a student — never trust a client-supplied role (privilege-escalation guard).
   const id = await generateUserId();
   const withCollege = await withCollegeSnapshot(payload);
+  const wa = normalizeBdMobile(withCollege.whatsappNumber);
   const toCreate = {
     ...withCollege,
-    whatsappNumber: normalizeBdMobile(withCollege.whatsappNumber),
+    whatsappNumber: wa,
+    // Same rule as the profile update: if only a WhatsApp number was given,
+    // it is the number we have, so it is the number to call. An explicitly
+    // supplied phone always wins.
+    phoneNumber: String(withCollege.phoneNumber || '').trim() || wa,
     id,
     role: 'student',
     authProvider: 'local' as const,
@@ -284,6 +289,28 @@ const updateUserServices = async (id: string, payload: Partial<IUser>): Promise<
   // Same one-shape rule as signup, so an edited number stays searchable.
   if (data.whatsappNumber !== undefined) {
     data.whatsappNumber = normalizeBdMobile(data.whatsappNumber);
+
+    /**
+     * A Google account is born without a phone — Google hands over a name, an
+     * email and a picture, never a number. So the WhatsApp number the student
+     * types afterwards is the ONLY number the shop has for them, and leaving
+     * phoneNumber empty has real costs: checkout cannot prefill it, so the
+     * buyer retypes it from memory into every order, and the admin list shows
+     * a customer with no way to reach them.
+     *
+     * So mirror it — but only into an EMPTY phone, and only when this request
+     * did not set one itself. A number already there is a deliberate answer to
+     * a different question ("which number do you actually pick up?"), and
+     * quietly overwriting that would be a worse bug than the one this fixes.
+     * Changing it later stays possible, because a later edit arrives with
+     * phoneNumber set and this branch never runs.
+     */
+    if (data.phoneNumber === undefined && data.whatsappNumber) {
+      const current = await User.findOne(query).select('phoneNumber').lean();
+      if (!String((current as { phoneNumber?: string } | null)?.phoneNumber || '').trim()) {
+        data.phoneNumber = data.whatsappNumber;
+      }
+    }
   }
 
   // `permissions` is NEVER writable through the generic user PATCH. That route
