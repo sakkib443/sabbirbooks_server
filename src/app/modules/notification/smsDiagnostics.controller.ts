@@ -13,15 +13,11 @@
  * pasted with a stray space — without putting the secret in a browser tab, a
  * screenshot, or a support chat.
  */
-import crypto from 'crypto';
 import { Request, Response } from 'express';
 import config from '../../config';
 import { SmsService } from './sms.service';
 import { SmsMessage } from './sms.message';
 import { Order } from '../order/order.model';
-
-/** Last probe-triggered send, so the temporary probe below cannot be used to spend money in a loop. */
-let lastProbeSend = 0;
 
 /** Enough to spot an empty or mistyped value; never enough to use. */
 const fingerprint = (s: string) => {
@@ -259,141 +255,5 @@ export const smsPreview = async (_req: Request, res: Response) => {
         { text: v, characters: v.length, messages: v.length > 160 ? 2 : 1 },
       ])
     ),
-  });
-};
-/**
- * GET /api/notifications/sms-probe?token=…[&to=88017XXXXXXXX]
- *
- * A TEMPORARY, UNAUTHENTICATED window onto the one thing that cannot be seen
- * from anywhere else: what MiMSMS says to THIS server.
- *
- * Why it exists. Texts have not been going out for days. Every remaining
- * explanation — the IP whitelist, the key's activation, the sender id — is
- * distinguishable only by the gateway's own answer, and the gateway will only
- * answer the whitelisted address, which is this container and nothing else.
- * The authenticated version of this lives one route up, but reading it needs
- * an admin session in a browser, and that has turned out to be the step that
- * does not happen. So: same information, reachable with a URL.
- *
- * WHY THIS IS NOT A HOLE. The token is not stored and not guessable — it is
- * sha256("sms-probe:" + JWT_ACCESS_SECRET). Anyone who could compute it
- * already holds the secret that signs admin sessions, so they could mint
- * themselves an admin token and read the authenticated endpoint anyway. This
- * grants no access that secret does not already grant. Beyond that:
- *
- *   - the comparison is timing-safe, so the token cannot be walked out a byte
- *     at a time
- *   - no secret is ever returned: the key comes back as a length and its first
- *     and last few characters, which is enough to catch an empty value or a
- *     stray space and useless for anything else
- *   - `to` is the only way to spend money here, it sends exactly one message,
- *     and it is rate-limited to one call a minute per process
- *
- * DELETE THIS once SMS is working. It is a debugging instrument, not a
- * feature, and it should not outlive the bug it was written for.
- */
-export const smsProbe = async (req: Request, res: Response) => {
-  const expected = crypto
-    .createHash('sha256')
-    .update(`sms-probe:${config.jwt.access_secret || ''}`)
-    .digest('hex');
-
-  const given = String(req.query.token || '');
-
-  // Wrong length would make timingSafeEqual throw, and a thrown error is
-  // itself a signal. Answer 404 for every failure: an endpoint that admits it
-  // exists is an endpoint worth attacking.
-  const ok =
-    given.length === expected.length &&
-    crypto.timingSafeEqual(Buffer.from(given), Buffer.from(expected));
-  if (!config.jwt.access_secret || !ok) {
-    return res.status(404).json({ success: false, message: 'Not found' });
-  }
-
-  // What the world sees this container as. The whole whitelist argument turns
-  // on this number and it cannot be read from the MiMSMS panel.
-  let outgoingIp: string | null = null;
-  try {
-    const r = await fetch('https://api.ipify.org?format=json', {
-      signal: AbortSignal.timeout(5000),
-    });
-    outgoingIp = (await r.json())?.ip ?? null;
-  } catch {
-    outgoingIp = null;
-  }
-
-  // The free question: will the gateway talk to us at all?
-  const balance = await SmsService.checkBalance();
-
-  // The raw body too. checkBalance reduces it to a verdict, and the verdict is
-  // an interpretation — when the interpretation is what is in doubt, the
-  // unprocessed words are what settle it.
-  let rawBalance: unknown = null;
-  try {
-    const r = await fetch('https://api.mimsms.com/api/SmsSending/balanceCheck', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ UserName: config.sms.username, Apikey: config.sms.api_key }),
-      signal: AbortSignal.timeout(10000),
-    });
-    rawBalance = { httpStatus: r.status, body: await r.text() };
-  } catch (e: any) {
-    rawBalance = { error: e?.message || 'unreachable' };
-  }
-
-  // One real message, only when asked for by phone number, and never twice in
-  // a minute. This is the test that costs something, so it is opt-in.
-  let sent: unknown = null;
-  const to = String(req.query.to || '').trim();
-  if (to) {
-    if (Date.now() - lastProbeSend < 60_000) {
-      sent = { skipped: 'rate limited — one send a minute' };
-    } else {
-      lastProbeSend = Date.now();
-      const normalised = SmsService.normalizePhone(to);
-      if (!normalised) {
-        sent = { error: `"${to}" is not a Bangladeshi mobile number` };
-      } else {
-        // Sent by hand rather than through SmsService.send so the gateway's
-        // untouched reply comes back, not a summary of it.
-        try {
-          const r = await fetch(config.sms.endpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              UserName: config.sms.username,
-              Apikey: config.sms.api_key,
-              MobileNumber: normalised,
-              CampaignId: 'null',
-              SenderName: config.sms.sender_id,
-              TransactionType: config.sms.transaction_type,
-              Message: `${config.alerts.shop_name}\nSMS test.\nIf you got this, it works.`,
-            }),
-            signal: AbortSignal.timeout(15000),
-          });
-          sent = { to: normalised, httpStatus: r.status, body: await r.text() };
-        } catch (e: any) {
-          sent = { to: normalised, error: e?.message || 'send threw' };
-        }
-      }
-    }
-  }
-
-  res.json({
-    success: true,
-    outgoingIp,
-    config: {
-      username: config.sms.username || null,
-      apiKey: fingerprint(config.sms.api_key),
-      senderId: config.sms.sender_id || null,
-      senderIdHasWhitespace: /\s/.test(config.sms.sender_id || ''),
-      transactionType: config.sms.transaction_type,
-      endpoint: config.sms.endpoint,
-      shopName: config.alerts.shop_name,
-      clientUrl: config.client_url,
-    },
-    balance,
-    rawBalance,
-    sent,
   });
 };
