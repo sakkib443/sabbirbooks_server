@@ -38,6 +38,9 @@ const main = async () => {
   console.log(`  SMS_TRANSACTION_TYPE  ${config.sms.transaction_type}`);
   console.log(`  SMS_ENDPOINT          ${config.sms.endpoint}`);
   console.log(`  SHOP_NAME             ${config.alerts.shop_name}`);
+  // The link that goes inside the delivered and affiliate texts. Unset, it is
+  // localhost:3000 — a real message with a dead link in it.
+  console.log(`  CLIENT_URL            ${config.client_url}`);
 
   if (SmsService.isDemo()) {
     console.log(
@@ -46,6 +49,38 @@ const main = async () => {
     );
   } else {
     console.log('\n  ✅ Configured. Real messages will be sent.');
+  }
+
+  console.log('\n─── Asking the gateway, without spending a message ─');
+  const gw = await SmsService.checkBalance();
+  const senderSet = Boolean(config.sms.sender_id);
+
+  if (SmsService.isDemo()) {
+    // No key means we never called anything, so the answer below would be an
+    // invented verdict about an IP we never used. Say the true thing instead.
+    console.log('  — skipped: no key set, so nothing was asked.');
+  } else if (gw.ok && senderSet) {
+    console.log(`  ✅ MiMSMS answered. Balance: ${gw.balance || '(not reported)'}`);
+    console.log('     The key is accepted and this machine is allowed to call.');
+    console.log('     A sender ID is set, so the only thing left to prove is that');
+    console.log('     THIS sender name is one the account owns — pass a phone');
+    console.log('     number below to settle that with one real message.');
+  } else if (gw.ok && !senderSet) {
+    console.log(`  ⚠  MiMSMS answered — the key and the IP are both fine.`);
+    console.log('     But SMS_SENDER_ID is EMPTY, and the gateway refuses every');
+    console.log("     message without it. Copy it from the panel's Sender ID menu");
+    console.log('     into Coolify and redeploy. That is the whole problem.');
+  } else if (!gw.reachable) {
+    console.log(`  ❌ MiMSMS refused this machine outright: ${gw.error}`);
+    console.log('     The IP is not whitelisted. If you are running this on your');
+    console.log('     laptop that is expected — only the server is whitelisted.');
+    console.log('     If you are running it ON the server, then whatever address');
+    console.log('     the panel lists is not the address this container leaves');
+    console.log('     from. Run `curl ifconfig.me` here and give MiMSMS that.');
+  } else {
+    console.log(`  ❌ MiMSMS heard us but rejected the credentials: ${gw.error}`);
+    console.log("     Check the key is ACTIVATED in the panel's Developer Option,");
+    console.log('     and that SMS_USERNAME is the email you sign in with.');
   }
 
   console.log('\n─── The five messages, as they would arrive ────────');
