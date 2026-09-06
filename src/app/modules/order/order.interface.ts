@@ -102,6 +102,8 @@ export interface IOrder {
   couponCode?: string;
   couponDiscount?: number;
   couponPayout?: number;
+  /** Taka a free-delivery coupon took off the delivery charge. */
+  deliveryWaived?: number;
   // Snapshotted at checkout from the site settings, so changing the rate later
   // never rewrites what an existing customer was quoted.
   deliveryCharge: number;

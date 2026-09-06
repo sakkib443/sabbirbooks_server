@@ -54,25 +54,148 @@ const upsertOwnerUser = async (input: {
   return created._id;
 };
 
-// Shared evaluation — the ONE place a coupon turns into taka. `amount` is the
-// product total AFTER the book's own offers (pre-order / online / normal), so the
-// coupon stacks on top of whatever discount is already live. Never discounts more
-// than the amount it is applied to. Throws a buyer-friendly Error when unusable.
-export const evaluateBookCoupon = async (code: string, amount: number) => {
+/**
+ * What the checkout knows about the order a coupon is being applied to.
+ *
+ * All optional, and every rule that depends on a missing field is SKIPPED
+ * rather than failed. The preview endpoint knows the amount but not always the
+ * payment method; the order service knows everything. A rule the preview
+ * cannot check is simply checked again on create, where it counts — so the
+ * worst case is a code that previews as valid and is refused at the last step,
+ * never one that slips through.
+ */
+export interface CouponContext {
+  /** Buyer's account id — needed for the per-buyer limit. */
+  userId?: unknown;
+  /** 'cod' | 'manual' | 'sslcommerz' | … — anything not 'cod' is prepaid. */
+  paymentMethod?: string | null;
+  /** The delivery charge this order would otherwise pay, for freeDelivery. */
+  deliveryCharge?: number;
+}
+
+export interface CouponEvaluation {
+  coupon: any;
+  /** Taka off the products. */
+  discountAmount: number;
+  /** Taka off the delivery charge — 0 unless the coupon waives it. */
+  deliveryDiscount: number;
+  finalPrice: number;
+}
+
+/**
+ * Turn a coupon code into taka, or explain why it cannot be used.
+ *
+ * THE ORDER OF THE CHECKS IS THE POINT. A buyer who is told "this coupon needs
+ * a ৳500 order" can act on it; one told "invalid coupon" retypes the code and
+ * gives up. So each rule fails with its own sentence, and the rules run
+ * cheapest-and-most-certain first: existence, then the switch, then the
+ * calendar, then the counters that cost a query.
+ *
+ * Every limit is opt-in. 0 and null mean "no limit", which is the state of
+ * every coupon written before these fields existed — a code that worked
+ * yesterday still works today.
+ */
+export const evaluateBookCoupon = async (
+  code: string,
+  amount: number,
+  ctx: CouponContext = {}
+): Promise<CouponEvaluation> => {
   const coupon: any = await BookCoupon.findOne({ code: String(code || '').toUpperCase().trim() });
   if (!coupon) throw new Error('Invalid coupon code');
   if (!coupon.isActive) throw new Error('This coupon is not active');
 
   const price = Math.max(0, Number(amount) || 0);
+  const now = new Date();
+
+  // ── The calendar ───────────────────────────────────────────────────────
+  // Dates are stored as instants, so "starts on the 5th" is midnight on the
+  // 5th in the server's zone. Saying WHEN it opens beats "not valid": a buyer
+  // who sees a date comes back, one who sees a refusal does not.
+  if (coupon.validFrom && now < new Date(coupon.validFrom)) {
+    throw new Error(
+      `This coupon starts on ${new Date(coupon.validFrom).toLocaleDateString('en-GB', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      })}`
+    );
+  }
+  if (coupon.validUntil && now > new Date(coupon.validUntil)) {
+    throw new Error('This coupon has expired');
+  }
+
+  // ── The counters ───────────────────────────────────────────────────────
+  const maxUses = Math.max(0, Number(coupon.maxUses) || 0);
+  if (maxUses > 0 && Number(coupon.usedCount || 0) >= maxUses) {
+    throw new Error('This coupon has reached its usage limit');
+  }
+
+  const perBuyer = Math.max(0, Number(coupon.maxUsesPerBuyer) || 0);
+  if (perBuyer > 0 && ctx.userId) {
+    // Counted from the orders, not from a tally on the coupon. A cancelled
+    // order should not burn somebody's one use, and the order collection is
+    // the only thing that knows which orders those are.
+    const used = await Order.countDocuments({
+      user: ctx.userId,
+      couponCode: coupon.code,
+      status: { $ne: 'cancelled' },
+    });
+    if (used >= perBuyer) {
+      throw new Error(
+        perBuyer === 1
+          ? 'You have already used this coupon'
+          : `You have already used this coupon ${perBuyer} times`
+      );
+    }
+  }
+
+  // ── The conditions ─────────────────────────────────────────────────────
+  const minPurchase = Math.max(0, Number(coupon.minPurchase) || 0);
+  if (minPurchase > 0 && price < minPurchase) {
+    // Says the gap, not just the rule — this is the one refusal a buyer can
+    // fix from the same screen, by adding another book.
+    throw new Error(`This coupon needs an order of at least BDT ${minPurchase}`);
+  }
+
+  const appliesTo = String(coupon.appliesTo || 'all');
+  if (appliesTo !== 'all' && ctx.paymentMethod) {
+    const isCod = String(ctx.paymentMethod).toLowerCase() === 'cod';
+    if (appliesTo === 'cod' && !isCod) {
+      throw new Error('This coupon only works with cash on delivery');
+    }
+    if (appliesTo === 'online' && isCod) {
+      throw new Error('This coupon only works when you pay online');
+    }
+  }
+
+  // ── The money ──────────────────────────────────────────────────────────
   let discountAmount = 0;
   if (coupon.discountType === 'percent') {
     const pct = Math.min(90, Math.max(0, Number(coupon.discountValue) || 0));
     discountAmount = Math.round((price * pct) / 100);
+    // "20% off, up to ৳100" — the shape most real campaigns take. Without the
+    // ceiling a percentage code is an open cheque against the largest basket
+    // anyone assembles.
+    const cap = Math.max(0, Number(coupon.maxDiscount) || 0);
+    if (cap > 0) discountAmount = Math.min(discountAmount, cap);
   } else {
     discountAmount = Math.max(0, Number(coupon.discountValue) || 0);
   }
   discountAmount = Math.min(discountAmount, price); // never below zero
-  return { coupon, discountAmount, finalPrice: Math.max(0, price - discountAmount) };
+
+  // Waiving delivery is capped at the delivery actually charged, so a free-
+  // delivery code on an order with free delivery already is worth nothing
+  // rather than negative.
+  const deliveryDiscount = coupon.freeDelivery
+    ? Math.max(0, Number(ctx.deliveryCharge) || 0)
+    : 0;
+
+  return {
+    coupon,
+    discountAmount,
+    deliveryDiscount,
+    finalPrice: Math.max(0, price - discountAmount),
+  };
 };
 
 // ═══════════════ Checkout (any logged-in buyer) ═══════════════
@@ -81,9 +204,19 @@ export const evaluateBookCoupon = async (code: string, amount: number) => {
 // real price.
 export const validateCoupon = async (req: Request, res: Response) => {
   try {
-    const { code, amount } = req.body;
+    const { code, amount, paymentMethod, deliveryCharge } = req.body;
     if (!code) return res.status(400).json({ success: false, message: 'Coupon code required' });
-    const { coupon, discountAmount, finalPrice } = await evaluateBookCoupon(code, amount);
+
+    // The buyer's own id, so the per-buyer limit is enforced in the preview
+    // too. Without it a code capped at one use per person previews as valid
+    // every time and only fails at the last click, which reads as a broken
+    // checkout rather than a rule.
+    const { coupon, discountAmount, deliveryDiscount, finalPrice } = await evaluateBookCoupon(
+      code,
+      amount,
+      { userId: uid(req), paymentMethod, deliveryCharge }
+    );
+
     res.json({
       success: true,
       data: {
@@ -93,6 +226,11 @@ export const validateCoupon = async (req: Request, res: Response) => {
         discountType: coupon.discountType,
         discountValue: coupon.discountValue,
         discountAmount,
+        // Sent separately from the product discount: the checkout shows them on
+        // two different lines, and a free-delivery code with no discount would
+        // otherwise look like it did nothing.
+        freeDelivery: Boolean(coupon.freeDelivery),
+        deliveryDiscount,
         finalPrice,
         originalPrice: Math.max(0, Number(amount) || 0),
       },
@@ -160,6 +298,42 @@ export const getCouponById = async (req: Request, res: Response) => {
   }
 };
 
+/**
+ * Make the limit fields safe to hand to Mongoose.
+ *
+ * An HTML date input that has never been touched submits '', and '' cast to a
+ * Date is a CastError that 500s the whole save — so the admin gets "something
+ * went wrong" for the ordinary act of not setting an end date. Empty means
+ * "no bound", which is null.
+ *
+ * The numbers get the same treatment for the same reason, and are floored at
+ * zero because a negative maxUses would read as "unlimited" through the
+ * `> 0` checks in evaluateBookCoupon while looking like a limit in the form.
+ *
+ * Mutates in place and returns the object; only touches keys that were sent,
+ * so a PATCH of one field cannot blank the rest.
+ */
+const normalizeCouponLimits = (data: any) => {
+  for (const key of ['validFrom', 'validUntil']) {
+    if (data[key] !== undefined) {
+      const v = data[key];
+      data[key] = v === '' || v === null ? null : new Date(v);
+      if (data[key] && Number.isNaN(data[key].getTime())) data[key] = null;
+    }
+  }
+  for (const key of ['maxUses', 'maxUsesPerBuyer', 'minPurchase', 'maxDiscount', 'discountValue', 'payoutPerSale']) {
+    if (data[key] !== undefined) data[key] = Math.max(0, Number(data[key]) || 0);
+  }
+  if (data.freeDelivery !== undefined) data.freeDelivery = Boolean(data.freeDelivery);
+
+  // A window that closes before it opens accepts nothing, and would be found
+  // out by a buyer rather than by the admin who typed it.
+  if (data.validFrom && data.validUntil && data.validFrom > data.validUntil) {
+    throw new Error('The end date is before the start date');
+  }
+  return data;
+};
+
 export const createCoupon = async (req: Request, res: Response) => {
   try {
     const code = String(req.body.code || '').toUpperCase().trim();
@@ -176,7 +350,9 @@ export const createCoupon = async (req: Request, res: Response) => {
       ownerPhone: req.body.ownerPhone,
     });
 
-    const coupon = await BookCoupon.create({ ...rest, code, ownerUser, createdBy: uid(req) });
+    const coupon = await BookCoupon.create(
+      normalizeCouponLimits({ ...rest, code, ownerUser, createdBy: uid(req) })
+    );
     res.status(201).json({ success: true, data: coupon });
   } catch (e: any) {
     res.status(500).json({ success: false, message: e.message });
@@ -186,7 +362,7 @@ export const createCoupon = async (req: Request, res: Response) => {
 export const updateCoupon = async (req: Request, res: Response) => {
   try {
     if (!isValidObjectId(req.params.id)) return res.status(404).json({ success: false, message: 'Coupon not found' });
-    const data: any = { ...req.body };
+    const data: any = normalizeCouponLimits({ ...req.body });
     delete data.usedCount; // never client-set — bumped by the order service
 
     // Owner login: create it, link an existing account by email, or (with the

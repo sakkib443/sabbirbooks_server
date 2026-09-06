@@ -254,16 +254,27 @@ const createOrder = async (
   let couponDiscount = 0;
   let couponPayout = 0;
   let couponDocId: unknown = null;
+  // Whether this code also waives the delivery charge. Held aside rather than
+  // folded into couponDiscount because the delivery charge is not quoted until
+  // further down — it depends on the college, the division and the paid total,
+  // and the paid total depends on this discount. So the products are settled
+  // here and the delivery is settled once there is a number to waive.
+  let couponFreeDelivery = false;
   const rawCoupon = (payload.couponCode || '').trim();
   if (rawCoupon) {
     const afterOffers = Math.max(0, subtotal - offersDiscount);
-    // Throws a buyer-friendly Error (invalid / inactive) which fails the order —
-    // the buyer explicitly applied the code and expects its price, so silently
-    // dropping it (and charging more than shown) would be worse.
-    const { coupon, discountAmount } = await evaluateBookCoupon(rawCoupon, afterOffers);
+    // Throws a buyer-friendly Error (expired / used up / wrong payment method)
+    // which fails the order — the buyer explicitly applied the code and expects
+    // its price, so silently dropping it and charging more than shown would be
+    // worse than refusing.
+    const { coupon, discountAmount } = await evaluateBookCoupon(rawCoupon, afterOffers, {
+      userId,
+      paymentMethod: method,
+    });
     couponCode = coupon.code;
     couponDiscount = discountAmount;
     couponPayout = Math.max(0, Number(coupon.payoutPerSale) || 0);
+    couponFreeDelivery = Boolean(coupon.freeDelivery);
     couponDocId = coupon._id;
   }
 
@@ -284,13 +295,22 @@ const createOrder = async (
         '(Please select your medical college in your profile before ordering.)'
     );
   }
-  const deliveryCharge = await quoteDeliveryCharge({
+  const quotedDelivery = await quoteDeliveryCharge({
     hasPrinted,
     subtotal: subtotal - discount,
     isCod: method === 'cod',
     division: payload.shippingAddress?.division,
     college: buyerCollege,
   });
+
+  // A free-delivery coupon zeroes the charge rather than discounting the order
+  // by the same amount. The distinction is not cosmetic: the delivery row is
+  // what the buyer compares against the rider's demand, and an order that says
+  // "Delivery ৳120" while having quietly taken ৳120 off elsewhere is the one
+  // that generates the phone call. It waives what was actually quoted, so a
+  // code used where delivery is already free is worth nothing, never negative.
+  const deliveryWaived = couponFreeDelivery ? quotedDelivery : 0;
+  const deliveryCharge = quotedDelivery - deliveryWaived;
   const total = subtotal - discount + deliveryCharge;
 
   // Human-friendly running number. Seeded to the current order count on first use
@@ -309,6 +329,7 @@ const createOrder = async (
     couponCode,
     couponDiscount,
     couponPayout,
+    deliveryWaived,
     deliveryCharge,
     total,
     isPreOrder: hasPreOrder,
