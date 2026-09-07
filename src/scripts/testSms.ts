@@ -86,6 +86,13 @@ const main = async () => {
   console.log('\n─── The five messages, as they would arrive ────────');
   const order = {
     shopName: config.alerts.shop_name,
+    // Was missing, and the delivered text renders it — so this preview printed
+    // "Enter it at undefined", which is exactly the kind of thing a preview
+    // exists to catch and instead was inventing. The live path builds the same
+    // field in orderSms.service.ts; this now matches it.
+    siteUrl: String(config.client_url || 'magicviva.com')
+      .replace(/^https?:\/\//i, '')
+      .replace(/\/+$/, ''),
     orderNumber: 'ORD-1788284255628-LKB6BR',
     total: 610,
   };
