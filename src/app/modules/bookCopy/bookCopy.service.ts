@@ -74,6 +74,28 @@ const generate = async (input: GenerateInput): Promise<IBookCopy[]> => {
   return made;
 };
 
+/**
+ * An email its owner will recognise and a stranger cannot use.
+ *
+ *   rahim.sarkar@gmail.com  →  •••••••••ar@gmail.com
+ *   ab@gmail.com            →  •••b@gmail.com
+ *
+ * Shown when a code turns out to be spent, so the person holding the book can
+ * tell "that is my other account, I should sign in" from "that is not me at
+ * all". Without it both cases read as a dead end and the shop gets the call.
+ *
+ * The domain stays because it is most of what makes an address recognisable
+ * and almost none of what identifies a person — nearly every reader here is on
+ * gmail. The local part keeps its last two characters at most, and never more
+ * than a third of itself, so a short address does not leak by being short.
+ */
+const maskEmail = (email?: string | null): string => {
+  const [local, domain] = String(email || '').split('@');
+  if (!local || !domain) return '';
+  const keep = Math.min(2, Math.max(1, Math.floor(local.length / 3)));
+  return `${'•'.repeat(Math.max(3, local.length - keep))}${local.slice(-keep)}@${domain}`;
+};
+
 export interface RedeemInput {
   code: string;
   userId: string;
@@ -111,7 +133,12 @@ const redeem = async (input: RedeemInput): Promise<RedeemResult> => {
   }
   if (!isValidObjectId(input.userId)) throw new Error('Sign in first');
 
-  const existing = await BookCopy.findOne({ code }).select('status book released').lean();
+  // redeemedBy is selected because the "already used" branch below has to know
+  // WHOSE it is — that is the whole difference between telling a reader to
+  // sign in and telling them their code is gone.
+  const existing = await BookCopy.findOne({ code })
+    .select('status book released redeemedBy')
+    .lean();
   if (!existing) {
     throw new Error('এই কোডটি আমাদের তালিকায় নেই। (This code is not one of ours.)');
   }
@@ -141,9 +168,38 @@ const redeem = async (input: RedeemInput): Promise<RedeemResult> => {
     );
   }
   if (existing.status === 'redeemed') {
-    throw new Error(
-      'এই কোডটি আগেই ব্যবহার করা হয়েছে। একটি কোড একবারই চালু করা যায়। (This code has already been used — a code works once.)'
+    /*
+     * "Already used" is the message readers get stuck on, and it used to be
+     * the same sentence whoever asked. Two very different people see it:
+     *
+     *   the owner, scanning from a browser they are not signed in to — which
+     *   is what a phone camera does — for whom the code is fine and the next
+     *   step is to sign in, not to find another code;
+     *
+     *   someone holding a second-hand copy whose code was spent by the last
+     *   owner, for whom no amount of retrying will help.
+     *
+     * Telling them apart takes one lookup, and it is the difference between a
+     * dead end and a working instruction.
+     */
+    const mine = String(existing.redeemedBy || '') === String(input.userId);
+    const holder: { email?: string } | null = mine
+      ? null
+      : await User.findById(existing.redeemedBy).select('email').lean();
+
+    const err: any = new Error(
+      mine
+        ? 'এই কোডটি আপনার এই অ্যাকাউন্টেই আগে চালু করা হয়েছে। আবার দেওয়ার দরকার নেই — QR স্ক্যান করলেই উত্তর খুলবে। ' +
+          '(Already active on this account.)'
+        : 'এই কোডটি অন্য একটি অ্যাকাউন্টে আগেই চালু করা হয়েছে। একটি কোড একবারই চলে। ' +
+          '(This code has already been used on another account.)'
     );
+    // Carried separately so the page can act on it rather than parse a
+    // sentence: which of the two cases this is, and — masked — which account
+    // holds it, so the owner can recognise their own.
+    err.reason = mine ? 'already-yours' : 'already-other';
+    err.maskedEmail = mine ? null : maskEmail(holder?.email);
+    throw err;
   }
 
   // The college's name is snapshotted alongside its id for the same reason the

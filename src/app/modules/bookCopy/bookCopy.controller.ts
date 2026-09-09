@@ -78,8 +78,23 @@ export const redeemCode = async (req: Request, res: Response) => {
       data: result,
     });
   } catch (e: any) {
-    noteFailure(String(uid(req) || 'anon'));
-    res.status(400).json({ success: false, message: e.message });
+    /*
+     * A code that is already active on THIS account is not a failed attempt.
+     * Counting it would let a reader who scanned from a signed-out browser,
+     * tried their own code twice, and got confused, lock themselves out of the
+     * one action that would have helped them.
+     */
+    if (e?.reason !== 'already-yours') noteFailure(String(uid(req) || 'anon'));
+
+    res.status(400).json({
+      success: false,
+      message: e.message,
+      // Which situation this is, and — masked — which account holds the code.
+      // The page needs to offer a different next step for each, and parsing a
+      // Bengali sentence to work out which is not a contract worth having.
+      reason: e?.reason,
+      maskedEmail: e?.maskedEmail,
+    });
   }
 };
 
