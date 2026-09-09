@@ -130,6 +130,40 @@ export const listCodes = async (req: Request, res: Response) => {
   }
 };
 
+/**
+ * GET /release — how far down the printed sheet the codes currently work.
+ *
+ * Read-only, and the number it leads with is `releasedUpTo` because that is
+ * what the admin types back to move the line.
+ */
+export const releaseStatus = async (_req: Request, res: Response) => {
+  try {
+    res.json({ success: true, data: await BookCopyService.releaseState() });
+  } catch (e: any) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+};
+
+/**
+ * PATCH /release { upTo } — release serials 1..upTo, hold back the rest.
+ *
+ * The whole print run's codes exist from day one; the books ship in batches.
+ * This is what keeps a code from an unprinted batch worth nothing until its
+ * books are actually out.
+ */
+export const setRelease = async (req: Request, res: Response) => {
+  try {
+    const data = await BookCopyService.setReleasedUpTo(req.body?.upTo);
+    res.json({
+      success: true,
+      message: `Codes 1–${data.releasedUpTo} are live. ${data.held} held back.`,
+      data,
+    });
+  } catch (e: any) {
+    res.status(400).json({ success: false, message: e.message });
+  }
+};
+
 export const voidCode = async (req: Request, res: Response) => {
   try {
     const copy = await BookCopyService.voidCode(req.params.id, req.body?.reason);

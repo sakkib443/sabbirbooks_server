@@ -24,6 +24,11 @@ const write = [authMiddleware, authorize('admin', 'manager'), requireCapability(
 router.get('/', ...write, C.listCodes);
 router.get('/export', ...write, C.exportCodes);
 router.post('/generate', ...write, C.generateCodes);
+// Which batch of the print run is live. Declared before '/:id/void' so
+// 'release' can never be read as a code id.
+router.get('/release', ...write, C.releaseStatus);
+router.patch('/release', ...write, C.setRelease);
+
 router.patch('/:id/void', ...write, C.voidCode);
 
 export const BookCopyRoutes = router;

@@ -50,6 +50,23 @@ export interface IBookCopy {
    * unanswerable, so it is captured at import and never derived from the code.
    */
   serial?: number;
+  /**
+   * Whether this code is allowed to work yet.
+   *
+   * Codes are made in one run and printed in several. 3,000 exist; 500 books
+   * are on the shelf. The other 2,500 codes are perfectly good and will be
+   * printed later — but until their books are in someone's hands, a code that
+   * escapes (a photo of the sheet, a printer's proof) must open nothing.
+   *
+   * Separate from `status` on purpose. 'void' means a code is finished —
+   * a misprint, a lost carton, never coming back. This one is "not yet", and
+   * conflating the two would make releasing the next 500 look like reviving
+   * cancelled stock in every list and report.
+   *
+   * Defaults to true so that every code written before this field existed keeps
+   * working. The import sets it explicitly for new batches.
+   */
+  released?: boolean;
   status: TBookCopyStatus;
 
   redeemedBy?: Types.ObjectId;
@@ -80,6 +97,7 @@ const bookCopySchema = new Schema<IBookCopy>(
     // Sparse: the codes generated before the printed sheet existed have no
     // position in it, and a plain index would file them all under null.
     serial: { type: Number, index: { sparse: true } },
+    released: { type: Boolean, default: true, index: true },
     status: {
       type: String,
       enum: ['available', 'redeemed', 'void'],

@@ -110,9 +110,29 @@ const redeem = async (input: RedeemInput): Promise<RedeemResult> => {
   }
   if (!isValidObjectId(input.userId)) throw new Error('Sign in first');
 
-  const existing = await BookCopy.findOne({ code }).select('status book').lean();
+  const existing = await BookCopy.findOne({ code }).select('status book released').lean();
   if (!existing) {
     throw new Error('এই কোডটি আমাদের তালিকায় নেই। (This code is not one of ours.)');
+  }
+  /*
+   * A real code, from a print run that has not gone out yet.
+   *
+   * All 3,000 codes were generated at once; the books are printed in batches.
+   * So a code can be genuine, unused, and still not something anyone should be
+   * holding — a photo of the sheet, a printer's proof, a guess that happened to
+   * land. Checked before 'void' and 'redeemed' because it is the earlier fact:
+   * this code was never in circulation to be cancelled or spent.
+   *
+   * The message does not say "not released yet". Someone typing a code they
+   * should not have does not need to be told they are early — and a buyer
+   * seeing this genuinely has a problem the shop must look at, since it means
+   * a book went out ahead of its batch.
+   */
+  if (existing.released === false) {
+    throw new Error(
+      'এই কোডটি এখনো চালু করা হয়নি। বইয়ের কোডটি আবার দেখে নিন, নাহলে সাপোর্টে যোগাযোগ করুন। ' +
+        '(This code is not active yet — please check it again or contact support.)'
+    );
   }
   if (existing.status === 'void') {
     throw new Error(
@@ -139,7 +159,12 @@ const redeem = async (input: RedeemInput): Promise<RedeemResult> => {
   }
 
   const claimed = await BookCopy.findOneAndUpdate(
-    { code, status: 'available' },
+    // `released` repeated here, not just checked above. The check above exists
+    // to give a good message; THIS is the gate. Between the two lines an admin
+    // can pull a batch back, and only a condition inside the write itself
+    // catches that. `$ne: false` rather than `true` so the codes written before
+    // the field existed — which have no value at all — still claim.
+    { code, status: 'available', released: { $ne: false } },
     {
       $set: {
         status: 'redeemed',
@@ -281,4 +306,81 @@ const exportCsv = async (query: { book?: string; batch?: string; status?: string
   return [head, ...body].join('\r\n');
 };
 
-export const BookCopyService = { generate, redeem, list, voidCode, exportCsv, MAX_PER_BATCH };
+/**
+ * Where the released batch currently ends, and what is behind it.
+ *
+ * The shop's question is never "which rows have released:true" — it is "how
+ * many books can be opened right now, and how many are waiting". So this
+ * answers in those terms, and reports the highest live serial rather than the
+ * count, because that is the number the admin types to move the line.
+ */
+const releaseState = async () => {
+  const withSerial = { serial: { $exists: true, $ne: null } };
+  const [total, live, held, redeemed, top] = await Promise.all([
+    BookCopy.countDocuments(withSerial),
+    BookCopy.countDocuments({ ...withSerial, released: true }),
+    BookCopy.countDocuments({ ...withSerial, released: false }),
+    BookCopy.countDocuments({ ...withSerial, status: 'redeemed' }),
+    BookCopy.findOne({ ...withSerial, released: true }).sort({ serial: -1 }).select('serial').lean(),
+  ]);
+  return {
+    total,
+    live,
+    held,
+    redeemed,
+    releasedUpTo: (top as { serial?: number } | null)?.serial ?? 0,
+  };
+};
+
+/**
+ * Move the line: serials 1..upTo work, everything above does not.
+ *
+ * Codes are generated in one run and printed in batches, so most of the sheet
+ * is legitimate but not yet in anybody's hands. This is the switch that keeps
+ * an unprinted code worth nothing.
+ *
+ * A redeemed code is never touched, on either side. One that has been used is
+ * in a reader's hands by definition, and sweeping it back would take away a
+ * book that was opened properly — the one outcome this feature must never
+ * produce while trying to prevent a smaller one.
+ */
+const setReleasedUpTo = async (upTo: number) => {
+  const n = Math.floor(Number(upTo));
+  if (!Number.isFinite(n) || n < 0) throw new Error('Give a serial number to release up to.');
+
+  const withSerial = { serial: { $exists: true, $ne: null } };
+  const notRedeemed = { status: { $ne: 'redeemed' } };
+
+  const [opened, heldBack] = await Promise.all([
+    BookCopy.updateMany(
+      { ...withSerial, ...notRedeemed, serial: { $lte: n } },
+      { $set: { released: true } }
+    ),
+    BookCopy.updateMany(
+      { ...withSerial, ...notRedeemed, serial: { $gt: n } },
+      { $set: { released: false } }
+    ),
+  ]);
+
+  // The measured state, not the number that was asked for. They can differ:
+  // a redeemed code above the line keeps its release, so the highest live
+  // serial may sit past `n`. Reporting the request as if it were the result
+  // would put a figure on the admin's screen that no row actually agrees with.
+  return {
+    ...(await releaseState()),
+    requestedUpTo: n,
+    opened: opened.modifiedCount || 0,
+    heldBack: heldBack.modifiedCount || 0,
+  };
+};
+
+export const BookCopyService = {
+  generate,
+  redeem,
+  list,
+  voidCode,
+  exportCsv,
+  releaseState,
+  setReleasedUpTo,
+  MAX_PER_BATCH,
+};
