@@ -592,6 +592,17 @@ const updateOrderStatus = async (
     void OrderSmsService.send(order, 'confirmed');
   }
 
+  // Handed to the courier.
+  //
+  // Keyed on the STATUS, not on shippedAt. Marking an order delivered stamps
+  // shippedAt too (an order that arrived was obviously shipped), so reading the
+  // timestamp would fire this and the delivered text in the same second — two
+  // messages, one of them telling a buyer holding the book to expect a call.
+  // Only an order sitting AT 'shipped' has something to say.
+  if (order.status === 'shipped') {
+    void OrderSmsService.send(order, 'shipped');
+  }
+
   // The parcel arrived. Sent on the transition, not on every save of a
   // delivered order — the guard on the order document is what makes that true
   // even for an admin who clicks through shipped and delivered twice.

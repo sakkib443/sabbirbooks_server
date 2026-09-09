@@ -100,9 +100,10 @@ const main = async () => {
     ['1. order placed (COD)', SmsMessage.orderPlaced(order)],
     ['2. payment received (prepaid)', SmsMessage.paymentReceived(order)],
     ['3. order confirmed (COD)', SmsMessage.orderConfirmed(order)],
-    ['4. delivered (both)', SmsMessage.orderDelivered(order)],
+    ['4. shipped (both)', SmsMessage.orderShipped(order)],
+    ['5. delivered (both)', SmsMessage.orderDelivered(order)],
     [
-      '5. affiliate approved',
+      '6. affiliate approved',
       SmsMessage.affiliateApproved({
         shopName: config.alerts.shop_name,
         couponCode: 'DMCSAKIB20',

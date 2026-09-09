@@ -87,7 +87,30 @@ export const SmsMessage = {
     ),
 
   /**
-   * 4. Delivered — and the one instruction that has to reach them.
+   * 4. On its way.
+   *
+   * The one text sent while the buyer can still do something useful with it:
+   * be reachable. A courier who cannot get through returns the parcel, and for
+   * cash on delivery that is the whole sale lost — so this asks them to keep
+   * the phone on rather than describing the parcel's journey.
+   *
+   * No amount, deliberately. COD buyers were told the figure when the order was
+   * confirmed and will be told it again by the rider; repeating it here spends
+   * characters on the one thing nobody has forgotten.
+   */
+  orderShipped: (i: OrderSmsInput) =>
+    lines(
+      `${i.shopName}`,
+      `Order ${i.orderNumber} has been shipped.`,
+      // A hyphen, not an em dash. The dash is not in GSM-7, and one character
+      // outside it forces the whole message into UCS-2 — the limit drops from
+      // 160 to 70 and this three-line text starts costing three credits
+      // instead of one. Every shipping notice, for one punctuation mark.
+      'Please keep your phone on - the courier will call. Thank you!'
+    ),
+
+  /**
+   * 5. Delivered — and the one instruction that has to reach them.
    *
    * A delivered parcel no longer opens the book by itself; the code printed
    * inside it does. Nobody looks for a code they were never told about, so this
@@ -103,7 +126,7 @@ export const SmsMessage = {
     ),
 
   /**
-   * 5. An affiliate was approved. The only text an affiliate ever gets.
+   * 6. An affiliate was approved. The only text an affiliate ever gets.
    *
    * It carries the code, because that is the thing they need in hand to start,
    * and where to sign in. It does not carry the password: it is their own phone

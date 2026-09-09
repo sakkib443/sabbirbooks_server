@@ -42,7 +42,7 @@ import { User } from '../user/user.model';
 import { SmsService } from './sms.service';
 import { SmsMessage, OrderSmsInput } from './sms.message';
 
-export type OrderSmsEvent = 'placed' | 'paid' | 'confirmed' | 'delivered';
+export type OrderSmsEvent = 'placed' | 'paid' | 'confirmed' | 'shipped' | 'delivered';
 
 /**
  * The buyer's mobile number.
@@ -87,6 +87,7 @@ const TEXT: Record<OrderSmsEvent, (i: OrderSmsInput) => string> = {
   placed: SmsMessage.orderPlaced,
   paid: SmsMessage.paymentReceived,
   confirmed: SmsMessage.orderConfirmed,
+  shipped: SmsMessage.orderShipped,
   delivered: SmsMessage.orderDelivered,
 };
 
@@ -119,6 +120,10 @@ const shouldSend = (event: OrderSmsEvent, order: any): boolean => {
   if (event === 'placed') return cod;
   if (event === 'confirmed') return cod;
   if (event === 'paid') return !cod;
+  // Shipped goes to everybody. It is not about money — it is "be reachable,
+  // the courier is coming", and a prepaid buyer needs that as much as a COD
+  // one. It is also the only text a buyer can still act on.
+  if (event === 'shipped') return true;
   return true; // delivered — everybody, however they paid
 };
 

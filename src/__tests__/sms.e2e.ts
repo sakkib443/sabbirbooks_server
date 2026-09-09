@@ -4,8 +4,8 @@
  * Express app via supertest — never touches the live DB or the real gateway).
  *
  * The rules being pinned down:
- *   COD        → placed (at once) → confirmed (admin) → delivered   = 3
- *   prepaid    → paid (money lands, which confirms it) → delivered  = 2
+ *   COD        → placed → confirmed → shipped → delivered         = 4
+ *   prepaid    → paid (money lands, which confirms it) → shipped → delivered = 3
  *   affiliate  → one text on approval, and never another
  *   cancelled  → silence
  *   repeats    → an admin clicking a status twice sends one text
@@ -172,13 +172,24 @@ async function main() {
       couponCode: 'AFMCFARHANA2066',
       discountTk: 20, payoutTk: 30, siteUrl: 'magicviva.com',
     };
-    const all: [string, string][] = [
-      ['orderPlaced', SmsMessage.orderPlaced(o)],
-      ['paymentReceived', SmsMessage.paymentReceived(o)],
-      ['orderConfirmed', SmsMessage.orderConfirmed(o)],
-      ['orderDelivered', SmsMessage.orderDelivered(o)],
-      ['affiliateApproved', SmsMessage.affiliateApproved(a)],
-    ];
+    /*
+     * Every template in the file, found rather than listed.
+     *
+     * This used to be five names typed out by hand, and a sixth template was
+     * added without anyone noticing it was not being checked — it went in with
+     * an em dash, which is not GSM-7 and would have tripled the cost of every
+     * shipping notice the shop sends. The point of these assertions is to catch
+     * exactly that, and a hand-written list quietly opts each new message out
+     * of them.
+     *
+     * Both shapes take one object and return a string, so every template can be
+     * called with the union of the two fixtures.
+     */
+    const all: [string, string][] = Object.entries(SmsMessage).map(([name, build]) => [
+      name,
+      (build as unknown as (input: typeof o & typeof a) => string)({ ...o, ...a }),
+    ]);
+    check(all.length >= 6, `all ${all.length} templates are checked, not a hand-typed subset`);
     for (const [name, body] of all) {
       check(body.length <= SMS_SINGLE_PART, `${name} is ${body.length} chars — one message`);
       check(body.split('\n').length === 3, `${name} is three lines`);
@@ -187,7 +198,7 @@ async function main() {
     }
   }
 
-  console.log('\n── Cash on delivery: three texts, in order ──');
+  console.log('\n── Cash on delivery: four texts, in order ──');
   const COD_PHONE = '01711110001';
   let codOrderId = '';
   {
@@ -220,13 +231,26 @@ async function main() {
   }
 
   {
+    // Handed to the courier. The one text a buyer can still act on: be
+    // reachable, because a courier who cannot get through returns the parcel
+    // and for cash on delivery that is the whole sale.
+    await setStatus(codOrderId, 'shipped');
+    await new Promise((r) => setTimeout(r, 300));
+
+    const texts = textsFor(COD_PHONE);
+    check(texts.length === 3, `shipping sends the third (${texts.length})`);
+    check(/shipped/i.test(texts[2]?.body || ''), 'which says it is on its way');
+    check(/phone/i.test(texts[2]?.body || ''), 'and asks them to keep the phone on');
+  }
+
+  {
     await setStatus(codOrderId, 'delivered');
     await new Promise((r) => setTimeout(r, 300));
 
     const texts = textsFor(COD_PHONE);
-    check(texts.length === 3, `delivering sends the third (${texts.length})`);
-    check(/delivered/i.test(texts[2]?.body || ''), 'which says it arrived');
-    check(/code/i.test(texts[2]?.body || ''), 'and tells them the book has a code inside — the only way in now');
+    check(texts.length === 4, `delivering sends the fourth (${texts.length})`);
+    check(/delivered/i.test(texts[3]?.body || ''), 'which says it arrived');
+    check(/code/i.test(texts[3]?.body || ''), 'and tells them the book has a code inside — the only way in now');
   }
 
   console.log('\n── Clicking a status twice does not text twice ──');
@@ -242,7 +266,7 @@ async function main() {
 
     const o: any = await Order.findById(codOrderId).lean();
     check(
-      JSON.stringify([...o.smsSent].sort()) === JSON.stringify(['confirmed', 'delivered', 'placed']),
+      JSON.stringify([...o.smsSent].sort()) === JSON.stringify(['confirmed', 'delivered', 'placed', 'shipped']),
       `the order records what it sent (${JSON.stringify(o.smsSent)})`
     );
   }
