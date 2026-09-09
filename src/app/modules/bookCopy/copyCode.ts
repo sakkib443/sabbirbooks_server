@@ -41,6 +41,15 @@ const GROUP = 4;
 export const CODE_PREFIX = 'MV';
 
 /**
+ * Length of a code from the printed sheet, dashes removed.
+ *
+ * Four groups of four. This is the format actually inside the books — it was
+ * generated elsewhere and delivered as a list, so nothing here produces it;
+ * this constant exists only so a reader typing one in is recognised.
+ */
+export const PRINTED_LENGTH = 16;
+
+/**
  * One code. `MV-7K3P-9QXR-2M8T`.
  *
  * Rejection sampling rather than `% ALPHABET.length`: the modulo of a uniform
@@ -82,15 +91,40 @@ export const normalizeCode = (raw: string): string => {
     .toUpperCase()
     .replace(/[^A-Z0-9]/g, '');
 
+  /*
+   * TWO SHAPES ARE VALID, because two sets of codes exist.
+   *
+   * The printed one is what is actually in the books: sixteen characters in
+   * four groups, `00N2-EB6V-05VX-9XM1`, generated outside this system and
+   * handed over as a 3,000-line sheet. It carries no prefix and it uses the
+   * whole alphanumeric range — including every character generateCode()
+   * carefully avoids.
+   *
+   * The `MV-` one is what this file makes, and only two of them were ever
+   * redeemed. They are kept readable so those two rows stay legible as
+   * history rather than turning into unmatchable strings in an audit.
+   *
+   * Length decides which, before anything else: a printed code that happens to
+   * begin "MV" is still a printed code, and stripping those two characters
+   * because they look like the prefix would corrupt it.
+   */
+
+  // ── The printed sheet: 16 characters, any letter or digit ──
+  if (cleaned.length === PRINTED_LENGTH) {
+    const groups: string[] = [];
+    for (let i = 0; i < cleaned.length; i += GROUP) groups.push(cleaned.slice(i, i + GROUP));
+    return groups.join('-');
+  }
+
+  // ── Legacy MV-xxxx-xxxx-xxxx ──
   const body = cleaned.startsWith(CODE_PREFIX) ? cleaned.slice(CODE_PREFIX.length) : cleaned;
   if (body.length < 8 || body.length > 24) return '';
 
-  // Every character has to be one we actually print. Note that no confusable
-  // character survives into the alphabet AT ALL — not 0 or O, not 1, I or L,
-  // not 5 or S, 8 or B, 2 or Z; both members of every pair are excluded. So a
-  // typed 'O' is a misread of something, and there is no way to know what:
-  // "correcting" it to 0 would be inventing a character we never print. It is
-  // reported as an invalid code instead, which is the truth.
+  // Every character has to be one we actually printed in THIS format. No
+  // confusable character survives into that alphabet at all — not 0 or O, not
+  // 1, I or L, not 5 or S, 8 or B, 2 or Z — so a typed 'O' here is a misread
+  // of something, and there is no way to know what. Reported as invalid, which
+  // is the truth.
   if (![...body].every((c) => ALPHABET.includes(c))) return '';
 
   const groups: string[] = [];

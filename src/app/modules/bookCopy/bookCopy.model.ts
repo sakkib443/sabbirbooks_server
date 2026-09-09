@@ -40,6 +40,16 @@ export interface IBookCopy {
   book: Types.ObjectId;
   /** Which print run this came from — the shop's own bookkeeping. */
   batch: string;
+  /**
+   * The code's position in the printed list, 1-based.
+   *
+   * The codes themselves are unordered — deliberately, since a code must give
+   * away nothing about another. But the sheet they were printed from numbers
+   * them 1..N, and that numbering is the only handle the shop has on "the
+   * first five hundred books". Losing it would make "release codes up to 500"
+   * unanswerable, so it is captured at import and never derived from the code.
+   */
+  serial?: number;
   status: TBookCopyStatus;
 
   redeemedBy?: Types.ObjectId;
@@ -67,6 +77,9 @@ const bookCopySchema = new Schema<IBookCopy>(
     code: { type: String, required: true, unique: true, uppercase: true, trim: true },
     book: { type: Schema.Types.ObjectId, ref: 'Book', required: true, index: true },
     batch: { type: String, trim: true, default: '' },
+    // Sparse: the codes generated before the printed sheet existed have no
+    // position in it, and a plain index would file them all under null.
+    serial: { type: Number, index: { sparse: true } },
     status: {
       type: String,
       enum: ['available', 'redeemed', 'void'],
