@@ -83,6 +83,31 @@ export interface IBookCopy {
   voidedAt?: Date;
   voidReason?: string;
 
+  /**
+   * What an admin has done to this code after it was redeemed.
+   *
+   * Resetting and transferring both take a book away from an account that
+   * currently has it. When the reader who lost it asks why — and they will,
+   * because to them the book simply stopped working — "we do not know" is not
+   * an answer the shop can give. So every such action is written down: what
+   * happened, who did it, when, and who held the code before and after.
+   *
+   * Append-only in practice. Nothing reads it to make a decision; it exists
+   * to be read by a person.
+   */
+  history?: {
+    action: 'reset' | 'transfer';
+    at: Date;
+    by?: Types.ObjectId;
+    /** The account that held it before this action. */
+    fromUser?: Types.ObjectId;
+    fromEmail?: string;
+    /** Only for a transfer. */
+    toUser?: Types.ObjectId;
+    toEmail?: string;
+    reason?: string;
+  }[];
+
   createdBy?: Types.ObjectId;
 }
 
@@ -116,6 +141,20 @@ const bookCopySchema = new Schema<IBookCopy>(
 
     voidedAt: { type: Date },
     voidReason: { type: String, trim: true },
+
+    history: [
+      {
+        _id: false,
+        action: { type: String, enum: ['reset', 'transfer'] },
+        at: { type: Date, default: Date.now },
+        by: { type: Schema.Types.ObjectId, ref: 'User' },
+        fromUser: { type: Schema.Types.ObjectId, ref: 'User' },
+        fromEmail: { type: String, trim: true },
+        toUser: { type: Schema.Types.ObjectId, ref: 'User' },
+        toEmail: { type: String, trim: true },
+        reason: { type: String, trim: true },
+      },
+    ],
 
     createdBy: { type: Schema.Types.ObjectId, ref: 'User' },
   },

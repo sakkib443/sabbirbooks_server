@@ -30,5 +30,9 @@ router.get('/release', ...write, C.releaseStatus);
 router.patch('/release', ...write, C.setRelease);
 
 router.patch('/:id/void', ...write, C.voidCode);
+// Undoing a redemption takes a book away from an account that has it, so both
+// sit behind the same write capability as voiding rather than a softer one.
+router.patch('/:id/reset', ...write, C.resetCode);
+router.patch('/:id/transfer', ...write, C.transferCode);
 
 export const BookCopyRoutes = router;

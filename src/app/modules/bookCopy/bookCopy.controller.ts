@@ -173,6 +173,58 @@ export const voidCode = async (req: Request, res: Response) => {
   }
 };
 
+/**
+ * PATCH /:id/reset — put a redeemed code back into circulation.
+ *
+ * For the everyday mistake: a reader typed their code while signed in to the
+ * wrong account. The code becomes usable again and the access it granted is
+ * withdrawn — but only the access THIS code granted, so a reader who also
+ * bought the book keeps what they paid for.
+ */
+export const resetCode = async (req: Request, res: Response) => {
+  try {
+    const out = await BookCopyService.resetCode({
+      id: req.params.id,
+      reason: req.body?.reason,
+      adminId: uid(req),
+    });
+    res.json({
+      success: true,
+      message: out.previousEmail
+        ? `Code reset. ${out.previousEmail} no longer has the book from it.`
+        : 'Code reset.',
+      data: out.copy,
+    });
+  } catch (e: any) {
+    res.status(400).json({ success: false, message: e.message });
+  }
+};
+
+/**
+ * PATCH /:id/transfer { email } — move a redeemed code to another account.
+ *
+ * One action rather than reset-then-redeem, so the code is never loose in
+ * between — which matters precisely because the reason an admin is here is
+ * that a code already went somewhere it should not have.
+ */
+export const transferCode = async (req: Request, res: Response) => {
+  try {
+    const out = await BookCopyService.transferCode({
+      id: req.params.id,
+      email: req.body?.email,
+      reason: req.body?.reason,
+      adminId: uid(req),
+    });
+    res.json({
+      success: true,
+      message: `Moved to ${out.toEmail}${out.fromEmail ? ` from ${out.fromEmail}` : ''}.`,
+      data: out.copy,
+    });
+  } catch (e: any) {
+    res.status(400).json({ success: false, message: e.message });
+  }
+};
+
 /** The file the printer gets. */
 export const exportCodes = async (req: Request, res: Response) => {
   try {

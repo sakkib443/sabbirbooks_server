@@ -12,6 +12,7 @@ import { generateCode, normalizeCode } from './copyCode';
 import { BookAccess } from '../bookAccess/bookAccess.model';
 import { Book } from '../book/book.model';
 import { MedicalCollege } from '../medicalCollege/medicalCollege.model';
+import { User } from '../user/user.model';
 
 export interface GenerateInput {
   bookId: string;
@@ -203,9 +204,28 @@ const redeem = async (input: RedeemInput): Promise<RedeemResult> => {
   await BookAccess.updateOne(
     { userId: input.userId, bookId: claimed.book },
     {
-      $set: { source: 'manual', note: `Book code ${code}` },
+      /*
+       * source and note are set ON INSERT ONLY.
+       *
+       * They used to be in $set, which meant a buyer who had already been
+       * granted the book by their ORDER and then redeemed the code from the
+       * same parcel had that order grant rewritten into "manual, Book code X".
+       * The record that they bought it was destroyed by the ordinary act of
+       * using their own code — and an admin later resetting that code would
+       * then revoke the access they had paid for.
+       *
+       * On insert these describe how the access came about. On a second grant
+       * they describe nothing new, so they are left alone.
+       */
+      $setOnInsert: {
+        userId: input.userId,
+        bookId: claimed.book,
+        source: 'manual',
+        note: `Book code ${code}`,
+      },
+      // Un-revoking stays unconditional: whatever happened before, this person
+      // is holding a valid unused code right now.
       $unset: { revokedAt: '' },
-      $setOnInsert: { userId: input.userId, bookId: claimed.book },
     },
     { upsert: true }
   );
@@ -223,6 +243,7 @@ const list = async (query: {
   status?: string;
   batch?: string;
   q?: string;
+  released?: string;
   page?: string;
   limit?: string;
 }) => {
@@ -230,16 +251,33 @@ const list = async (query: {
   if (query.book && isValidObjectId(query.book)) filter.book = query.book;
   if (query.status && query.status !== 'all') filter.status = query.status;
   if (query.batch) filter.batch = query.batch;
+
+  // Which print batch is live. `$ne: true` rather than `false` because the
+  // codes written before the field existed have no value at all, and they are
+  // held back by nothing — they belong on the "live" side.
+  if (query.released === 'true') filter.released = { $ne: false };
+  if (query.released === 'false') filter.released = false;
+
   if (query.q) {
     const term = String(query.q).trim();
     // A code is looked up whole; everything else is a name or a roll number.
     const asCode = normalizeCode(term);
+
+    // Email is the one thing an admin searches by that is NOT on this document
+    // — it lives on the account that redeemed the code. And it is exactly what
+    // they have in hand when a reader writes in saying the book opened on the
+    // wrong address, so it is worth the extra lookup.
+    const byEmail = term.includes('@')
+      ? await User.find({ email: { $regex: term, $options: 'i' } }).select('_id').lean()
+      : [];
+
     filter.$or = [
       ...(asCode ? [{ code: asCode }] : []),
       { code: { $regex: term.toUpperCase(), $options: 'i' } },
       { 'holder.fullName': { $regex: term, $options: 'i' } },
       { 'holder.classRoll': { $regex: term, $options: 'i' } },
       { 'holder.medicalCollegeName': { $regex: term, $options: 'i' } },
+      ...(byEmail.length ? [{ redeemedBy: { $in: byEmail.map((u) => u._id) } }] : []),
     ];
   }
 
@@ -250,7 +288,11 @@ const list = async (query: {
     BookCopy.find(filter)
       .populate('book', 'title slug')
       .populate('redeemedBy', 'firstName lastName email')
-      .sort({ createdAt: -1 })
+      // Serial first: all 3,000 imported codes share one createdAt to the
+      // second, so sorting by time put a 3,000-row list in arbitrary order.
+      // The sheet numbers them, the shop counts in that order, and codes with
+      // no serial (the older run) fall to the end where they belong.
+      .sort({ serial: 1, createdAt: -1 })
       .skip((page - 1) * limit)
       .limit(limit)
       .lean(),
@@ -374,6 +416,169 @@ const setReleasedUpTo = async (upTo: number) => {
   };
 };
 
+/**
+ * Take a redeemed code back, or move it to the right account.
+ *
+ * The case this exists for is mundane and constant: a buyer types their code
+ * while signed in to the wrong Google account, or a friend's phone, or an
+ * address they no longer read. The code is spent, the book opens for somebody
+ * who is not the reader, and until now nothing could undo it — the code stayed
+ * spent forever and the shop's own list showed the wrong name against it.
+ *
+ * THE ACCESS IS ONLY REVOKED IF THIS CODE GRANTED IT. An account can hold the
+ * same book through an order as well, and a reset that blindly removed access
+ * would take away something the reader paid for separately. The grant records
+ * which code opened it, and that note is what is checked.
+ */
+const codeGrantNote = (code: string) => `Book code ${code}`;
+
+/**
+ * Remove the access this specific code granted, if it is still the reason the
+ * account has the book. Returns whether anything was actually revoked.
+ */
+const revokeGrantFromCode = async (
+  userId: Types.ObjectId,
+  bookId: Types.ObjectId,
+  code: string
+): Promise<boolean> => {
+  const res = await BookAccess.updateOne(
+    { userId, bookId, note: codeGrantNote(code), revokedAt: { $exists: false } },
+    { $set: { revokedAt: new Date() } }
+  );
+  return (res.modifiedCount || 0) > 0;
+};
+
+export interface ResetInput {
+  id: string;
+  reason?: string;
+  adminId?: string;
+}
+
+/**
+ * Put a redeemed code back into circulation.
+ *
+ * The code becomes available again and the holder's details are cleared, so
+ * the next person to type it starts clean. What it does NOT do is delete the
+ * record that it happened — see `history` on the model.
+ */
+const resetCode = async (input: ResetInput) => {
+  if (!isValidObjectId(input.id)) throw new Error('Code not found');
+
+  const copy: any = await BookCopy.findById(input.id);
+  if (!copy) throw new Error('Code not found');
+  if (copy.status !== 'redeemed') {
+    // Resetting an unused code is a no-op dressed as an action, and a void one
+    // needs un-voiding rather than resetting. Saying so beats pretending.
+    throw new Error('Only a redeemed code can be reset.');
+  }
+
+  const previous = copy.redeemedBy;
+  const holder: any = previous
+    ? await User.findById(previous).select('email').lean()
+    : null;
+
+  const revoked = previous
+    ? await revokeGrantFromCode(previous, copy.book, copy.code)
+    : false;
+
+  copy.status = 'available';
+  copy.redeemedBy = undefined;
+  copy.redeemedAt = undefined;
+  copy.holder = undefined;
+  copy.history = [
+    ...(copy.history || []),
+    {
+      action: 'reset' as const,
+      at: new Date(),
+      by: input.adminId && isValidObjectId(input.adminId) ? new Types.ObjectId(input.adminId) : undefined,
+      fromUser: previous,
+      fromEmail: holder?.email,
+      reason: String(input.reason || '').trim(),
+    },
+  ];
+  await copy.save();
+
+  return { copy, revokedAccess: revoked, previousEmail: holder?.email || null };
+};
+
+export interface TransferInput {
+  id: string;
+  email: string;
+  reason?: string;
+  adminId?: string;
+}
+
+/**
+ * Move a redeemed code to a different account.
+ *
+ * Reset-then-redeem would do the same thing in two steps, but leaves a window
+ * where the code is loose — and the whole reason an admin is here is that a
+ * code went somewhere it should not have. This moves it in one action, and the
+ * code is never available to anyone else in between.
+ *
+ * The destination must already have an account. Creating one from an email
+ * typed into an admin box would produce a passwordless account nobody can sign
+ * in to, and the reader would be no better off than before.
+ */
+const transferCode = async (input: TransferInput) => {
+  if (!isValidObjectId(input.id)) throw new Error('Code not found');
+  const email = String(input.email || '').trim().toLowerCase();
+  if (!email) throw new Error('Which account should it go to? Give an email.');
+
+  const copy: any = await BookCopy.findById(input.id);
+  if (!copy) throw new Error('Code not found');
+  if (copy.status !== 'redeemed') {
+    throw new Error('Only a redeemed code can be transferred. Give this one to the reader instead.');
+  }
+
+  const target: any = await User.findOne({ email }).select('email firstName lastName');
+  if (!target) {
+    throw new Error(
+      `No account with the email ${email}. Ask the reader to sign up first, then transfer.`
+    );
+  }
+  if (String(target._id) === String(copy.redeemedBy)) {
+    throw new Error('That account already holds this code.');
+  }
+
+  const previous = copy.redeemedBy;
+  const from: any = previous ? await User.findById(previous).select('email').lean() : null;
+
+  if (previous) await revokeGrantFromCode(previous, copy.book, copy.code);
+
+  // Same upsert the redemption path uses: the target may already have access
+  // from an order, and that is not an error — they end up with the book once,
+  // which is the correct outcome.
+  await BookAccess.updateOne(
+    { userId: target._id, bookId: copy.book },
+    {
+      $set: { source: 'manual', note: codeGrantNote(copy.code) },
+      $unset: { revokedAt: '' },
+      $setOnInsert: { userId: target._id, bookId: copy.book },
+    },
+    { upsert: true }
+  );
+
+  copy.redeemedBy = target._id;
+  copy.redeemedAt = new Date();
+  copy.history = [
+    ...(copy.history || []),
+    {
+      action: 'transfer' as const,
+      at: new Date(),
+      by: input.adminId && isValidObjectId(input.adminId) ? new Types.ObjectId(input.adminId) : undefined,
+      fromUser: previous,
+      fromEmail: from?.email,
+      toUser: target._id,
+      toEmail: target.email,
+      reason: String(input.reason || '').trim(),
+    },
+  ];
+  await copy.save();
+
+  return { copy, fromEmail: from?.email || null, toEmail: target.email };
+};
+
 export const BookCopyService = {
   generate,
   redeem,
@@ -382,5 +587,7 @@ export const BookCopyService = {
   exportCsv,
   releaseState,
   setReleasedUpTo,
+  resetCode,
+  transferCode,
   MAX_PER_BATCH,
 };
