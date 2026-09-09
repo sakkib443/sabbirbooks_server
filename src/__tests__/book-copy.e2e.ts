@@ -367,7 +367,20 @@ async function main() {
       list.body.rows.every((r: any) => r.status === 'available'),
       'filtered to available only'
     );
-    check(typeof list.body.counts?.redeemed === 'number', `with counts per status (${JSON.stringify(list.body.counts)})`);
+    /*
+     * Counts are per TAB, not per status, and the difference is the point.
+     *
+     * "Ready to use" is not a status: it is available AND from a batch that
+     * has shipped. A code sitting in an unprinted run is 'available' too, and
+     * counting the two together told the shop it had thousands of usable codes
+     * when it had five hundred.
+     */
+    const c = list.body.counts || {};
+    check(
+      typeof c.ready === 'number' && typeof c.used === 'number' && typeof c.waiting === 'number',
+      `with a count per tab (${JSON.stringify(c)})`
+    );
+    check(c.ready + c.waiting + c.used + c.dead === c.all, 'the tabs account for every code');
 
     const byHolder = await api()
       .get('/api/book-copies?q=Rifat')

@@ -225,6 +225,27 @@ export const transferCode = async (req: Request, res: Response) => {
   }
 };
 
+/**
+ * PATCH /:id/holder — correct the name, college or roll typed on activation.
+ *
+ * Those three fields are how the shop recognises a reader afterwards, and
+ * they were typed once, on a phone, in a hurry. A misspelling is a person who
+ * cannot be found in the list.
+ */
+export const editHolder = async (req: Request, res: Response) => {
+  try {
+    const copy = await BookCopyService.editHolder({
+      id: req.params.id,
+      fullName: req.body?.fullName,
+      medicalCollegeName: req.body?.medicalCollegeName,
+      classRoll: req.body?.classRoll,
+    });
+    res.json({ success: true, message: 'Details updated.', data: copy });
+  } catch (e: any) {
+    res.status(400).json({ success: false, message: e.message });
+  }
+};
+
 /** The file the printer gets. */
 export const exportCodes = async (req: Request, res: Response) => {
   try {

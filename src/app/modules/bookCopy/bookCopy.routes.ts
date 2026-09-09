@@ -34,5 +34,6 @@ router.patch('/:id/void', ...write, C.voidCode);
 // sit behind the same write capability as voiding rather than a softer one.
 router.patch('/:id/reset', ...write, C.resetCode);
 router.patch('/:id/transfer', ...write, C.transferCode);
+router.patch('/:id/holder', ...write, C.editHolder);
 
 export const BookCopyRoutes = router;

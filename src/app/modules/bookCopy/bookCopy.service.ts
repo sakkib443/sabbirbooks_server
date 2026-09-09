@@ -284,20 +284,57 @@ const list = async (query: {
   const limit = Math.min(Math.max(Number(query.limit) || 50, 1), 500);
   const page = Math.max(Number(query.page) || 1, 1);
 
+  /*
+   * Ordered by the sheet's own numbering, with the unnumbered codes last.
+   *
+   * All 3,000 imported codes share one createdAt to the second, so sorting by
+   * time put a 3,000-row list in arbitrary order. Sorting by serial fixes that
+   * — except Mongo sorts a MISSING field before every number, so the 1,000
+   * older codes, which have no serial at all, took over the top of the list and
+   * every visible row showed "—". An aggregation is used rather than find()
+   * for exactly this: it can substitute a large value for the missing field so
+   * those rows sort to the end, where a list numbered 1..3000 expects them.
+   */
   const [rows, total, counts] = await Promise.all([
-    BookCopy.find(filter)
-      .populate('book', 'title slug')
-      .populate('redeemedBy', 'firstName lastName email')
-      // Serial first: all 3,000 imported codes share one createdAt to the
-      // second, so sorting by time put a 3,000-row list in arbitrary order.
-      // The sheet numbers them, the shop counts in that order, and codes with
-      // no serial (the older run) fall to the end where they belong.
-      .sort({ serial: 1, createdAt: -1 })
-      .skip((page - 1) * limit)
-      .limit(limit)
-      .lean(),
+    BookCopy.aggregate([
+      { $match: filter },
+      { $addFields: { _order: { $ifNull: ['$serial', Number.MAX_SAFE_INTEGER] } } },
+      { $sort: { _order: 1, createdAt: -1 } },
+      { $skip: (page - 1) * limit },
+      { $limit: limit },
+      { $project: { _order: 0 } },
+    ]).then((docs) =>
+      // aggregate() returns plain objects, so populate is called on them
+      // afterwards rather than chained — same two joins the screen needs.
+      BookCopy.populate(docs, [
+        { path: 'book', select: 'title slug' },
+        { path: 'redeemedBy', select: 'firstName lastName email' },
+      ])
+    ),
     BookCopy.countDocuments(filter),
-    BookCopy.aggregate([{ $group: { _id: '$status', n: { $sum: 1 } } }]),
+    /*
+     * The counts the TABS need, which are not the counts `status` gives.
+     *
+     * "Ready to use" is not a status — it is available AND from a batch that
+     * has shipped. A code sitting in an unprinted batch is also 'available'
+     * and putting the two together in one number told the shop it had 3,998
+     * usable codes when it had 500. Each tab counts its own condition.
+     */
+    BookCopy.aggregate([
+      {
+        $facet: {
+          ready: [{ $match: { status: 'available', released: { $ne: false } } }, { $count: 'n' }],
+          used: [{ $match: { status: 'redeemed' } }, { $count: 'n' }],
+          // `status: 'available'` here too, so the tabs are a true partition:
+          // a voided code from an unprinted batch belongs under "dead", and
+          // counting it in both would make the four tabs add up to more than
+          // the run.
+          waiting: [{ $match: { status: 'available', released: false } }, { $count: 'n' }],
+          dead: [{ $match: { status: 'void' } }, { $count: 'n' }],
+          all: [{ $count: 'n' }],
+        },
+      },
+    ]),
   ]);
 
   return {
@@ -305,7 +342,15 @@ const list = async (query: {
     total,
     page,
     limit,
-    counts: Object.fromEntries(counts.map((c: any) => [c._id, c.n])),
+    // $facet gives each bucket as an array that is empty when nothing matched,
+    // so an absent bucket has to read as 0 rather than undefined — a tab
+    // labelled "ব্যবহৃত undefined" is how that leaks to the screen.
+    counts: Object.fromEntries(
+      Object.entries((counts[0] || {}) as Record<string, { n?: number }[]>).map(([k, v]) => [
+        k,
+        v?.[0]?.n || 0,
+      ])
+    ),
   };
 };
 
@@ -501,6 +546,46 @@ const resetCode = async (input: ResetInput) => {
   return { copy, revokedAccess: revoked, previousEmail: holder?.email || null };
 };
 
+export interface EditHolderInput {
+  id: string;
+  fullName?: string;
+  medicalCollegeName?: string;
+  classRoll?: string;
+}
+
+/**
+ * Correct the details typed alongside a code.
+ *
+ * A reader activating their book types their name, college and roll into a
+ * form on a phone, once, quickly. Those three fields are how the shop later
+ * recognises them — in the list, in a CSV, in a support thread — so a
+ * misspelling is a person who cannot be found. This edits the record without
+ * touching who holds the code or whether it works.
+ *
+ * Only the fields actually sent are changed, so correcting a roll number
+ * cannot blank a college.
+ */
+const editHolder = async (input: EditHolderInput) => {
+  if (!isValidObjectId(input.id)) throw new Error('Code not found');
+
+  const copy: any = await BookCopy.findById(input.id);
+  if (!copy) throw new Error('Code not found');
+  if (copy.status !== 'redeemed') {
+    throw new Error('Nobody has used this code yet, so there is nothing to correct.');
+  }
+
+  copy.holder = copy.holder || {};
+  if (input.fullName !== undefined) copy.holder.fullName = String(input.fullName).trim();
+  if (input.medicalCollegeName !== undefined) {
+    copy.holder.medicalCollegeName = String(input.medicalCollegeName).trim();
+  }
+  if (input.classRoll !== undefined) copy.holder.classRoll = String(input.classRoll).trim();
+
+  copy.markModified('holder');
+  await copy.save();
+  return copy;
+};
+
 export interface TransferInput {
   id: string;
   email: string;
@@ -589,5 +674,6 @@ export const BookCopyService = {
   setReleasedUpTo,
   resetCode,
   transferCode,
+  editHolder,
   MAX_PER_BATCH,
 };
