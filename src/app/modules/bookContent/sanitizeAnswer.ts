@@ -1,4 +1,5 @@
 import sanitizeHtml from 'sanitize-html';
+import { withoutMediaTokens } from './mediaToken';
 
 /**
  * Strip scripting from admin-authored answer HTML.
@@ -79,8 +80,20 @@ export const sanitizeAnswerHtml = (html?: unknown): string | undefined => {
   return sanitizeHtml(html, options);
 };
 
-/** Applies sanitizeAnswerHtml to a payload's answerHtml, if it carries one. */
+/**
+ * A question payload as it is safe to store: scripting stripped from the
+ * answer, and media tokens stripped from every URL.
+ *
+ * The second half is the newer one. The API stamps a short-lived `?t=…` token
+ * onto every figure URL it sends out, so the editor can render the figure;
+ * the editor then sent those URLs straight back on save, and nothing removed
+ * the token before the row was written. Thirty minutes later the stored URL
+ * was a broken image. Stripping here — on the one path every create and
+ * update goes through — is what makes that impossible from now on.
+ */
 export const sanitizeQuestionPayload = <T extends Record<string, unknown>>(payload: T): T => {
-  if (!payload || !('answerHtml' in payload)) return payload;
-  return { ...payload, answerHtml: sanitizeAnswerHtml(payload.answerHtml) };
+  if (!payload) return payload;
+  const clean = withoutMediaTokens(payload);
+  if (!('answerHtml' in clean)) return clean;
+  return { ...clean, answerHtml: sanitizeAnswerHtml(clean.answerHtml) };
 };

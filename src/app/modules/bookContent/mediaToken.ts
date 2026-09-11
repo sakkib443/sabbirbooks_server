@@ -50,9 +50,45 @@ export const verifyMediaToken = (token: string): string | null => {
  */
 const MEDIA_URL_RE = /(https?:\/\/[^\s"'<>\\]*\/api\/book-content\/media\/[^\s"'<>\\?]+)/g;
 
+/**
+ * A protected-media URL with one or more `?t=…` tokens still hanging off it.
+ *
+ * Those should never exist at rest, and for a while they did. The admin editor
+ * loads a question through the API — which stamps every media URL with a
+ * fresh 30-minute token so the figures can render — and on save it sent the
+ * URLs back exactly as it had received them. Nothing stripped the token, so
+ * it was written into the database. Twenty-one questions were saved that way
+ * over two weeks; the group `(?:…)+` is there because one of them had been
+ * saved twice and carried two.
+ *
+ * The token class stops at `?` and `&` as well as the usual URL terminators,
+ * so a doubled `?t=A?t=B` is consumed as two repetitions rather than one long
+ * token, and nothing after a legitimate query separator could be eaten.
+ */
+const STALE_TOKEN_RE = /(\/api\/book-content\/media\/[^\s"'<>\\?]+)(?:\?t=[^\s"'<>\\?&]*)+/g;
+
+/**
+ * Remove every stale media token from the URLs inside a string.
+ *
+ * Only `/api/book-content/media/` URLs are touched. A YouTube link's `?si=`
+ * or a PDF viewer's `?page=` is not a media token and is left alone — the
+ * regex is anchored on our own media path and on the literal `t=` key.
+ */
+export const stripMediaTokens = (text: string): string =>
+  text.includes('/api/book-content/media/') ? text.replace(STALE_TOKEN_RE, '$1') : text;
+
 const stampUrlsIn = (text: string, token: string): string =>
   text.includes('/api/book-content/media/')
-    ? text.replace(MEDIA_URL_RE, url => `${url}?t=${token}`)
+    ? // Strip first, then stamp, so a URL can never leave here carrying two
+      // tokens (`…png?t=NEW?t=OLD`), which the browser sends as one garbage
+      // token that fails verification.
+      //
+      // This alone does NOT rescue a row that was stored with a token: the
+      // media route finds a file's owning question by matching the stored URL
+      // anchored at its end, and a stored URL ending in "?t=…" never matches.
+      // Rows like that are fixed by scripts/repairMediaTokens.ts, and new ones
+      // cannot be written because sanitizeQuestionPayload strips on save.
+      stripMediaTokens(text).replace(MEDIA_URL_RE, url => `${url}?t=${token}`)
     : text;
 
 /**
@@ -86,11 +122,9 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> => {
  * `videos[].url`, `attachments[].fileUrl` and `images[]`, and a fourth place
  * would otherwise be silently served without a token and 401 in the browser.
  */
-export const withMediaTokens = <T>(payload: T, userId: string): T => {
-  const token = signMediaToken(userId);
-
+const mapStrings = <T>(payload: T, fn: (s: string) => string): T => {
   const walk = (node: unknown): unknown => {
-    if (typeof node === 'string') return stampUrlsIn(node, token);
+    if (typeof node === 'string') return fn(node);
     if (Array.isArray(node)) return node.map(walk);
     if (isPlainObject(node)) {
       return Object.fromEntries(Object.entries(node).map(([k, v]) => [k, walk(v)]));
@@ -100,6 +134,21 @@ export const withMediaTokens = <T>(payload: T, userId: string): T => {
     // descending into one — and everything to lose. See isPlainObject.
     return node;
   };
-
   return walk(payload) as T;
 };
+
+export const withMediaTokens = <T>(payload: T, userId: string): T => {
+  const token = signMediaToken(userId);
+  return mapStrings(payload, (s) => stampUrlsIn(s, token));
+};
+
+/**
+ * The inverse, for the write side: a payload as it should be STORED.
+ *
+ * Same walk as withMediaTokens, so the two cannot disagree about where a media
+ * URL might be hiding. Applied to every question create and update — see
+ * sanitizeQuestionPayload — so a token that reaches the server on its way back
+ * from the editor is dropped before the row is written, and the mistake that
+ * produced twenty-one broken questions cannot be made again by anyone.
+ */
+export const withoutMediaTokens = <T>(payload: T): T => mapStrings(payload, stripMediaTokens);
