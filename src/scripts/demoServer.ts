@@ -261,6 +261,17 @@ async function main() {
   // Overridable: 5000 is a popular port, and another project's dev server
   // sitting on it made this one bind nothing while still looking alive — every
   // request answered by the wrong API.
+  // One question with a video, so the demo shows BOTH states of the scan
+  // page: the first question of the free sample plays a video, the rest show
+  // the "video unavailable" notice. With every seeded question video-less, only
+  // the notice could ever be looked at, and the path that hides it went unseen.
+  if (freeSample) {
+    await BookQuestion.updateOne(
+      { topicId: (freeSample as { _id: unknown })._id, questionNo: '1' },
+      { $set: { videos: [{ title: '', url: 'https://youtu.be/8LZlz1lZvHQ', provider: 'youtube' }] } }
+    );
+  }
+
   const port = Number(process.env.DEMO_PORT || 5000);
   app.listen(port, () => {
     console.log(`\nDemo API on http://localhost:${port}`);
