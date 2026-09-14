@@ -13,6 +13,11 @@ const shippingAddressSchema = z.object({
   // decides the courier zone, so `area` above becomes advisory — see createOrder.
   district: z.string().optional(),
   division: z.string().optional(),
+  upazila: z.string().optional(),
+  // Checked properly (Bangladeshi mobile format, email shape) in createOrder,
+  // where the message can say which field is wrong in the buyer's language.
+  altPhone: z.string().optional(),
+  email: z.string().optional(),
   note: z.string().optional(),
 });
 
@@ -38,6 +43,11 @@ export const createOrderValidationSchema = z.object({
     // An optional discount code. Re-evaluated server-side against the post-offer
     // price; an invalid code fails the order rather than being charged in full.
     couponCode: z.string().optional(),
+    // The buyer's college: a directory id when picked from the list, or the
+    // name they typed when theirs is not listed. A signed-in buyer who sends
+    // neither falls back to the college on their profile.
+    medicalCollege: z.string().optional(),
+    medicalCollegeName: z.string().optional(),
   }),
 });
 

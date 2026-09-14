@@ -1,4 +1,5 @@
 import express from 'express';
+import rateLimit from 'express-rate-limit';
 import { trackByPhone } from './orderTrack.controller';
 import { OrderController } from './order.controller';
 import validateRequest from '../../middlewares/validateRequest';
@@ -8,9 +9,36 @@ import {
   submitManualPaymentValidationSchema,
   updateOrderPaymentValidationSchema,
 } from './order.validation';
-import { authMiddleware, authorize, requireCapability } from '../../middlewares/auth';
+import { authMiddleware, authorize, requireCapability, optionalAuth } from '../../middlewares/auth';
 
 const router = express.Router();
+
+// Placing an order no longer needs an account, so this is the one public route
+// that writes a document AND sends an SMS and an admin alert every time it is
+// hit. The limit is per IP and generous on purpose: students order from the
+// same hostel Wi-Fi and from mobile networks that put thousands of phones
+// behind one address, and a limit tight enough to stop a flood from there
+// would also stop a class ordering together. It exists to cap a script, not a
+// busy evening. (app.ts trusts one proxy hop, so req.ip is the visitor.)
+//
+// A signed-in buyer is not counted: an account is already a thing the signup
+// limiter rations. That is decided on req.user, which optionalAuth only sets
+// for a token that verifies — so a forged Authorization header buys nothing —
+// and it is why optionalAuth runs BEFORE this limiter on the route below.
+// ORDER_CREATE_LIMIT exists for the e2e suites, which place dozens of orders
+// from 127.0.0.1 in a few seconds.
+const orderCreateLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  limit: Number(process.env.ORDER_CREATE_LIMIT) || 20,
+  skip: (req) => Boolean((req as any).user),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message:
+      'অল্প সময়ে অনেকগুলো অর্ডার এসেছে। কয়েক মিনিট পর আবার চেষ্টা করুন। (Too many orders from this connection — try again in a few minutes.)',
+  },
+});
 
 // ─── Checkout options (public) ───────────────────────────────
 // Which payment methods are on + what delivery costs. Declared before '/:id'
@@ -22,10 +50,13 @@ router.get('/checkout-options', OrderController.getCheckoutOptions);
 // what it deliberately does not return.
 router.post('/track', trackByPhone);
 
-// ─── Create + list own orders (any logged-in user) ───────────
+// ─── Create (anyone) + list own orders (logged-in user) ──────
+// optionalAuth: a signed-in buyer's order is linked to their account; a guest's
+// is not, and carries an access key instead (see OrderService.createOrder).
 router.post(
   '/',
-  authMiddleware,
+  optionalAuth,
+  orderCreateLimiter,
   validateRequest(createOrderValidationSchema),
   OrderController.createOrder
 );
@@ -41,9 +72,11 @@ router.get('/', authMiddleware, authorize('admin'), requireCapability('orders.re
 // list above. Declared before '/:id' so 'stats' is not read as an order id.
 router.get('/stats', authMiddleware, authorize('admin'), requireCapability('orders.read'), OrderController.getStats);
 
-// ─── Payment (owner) — placed before '/:id' plain GET is fine ─
-router.post('/:id/pay/bkash', authMiddleware, OrderController.payWithBkash);
-router.post('/:id/pay/sslcommerz', authMiddleware, OrderController.payWithSslcommerz);
+// ─── Payment (owner, or the order's access key) ──────────────
+// A guest has no token; they send the access key their order was created with
+// in an x-order-key header. Anyone with neither gets "order not found".
+router.post('/:id/pay/bkash', optionalAuth, OrderController.payWithBkash);
+router.post('/:id/pay/sslcommerz', optionalAuth, OrderController.payWithSslcommerz);
 
 // REMOVED 2026-08-14 — POST /:id/pay/complete was a free-book hole.
 //
@@ -137,8 +170,8 @@ router.post(
 );
 router.delete('/:id', authMiddleware, authorize('superAdmin', 'admin'), OrderController.deleteOrder);
 
-// ─── Single order (owner or admin) — keep last so specific
-// paths above win over the ':id' wildcard ────────────────────
-router.get('/:id', authMiddleware, OrderController.getOrderById);
+// ─── Single order (owner, admin, or access key) — keep last so
+// specific paths above win over the ':id' wildcard ───────────
+router.get('/:id', optionalAuth, OrderController.getOrderById);
 
 export const OrderRoutes = router;

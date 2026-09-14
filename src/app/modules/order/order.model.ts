@@ -59,7 +59,20 @@ const shippingAddressSchema = new Schema(
     division: { type: String, trim: true, default: '' },
     // Set alongside `city` (which holds the same value) — see IShippingAddress.
     upazila: { type: String, trim: true, default: '' },
+    // Optional second number and this order's email — see IShippingAddress.
+    altPhone: { type: String, trim: true, default: '' },
+    email: { type: String, trim: true, lowercase: true, default: '' },
     note: { type: String },
+  },
+  { _id: false }
+);
+
+const orderCollegeSchema = new Schema(
+  {
+    college: { type: Schema.Types.ObjectId, ref: 'MedicalCollege' },
+    name: { type: String, trim: true, required: true },
+    district: { type: String, trim: true, default: '' },
+    upazila: { type: String, trim: true, default: '' },
   },
   { _id: false }
 );
@@ -77,7 +90,11 @@ const orderSchema = new Schema<IOrder>(
     // at create time (order.service). Not `required`/`unique` at the schema level:
     // rows created before this field existed have none until the backfill runs.
     orderSeq: { type: Number, index: true },
-    user: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    // Not required: a guest order has no account. See IOrder.user.
+    user: { type: Schema.Types.ObjectId, ref: 'User' },
+    college: { type: orderCollegeSchema, required: false },
+    deliveryRule: { type: String, enum: ['digital', 'free-above', 'college', 'standard'] },
+    accessKeyHash: { type: String, select: false },
     items: { type: [orderItemSchema], required: true, validate: (v: unknown[]) => v.length > 0 },
     deliveryType: {
       type: String,

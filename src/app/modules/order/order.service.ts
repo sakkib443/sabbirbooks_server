@@ -1,8 +1,16 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import crypto from 'crypto';
 import { isValidObjectId } from 'mongoose';
+import config from '../../config';
 import { Order } from './order.model';
 import { getNextSequence, ORDER_SEQ } from './counter.model';
-import { IOrder, IShippingAddress, TDeliveryType, TDeliveryArea } from './order.interface';
+import {
+  IOrder,
+  IShippingAddress,
+  TDeliveryType,
+  TDeliveryArea,
+  TDeliveryRule,
+} from './order.interface';
 import { Book } from '../book/book.model';
 import { priceBookUnit, hasOffers } from '../book/book.pricing';
 import { BookCoupon } from '../bookCoupon/bookCoupon.model';
@@ -25,66 +33,92 @@ const resolveBook = async (slugOrId: string) => {
   return Book.findOne({ $or: or });
 };
 
+/** The college fields a delivery quote needs. */
+type CollegeRate = {
+  _id?: unknown;
+  name?: string;
+  district?: string;
+  upazila?: string;
+  deliveryCharge?: number | null;
+};
+
+const sameGeo = (a?: string, b?: string): boolean => {
+  const norm = (s?: string) => String(s || '').trim().replace(/\s+/g, ' ');
+  return norm(a) !== '' && norm(a) === norm(b);
+};
+
 /**
- * What the courier fee for this order is, in taka.
+ * Does this college's own delivery rate apply to a parcel going here?
  *
- * Read from site settings rather than hard-coded so the shop owner can change
- * the rate without a deploy, and snapshotted onto the order so a later rate
- * change never rewrites an existing customer's total. Digital-only orders ship
- * nothing and are always free.
+ * Only when the college HAS a rate, and the parcel goes to the college's own
+ * district and its own upazila. The rate is the shop's price for delivering to
+ * that campus — sometimes by hand — so a Rajshahi Medical College student whose
+ * book is going home to Narail pays the ordinary charge.
+ *
+ * Both halves must match, not just the district: two upazilas of one district
+ * can be a long way apart, and several upazila names exist in more than one
+ * district (কালীগঞ্জ is in four), so the district alone or the upazila alone
+ * would each match parcels the rate was never meant for.
+ *
+ * Exact on the spelling, after trimming. The college's upazila and the
+ * checkout's are both drawn from the same list (bdGeoData in the storefront),
+ * so an honest address always matches; anything else pays the normal charge,
+ * which is the safe way round.
+ */
+export const collegeRateApplies = (
+  college: CollegeRate | null | undefined,
+  district?: string,
+  upazila?: string
+): boolean => {
+  if (!college) return false;
+  const rate = college.deliveryCharge;
+  if (rate === null || rate === undefined || !Number.isFinite(Number(rate)) || Number(rate) < 0) {
+    return false;
+  }
+  return sameGeo(college.district, district) && sameGeo(college.upazila, upazila);
+};
+
+/**
+ * What the courier fee for this order is, in taka, and which rule set it.
+ *
+ * Read from site settings and the college directory rather than hard-coded so
+ * the shop owner can change rates without a deploy, and snapshotted onto the
+ * order so a later rate change never rewrites an existing customer's total.
+ * Digital-only orders ship nothing and are always free.
+ *
+ * In order:
+ *   1. nothing printed                            → 0
+ *   2. the order crosses freeDeliveryAbove         → 0
+ *   3. the college has a rate and the parcel goes to its district + upazila
+ *                                                  → that rate (+ COD surcharge;
+ *                                                    a rate of 0 is simply free)
+ *   4. otherwise                                   → deliveryCharge (+ COD surcharge)
+ *
+ * The two Khulna rules that used to be settings (a free college, a cheaper
+ * district) are college rates now — see migrateLegacyDeliveryRates.
  */
 const quoteDeliveryCharge = async (opts: {
   hasPrinted: boolean;
   subtotal: number;
   isCod: boolean;
-  // The buyer's own division and college, when known — for the free-local rule.
-  division?: string;
-  college?: string;
-}): Promise<number> => {
-  if (!opts.hasPrinted) return 0;
+  college?: CollegeRate | null;
+  district?: string;
+  upazila?: string;
+}): Promise<{ charge: number; rule: TDeliveryRule }> => {
+  if (!opts.hasPrinted) return { charge: 0, rule: 'digital' };
 
   const s: any = await SettingsService.getSettingsService();
 
   const freeAbove = Number(s?.freeDeliveryAbove) || 0;
-  if (freeAbove > 0 && opts.subtotal >= freeAbove) return 0;
+  if (freeAbove > 0 && opts.subtotal >= freeAbove) return { charge: 0, rule: 'free-above' };
 
-  // Free local delivery: the configured college's students shipping within the
-  // configured division pay nothing. The same student shipping to any other
-  // division falls through to the flat charge.
-  const freeCollege = String(s?.freeDeliveryCollege || '').trim();
-  const freeDivision = String(s?.freeDeliveryDivision || '').trim();
-  if (
-    freeCollege &&
-    freeDivision &&
-    (opts.college || '').trim() === freeCollege &&
-    (opts.division || '').trim() === freeDivision
-  ) {
-    return 0;
-  }
+  const codExtra = opts.isCod ? Number(s?.codExtraCharge) || 0 : 0;
 
-  /**
-   * The shop's own city, at a reduced rate.
-   *
-   * Every other medical college in the same district as the shop is a short
-   * courier hop rather than a national one. The free college above is already
-   * handled and cannot reach here, so this is exactly "the others in town".
-   *
-   * The buyer's district comes from their COLLEGE, not from the address they
-   * typed: a Khulna student ordering a book to their family home in Barishal
-   * is a national parcel and should pay the national rate, and a student who
-   * types their hostel address badly should not lose the local rate for it.
-   * The college is the thing the shop can check.
-   */
-  const localDistrict = String(s?.localDeliveryDistrict || '').trim();
-  const localRate = Number(s?.localDeliveryCharge);
-  if (localDistrict && Number.isFinite(localRate) && opts.college) {
-    const college: any = await MedicalCollege.findOne({ name: opts.college.trim() })
-      .select('district')
-      .lean();
-    if (college && String(college.district || '').trim() === localDistrict) {
-      const codExtraLocal = opts.isCod ? Number(s?.codExtraCharge) || 0 : 0;
-      return Math.max(0, Math.round(localRate + codExtraLocal));
-    }
+  if (collegeRateApplies(opts.college, opts.district, opts.upazila)) {
+    const rate = Math.max(0, Math.round(Number(opts.college!.deliveryCharge)));
+    // Free means free: a campus the shop delivers to for nothing does not
+    // start costing money because the buyer chose to pay in cash.
+    return { charge: rate === 0 ? 0 : rate + codExtra, rule: 'college' };
   }
 
   // One flat rate everywhere else. deliveryCharge is the live field; the old
@@ -93,10 +127,110 @@ const quoteDeliveryCharge = async (opts: {
   const flat = Number(s?.deliveryCharge);
   const legacy = Number(s?.deliveryChargeInsideDhaka);
   const charge = Number.isFinite(flat) ? flat : Number.isFinite(legacy) ? legacy : 130;
-  const codExtra = opts.isCod ? Number(s?.codExtraCharge) || 0 : 0;
 
-  return Math.max(0, Math.round(charge + codExtra));
+  return { charge: Math.max(0, Math.round(charge + codExtra)), rule: 'standard' };
 };
+
+/**
+ * A Bangladeshi mobile number as 01XXXXXXXXX, or '' when it is not one.
+ *
+ * Every way the same number gets typed — 01712-345678, +880 1712 345678,
+ * 8801712345678 — comes out as the same eleven digits, which is what the SMS
+ * gateway, the courier sheet and the order tracker all compare on.
+ */
+export const normalizeBdMobile = (raw?: string): string => {
+  const digits = String(raw || '').replace(/\D/g, '');
+  const local = digits.length === 13 && digits.startsWith('88') ? digits.slice(2) : digits;
+  return /^01[3-9]\d{8}$/.test(local) ? local : '';
+};
+
+const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+/**
+ * The access key: how a buyer without an account proves an order is theirs.
+ *
+ * Neither the order's _id nor its orderNumber can do that job — both travel in
+ * payment redirect URLs and emails, and the number is a timestamp plus a short
+ * random tail. The key is 24 random bytes, handed to the browser once in the
+ * create response and never again; only its sha256 is stored.
+ */
+const newAccessKey = (): string => crypto.randomBytes(24).toString('base64url');
+const hashAccessKey = (key: string): string =>
+  crypto.createHash('sha256').update(key).digest('hex');
+
+export const accessKeyMatches = (storedHash?: string, key?: string): boolean => {
+  if (!storedHash || !key) return false;
+  const given = Buffer.from(hashAccessKey(String(key)), 'hex');
+  const stored = Buffer.from(String(storedHash), 'hex');
+  return given.length === stored.length && crypto.timingSafeEqual(given, stored);
+};
+
+/** Who is acting on an order: a signed-in account, an access key, or both. */
+export type OrderBuyer = { userId?: string; accessKey?: string };
+const toBuyer = (b?: string | OrderBuyer): OrderBuyer =>
+  typeof b === 'string' ? { userId: b } : b || {};
+
+/**
+ * Load an order for the person who placed it — the signed-in owner, or anyone
+ * holding its access key. Anyone else gets "not found", never "forbidden", so
+ * an id cannot be probed to learn that an order exists.
+ */
+const findOrderForBuyer = async (id: string, who?: string | OrderBuyer): Promise<any> => {
+  const buyer = toBuyer(who);
+  if (!isValidObjectId(id)) throw new Error('Order not found');
+  const order: any = await Order.findById(id).select('+accessKeyHash');
+  if (!order) throw new Error('Order not found');
+  const isOwner = !!buyer.userId && !!order.user && String(order.user) === String(buyer.userId);
+  if (!isOwner && !accessKeyMatches(order.accessKeyHash, buyer.accessKey)) {
+    throw new Error('Order not found');
+  }
+  return order;
+};
+
+/**
+ * The college this order is for.
+ *
+ * A directory id wins (the buyer picked a listed college); then a typed name,
+ * matched to the directory when it is spelt exactly like a listed college;
+ * then, for a signed-in buyer who sent neither — an older checkout still
+ * running in someone's tab — the college on their profile.
+ */
+const resolveOrderCollege = async (
+  payload: { medicalCollege?: string; medicalCollegeName?: string },
+  userId?: string
+): Promise<CollegeRate | null> => {
+  const fields = 'name district upazila deliveryCharge';
+
+  const id = String(payload.medicalCollege || '').trim();
+  if (id && isValidObjectId(id)) {
+    const c = await MedicalCollege.findOne({ _id: id, isActive: true }).select(fields).lean();
+    if (c) return c as CollegeRate;
+  }
+
+  const typed = String(payload.medicalCollegeName || '').trim();
+  if (typed) {
+    const c = await MedicalCollege.findOne({ name: typed, isActive: true }).select(fields).lean();
+    return c ? (c as CollegeRate) : { name: typed };
+  }
+
+  if (userId) {
+    const buyer: any = await User.findById(userId).select('medicalCollege medicalCollegeName').lean();
+    if (buyer?.medicalCollege && isValidObjectId(String(buyer.medicalCollege))) {
+      const c = await MedicalCollege.findById(buyer.medicalCollege).select(fields).lean();
+      if (c) return c as CollegeRate;
+    }
+    const name = String(buyer?.medicalCollegeName || '').trim();
+    if (name) {
+      const c = await MedicalCollege.findOne({ name }).select(fields).lean();
+      return c ? (c as CollegeRate) : { name };
+    }
+  }
+
+  return null;
+};
+
+/** How long an identical COD order from the same number counts as a double tap. */
+const DUPLICATE_WINDOW_MS = 10 * 60 * 1000;
 
 /**
  * Which courier zone a district belongs to.
@@ -134,13 +268,19 @@ const getEnabledPaymentMethods = async (): Promise<{ cod: boolean; online: boole
 // The order is born `pending` either way. What differs is what happens next:
 //   manual → buyer submits a TrxID, admin verifies it
 //   cod    → admin confirms the order, then the courier collects the cash
+//
+// `userId` is absent for a guest. Everything an order needs from a buyer — the
+// name, the numbers, the address, the college — arrives in the payload, so the
+// account is only a link for the buyer's own order list, never a requirement.
 const createOrder = async (
-  userId: string,
+  userId: string | undefined,
   payload: {
     items: { bookSlugOrId: string; quantity: number }[];
     shippingAddress?: IShippingAddress;
     paymentMethod?: 'manual' | 'cod';
     couponCode?: string;
+    medicalCollege?: string;
+    medicalCollegeName?: string;
   }
 ): Promise<IOrder> => {
   const items: IOrder['items'] = [];
@@ -217,15 +357,83 @@ const createOrder = async (
   const deliveryType: TDeliveryType =
     hasPrinted && hasDigital ? 'mixed' : hasPrinted ? 'printed' : 'digital';
 
-  // Printed items ship — a full address is mandatory.
+  // A digital book is opened from the buyer's account — the download link checks
+  // who is signed in — so a guest could pay for one and have no way to open it.
+  // Without an account, printed books only; nothing is saved before this point.
+  if (!userId && hasDigital) {
+    throw new Error('ডিজিটাল বই কিনতে আগে লগইন করুন। (Please sign in to buy a digital book.)');
+  }
+
+  // Printed items ship — a full address is mandatory, and the numbers have to
+  // be numbers a courier can ring and an SMS can reach. Now that a stranger can
+  // order without an account, the phone is the only way back to them.
+  let shipping: IShippingAddress | undefined;
   if (hasPrinted) {
     const addr = payload.shippingAddress;
-    if (!addr || !addr.name || !addr.phone || !addr.address || !addr.city) {
+    if (!addr || !addr.name?.trim() || !addr.phone || !addr.address?.trim() || !addr.city) {
       throw new Error('Shipping address (name, phone, address, city) is required for printed items');
     }
+    const phone = normalizeBdMobile(addr.phone);
+    if (!phone) {
+      throw new Error(
+        'সঠিক মোবাইল নম্বর দিন, যেমন 01712345678। (Enter a valid Bangladeshi mobile number.)'
+      );
+    }
+    let altPhone = '';
+    if (String(addr.altPhone || '').trim()) {
+      altPhone = normalizeBdMobile(addr.altPhone);
+      if (!altPhone) {
+        throw new Error(
+          'দ্বিতীয় মোবাইল নম্বরটি সঠিক নয়। (The second mobile number is not a valid number.)'
+        );
+      }
+      if (altPhone === phone) altPhone = '';
+    }
+    const email = String(addr.email || '').trim().toLowerCase();
+    if (email && !EMAIL_SHAPE.test(email)) {
+      throw new Error('ইমেইল ঠিকানাটি সঠিক নয়। (The email address is not valid.)');
+    }
+    shipping = {
+      ...addr,
+      name: addr.name.trim(),
+      phone,
+      altPhone,
+      email,
+      address: addr.address.trim(),
+    };
   }
 
   const method = payload.paymentMethod === 'cod' ? 'cod' : 'manual';
+
+  // A guest's double tap, or the same order placed again by someone who did not
+  // see the first one go through. Only for a guest — an account can see its own
+  // orders, and a signed-in repeat is a decision, not an accident — and only on
+  // COD: nothing is paid, so a repeat costs the shop a parcel nobody wants. A
+  // gateway order is different — an abandoned payment page leaves a pending
+  // order behind for a while, and a buyer retrying must not be told they
+  // already ordered. "Same" means the same books in the same quantities.
+  if (!userId && method === 'cod' && shipping) {
+    const since = new Date(Date.now() - DUPLICATE_WINDOW_MS);
+    const lines = (list: any[]) =>
+      list.map((i) => `${String(i.book)}x${Number(i.quantity) || 1}`).sort().join(',');
+    const thisOrder = lines(items);
+    const recent = await Order.find({
+      'payment.method': 'cod',
+      status: { $ne: 'cancelled' },
+      createdAt: { $gte: since },
+      'shippingAddress.phone': { $regex: new RegExp(`${shipping.phone.slice(-10)}$`) },
+    })
+      .select('items.book items.quantity')
+      .lean();
+    const same = recent.some((o: any) => lines(o.items || []) === thisOrder);
+    if (same) {
+      throw new Error(
+        'এই মোবাইল নম্বরে কয়েক মিনিট আগেই একই বইয়ের অর্ডার হয়েছে। হোমপেজের "অর্ডার ট্র্যাক করুন" থেকে দেখে নিন; ' +
+          'আরেকটা অর্ডার সত্যিই দরকার হলে ১০ মিনিট পর আবার চেষ্টা করুন। ' +
+          '(This number placed the same order a few minutes ago.)'
+      );
+    }
+  }
 
   // There is no parcel for a digital book, so nobody can hand over cash for it.
   if (method === 'cod' && !hasPrinted) {
@@ -269,6 +477,8 @@ const createOrder = async (
     // worse than refusing.
     const { coupon, discountAmount } = await evaluateBookCoupon(rawCoupon, afterOffers, {
       userId,
+      // A guest's "one use per buyer" is counted by phone number.
+      phone: shipping?.phone,
       paymentMethod: method,
     });
     couponCode = coupon.code;
@@ -281,26 +491,20 @@ const createOrder = async (
   // Grand total discount = the book's offers plus the coupon.
   const discount = offersDiscount + couponDiscount;
 
-  // The buyer's medical college — required on EVERY order, and the input to the
-  // free-local-delivery rule. Required because the shop is sold to medical
-  // students and the college is how orders are batched and delivered; an account
-  // that never picked one (an old signup, or a Google sign-in that skipped the
-  // profile step) is asked to set it before it can order, rather than silently
-  // producing an order nobody can route.
-  const buyer = await User.findById(userId).select('medicalCollegeName').lean();
-  const buyerCollege = (buyer?.medicalCollegeName || '').trim();
-  if (!buyerCollege) {
-    throw new Error(
-      'আপনার মেডিকেল কলেজ নির্বাচন করা নেই। প্রোফাইল থেকে মেডিকেল কলেজ নির্বাচন করে আবার অর্ডার করুন। ' +
-        '(Please select your medical college in your profile before ordering.)'
-    );
+  // The buyer's medical college — required on EVERY order. The shop sells to
+  // medical students and the college is how orders are batched and delivered,
+  // and it is what a college's own delivery rate is looked up on.
+  const college = await resolveOrderCollege(payload, userId);
+  if (!college?.name) {
+    throw new Error('মেডিকেল কলেজ নির্বাচন করুন। (Please choose your medical college.)');
   }
-  const quotedDelivery = await quoteDeliveryCharge({
+  const { charge: quotedDelivery, rule: deliveryRule } = await quoteDeliveryCharge({
     hasPrinted,
     subtotal: subtotal - discount,
     isCod: method === 'cod',
-    division: payload.shippingAddress?.division,
-    college: buyerCollege,
+    college,
+    district: shipping?.district,
+    upazila: shipping?.upazila,
   });
 
   // A free-delivery coupon zeroes the charge rather than discounting the order
@@ -318,12 +522,22 @@ const createOrder = async (
   // rows the backfill numbers 1..N.
   const orderSeq = await getNextSequence(ORDER_SEQ, () => Order.countDocuments());
 
+  const accessKey = newAccessKey();
+
   const order = await Order.create({
-    user: userId,
+    user: userId || undefined,
     orderSeq,
     items,
     deliveryType,
-    shippingAddress: hasPrinted ? { ...payload.shippingAddress } : undefined,
+    shippingAddress: hasPrinted ? shipping : undefined,
+    college: {
+      college: college._id,
+      name: college.name,
+      district: college.district || '',
+      upazila: college.upazila || '',
+    },
+    deliveryRule,
+    accessKeyHash: hashAccessKey(accessKey),
     subtotal,
     discount,
     couponCode,
@@ -364,6 +578,11 @@ const createOrder = async (
     // goes out from applyPaidSideEffects instead.
     void OrderSmsService.send(order, 'placed');
   }
+
+  // Handed to the controller for the create response and nowhere else. $locals
+  // is never persisted or serialised, so the plain key cannot leak into a save
+  // or a later read of this document.
+  (order as any).$locals.accessKey = accessKey;
 
   return order;
 };
@@ -406,17 +625,19 @@ const getCheckoutOptions = async (subtotal = 0) => {
   const s: any = await SettingsService.getSettingsService();
   const enabled = await getEnabledPaymentMethods();
 
-  // One flat charge everywhere. The buyer's own eligibility for free local
-  // delivery is decided on the client from freeDeliveryCollege/Division below
-  // (it knows the buyer's college); the server re-checks it at order time.
-  const deliveryCharge = await quoteDeliveryCharge({ hasPrinted: true, subtotal, isCod: false });
+  // The standard charge. A college's own rate is published on the college list
+  // (GET /medical-colleges) and applied on the client with the same rule as
+  // collegeRateApplies above; the server re-prices it at order time either way.
+  const { charge: deliveryCharge } = await quoteDeliveryCharge({
+    hasPrinted: true,
+    subtotal,
+    isCod: false,
+  });
 
   return {
     codEnabled: enabled.cod,
     onlinePaymentEnabled: enabled.online,
     deliveryCharge,
-    freeDeliveryCollege: String(s?.freeDeliveryCollege || ''),
-    freeDeliveryDivision: String(s?.freeDeliveryDivision || ''),
     codExtraCharge: Number(s?.codExtraCharge) || 0,
     freeDeliveryAbove: Number(s?.freeDeliveryAbove) || 0,
     deliveryNote: s?.deliveryNote || '',
@@ -443,20 +664,27 @@ const getMyOrders = async (userId: string): Promise<IOrder[]> => {
 };
 
 // ─── GET single (owner or admin) ─────────────────────────────
+// The owner, an admin, or — for a guest order — whoever holds its access key
+// (the payment-return page, right after the gateway sends the buyer back).
 const getOrderById = async (
   id: string,
-  requester: { _id: string; role: string }
+  requester?: { _id: string; role: string },
+  accessKey?: string
 ): Promise<IOrder> => {
   if (!isValidObjectId(id)) throw new Error('Invalid order id');
-  const order = await Order.findById(id);
+  const order: any = await Order.findById(id).select('+accessKeyHash');
   if (!order) throw new Error('Order not found');
 
-  const isOwner = order.user.toString() === requester._id;
-  const isAdmin = ['admin', 'superAdmin'].includes(requester.role);
-  if (!isOwner && !isAdmin) {
+  // `order.user` is optional now — a guest order has none — so it is never
+  // dereferenced before it is known to be there.
+  const isOwner = !!requester && !!order.user && String(order.user) === String(requester._id);
+  const isAdmin = !!requester && ['admin', 'superAdmin'].includes(requester.role);
+  if (!isOwner && !isAdmin && !accessKeyMatches(order.accessKeyHash, accessKey)) {
     throw new Error('You are not allowed to view this order');
   }
-  return order;
+  const plain = order.toObject();
+  delete plain.accessKeyHash;
+  return plain;
 };
 
 // ─── GET all (admin, paginated + status filter) ──────────────
@@ -685,15 +913,20 @@ const deleteOrders = async (ids: string[]): Promise<{ deleted: number; failed: n
 // Reuses the payment module's BkashService (DEMO mode when keys are blank).
 // The order's _id is passed through the service's `courseId` slot as the generic
 // reference, and the order number as the merchant invoice.
-const payWithBkash = async (id: string, userId: string) => {
-  const order = await Order.findOne({ _id: id, user: userId });
-  if (!order) throw new Error('Order not found');
+//
+// `who` is the signed-in owner's id, or { userId?, accessKey? } — a guest pays
+// with the access key their order was created with. See findOrderForBuyer.
+const payWithBkash = async (id: string, who: string | OrderBuyer) => {
+  const buyer = toBuyer(who);
+  const order = await findOrderForBuyer(id, buyer);
   if (order.payment.status === 'paid') throw new Error('Order is already paid');
 
   const result = await BkashService.createPayment({
     amount: order.total,
     courseId: order._id.toString(),
-    studentId: userId,
+    // bKash's payerReference. Settlement finds the order by its own reference,
+    // so for a guest this only has to be something stable about the buyer.
+    studentId: buyer.userId || order.shippingAddress?.phone || order.orderNumber,
     invoiceNumber: order.orderNumber,
   });
 
@@ -705,24 +938,30 @@ const payWithBkash = async (id: string, userId: string) => {
 };
 
 // ─── PAY via SSLCommerz ──────────────────────────────────────
-const payWithSslcommerz = async (id: string, userId: string) => {
-  const order = await Order.findOne({ _id: id, user: userId });
-  if (!order) throw new Error('Order not found');
+const payWithSslcommerz = async (id: string, who: string | OrderBuyer) => {
+  const buyer = toBuyer(who);
+  const order = await findOrderForBuyer(id, buyer);
   if (order.payment.status === 'paid') throw new Error('Order is already paid');
 
-  // Gateway needs buyer identity; the JWT payload may not carry name/phone, so
-  // pull them from the User record.
-  const user = await User.findById(userId);
-  if (!user) throw new Error('User not found');
+  // The gateway wants a name, an email and a phone. The order carries all three
+  // for anyone who ordered through the current checkout; an account fills gaps
+  // for older orders. SSLCommerz refuses a session without an email, and a
+  // guest may not have given one, so the shop's own sender address stands in —
+  // it is the shop the receipt matters to in that case.
+  const user: any = buyer.userId ? await User.findById(buyer.userId).lean() : null;
+  const ship: any = order.shippingAddress || {};
 
   const result = await SslcommerzService.initSession({
     amount: order.total,
     courseId: order._id.toString(),
     courseName: `Book Order ${order.orderNumber}`,
-    studentId: userId,
-    studentName: `${user.firstName || ''} ${user.lastName || ''}`.trim() || 'Customer',
-    studentEmail: user.email,
-    studentPhone: user.phoneNumber,
+    studentId: buyer.userId || 'guest',
+    studentName:
+      String(ship.name || '').trim() ||
+      `${user?.firstName || ''} ${user?.lastName || ''}`.trim() ||
+      'Customer',
+    studentEmail: String(ship.email || '').trim() || user?.email || config.email.from_email,
+    studentPhone: ship.phone || user?.phoneNumber,
     invoiceNumber: order.orderNumber,
   });
 
@@ -794,12 +1033,21 @@ const applyPaidSideEffects = async (order: any): Promise<void> => {
 
 // ─── COMPLETE payment (DEMO / gateway callback) ──────────────
 // Instant-paid path used by the demo bKash/SSLCommerz gateways.
+//
+// `userId` narrows the lookup to that account's order when there is one. A
+// guest order has no account, and its settlement arrives here with no userId —
+// the gateway callback has already proven the payment against the order's own
+// reference and amount (payment/orderSettlement.ts), which is the check that
+// matters. Filtering on a missing user used to turn "undefined" into a cast
+// error, and a guest who had paid was told the payment failed.
 const completePayment = async (
   id: string,
-  userId: string,
+  userId?: string,
   body?: { method?: string; transactionId?: string }
 ): Promise<IOrder> => {
-  const order = await Order.findOne({ _id: id, user: userId });
+  const filter: Record<string, unknown> = { _id: id };
+  if (userId) filter.user = userId;
+  const order = await Order.findOne(filter);
   if (!order) throw new Error('Order not found');
 
   await applyPaidSideEffects(order);
@@ -1033,7 +1281,18 @@ const adminUpdateOrder = async (
   if (body.shippingAddress) {
     const a = body.shippingAddress;
     order.shippingAddress = { ...(order.shippingAddress?.toObject?.() ?? order.shippingAddress ?? {}) };
-    for (const k of ['name', 'phone', 'address', 'city', 'district', 'division', 'upazila', 'note'] as const) {
+    for (const k of [
+      'name',
+      'phone',
+      'altPhone',
+      'email',
+      'address',
+      'city',
+      'district',
+      'division',
+      'upazila',
+      'note',
+    ] as const) {
       if (a[k] !== undefined) (order.shippingAddress as any)[k] = a[k];
     }
     // 'city' is the courier-facing line and mirrors the upazila (see
@@ -1060,6 +1319,13 @@ const adminUpdateOrder = async (
   }
 
   if (body.adminNote !== undefined) order.adminNote = body.adminNote;
+
+  // A guest order has no account for the buyer fields to land on, so the email
+  // goes onto the order itself — where the order emails look first anyway.
+  if (!order.user && body.buyer?.email !== undefined && order.shippingAddress) {
+    order.shippingAddress.email = String(body.buyer.email).trim().toLowerCase();
+    order.markModified('shippingAddress');
+  }
 
   await order.save();
 
@@ -1129,7 +1395,7 @@ const getDownloadUrl = async (
   const order = await Order.findById(orderId);
   if (!order) throw new Error('Order not found');
 
-  const isOwner = order.user.toString() === requester._id;
+  const isOwner = !!order.user && order.user.toString() === requester._id;
   const isAdmin = ['admin', 'superAdmin'].includes(requester.role);
   if (!isOwner && !isAdmin) throw new Error('You are not allowed to access this order');
 

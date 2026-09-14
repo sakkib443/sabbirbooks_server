@@ -9,14 +9,21 @@
 // so corrections do not need a deploy. Re-running the seed never duplicates and
 // never overwrites an edited row.
 //
-// The upazila/area column is deliberately blank. Unlike division and district,
-// which were repaired against canonical lists, there is no authoritative list of
-// the 495 upazilas to match the mangled cells against — and showing a student
-// "চোাদপুর সিদর" is worse than showing nothing. District is what the delivery
-// charge and the address prefill actually use. Admins can fill areas in later.
+// `upazila` is where the campus stands, spelt exactly as the storefront's address
+// list spells it (sabbirbooks/src/components/checkout/bdGeoData.ts), because the
+// per-college delivery charge applies only when a parcel's district AND upazila
+// equal the college's. The PDF's own upazila column could not be read back
+// reliably, so these were matched by hand from the PDF (Medical_Colleges_Bangladesh,
+// Sept 2026). Colleges in a city corporation carry the city thana — ধানমন্ডি,
+// পাঁচলাইশ, রাজপাড়া — and cantonments carry the thana or upazila they sit in. The
+// seed fills blanks only (MedicalCollegeService.backfillUpazilas), so an upazila
+// corrected on the delivery-charge screen survives every deploy.
 //
-// One row carries needsReview: the PDF cell holding its name did not survive text
-// extraction. Its other fields are intact. It is left blank rather than guessed.
+// `area` stays blank: it is free text for the neighbourhood, and nothing prices
+// or matches on it.
+//
+// The Jamalpur row was seeded nameless (needsReview) from the first PDF; the second
+// PDF names it, and seedFromFile renames that placeholder in place.
 
 export interface SeedCollege {
   name: string;
@@ -24,6 +31,7 @@ export interface SeedCollege {
   division: string;
   district: string;
   area: string;
+  upazila: string;
   established: number;
   seats: number | null;
   needsReview?: boolean;
@@ -36,6 +44,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "ঢাকা",
     "area": "",
+    "upazila": "শাহবাগ",
     "established": 1946,
     "seats": 225
   },
@@ -45,6 +54,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "ঢাকা",
     "area": "",
+    "upazila": "কোতোয়ালী",
     "established": 1972,
     "seats": 225
   },
@@ -54,6 +64,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "ঢাকা",
     "area": "",
+    "upazila": "শেরেবাংলা নগর",
     "established": 2006,
     "seats": 225
   },
@@ -63,6 +74,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "চট্টগ্রাম",
     "district": "চট্টগ্রাম",
     "area": "",
+    "upazila": "পাঁচলাইশ",
     "established": 1957,
     "seats": 225
   },
@@ -72,6 +84,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "রাজশাহী",
     "district": "রাজশাহী",
     "area": "",
+    "upazila": "রাজপাড়া",
     "established": 1958,
     "seats": 225
   },
@@ -81,6 +94,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ময়মনসিংহ",
     "district": "ময়মনসিংহ",
     "area": "",
+    "upazila": "ময়মনসিংহ সদর",
     "established": 1962,
     "seats": 225
   },
@@ -90,6 +104,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "সিলেট",
     "district": "সিলেট",
     "area": "",
+    "upazila": "সিলেট সদর",
     "established": 1962,
     "seats": 225
   },
@@ -99,6 +114,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "বরিশাল",
     "district": "বরিশাল",
     "area": "",
+    "upazila": "বরিশাল সদর",
     "established": 1968,
     "seats": 225
   },
@@ -108,6 +124,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "রংপুর",
     "district": "রংপুর",
     "area": "",
+    "upazila": "রংপুর সদর",
     "established": 1970,
     "seats": 225
   },
@@ -117,6 +134,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "চট্টগ্রাম",
     "district": "কুমিল্লা",
     "area": "",
+    "upazila": "কুমিল্লা সদর",
     "established": 1992,
     "seats": 200
   },
@@ -126,6 +144,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "রংপুর",
     "district": "দিনাজপুর",
     "area": "",
+    "upazila": "দিনাজপুর সদর",
     "established": 1992,
     "seats": 200
   },
@@ -135,6 +154,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "ফরিদপুর",
     "area": "",
+    "upazila": "ফরিদপুর সদর",
     "established": 1992,
     "seats": 200
   },
@@ -144,6 +164,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "খুলনা",
     "district": "খুলনা",
     "area": "",
+    "upazila": "খুলনা সদর",
     "established": 1992,
     "seats": 200
   },
@@ -153,6 +174,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "রাজশাহী",
     "district": "বগুড়া",
     "area": "",
+    "upazila": "বগুড়া সদর",
     "established": 1992,
     "seats": 200
   },
@@ -162,6 +184,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "চট্টগ্রাম",
     "district": "কক্সবাজার",
     "area": "",
+    "upazila": "কক্সবাজার সদর",
     "established": 2008,
     "seats": 100
   },
@@ -171,6 +194,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "চট্টগ্রাম",
     "district": "নোয়াখালী",
     "area": "",
+    "upazila": "বেগমগঞ্জ",
     "established": 2008,
     "seats": 100
   },
@@ -180,6 +204,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "রাজশাহী",
     "district": "পাবনা",
     "area": "",
+    "upazila": "পাবনা সদর",
     "established": 2008,
     "seats": 100
   },
@@ -189,6 +214,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "খুলনা",
     "district": "যশোর",
     "area": "",
+    "upazila": "যশোর সদর",
     "established": 2010,
     "seats": 100
   },
@@ -198,6 +224,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "গোপালগঞ্জ",
     "area": "",
+    "upazila": "গোপালগঞ্জ সদর",
     "established": 2011,
     "seats": 125
   },
@@ -207,6 +234,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "খুলনা",
     "district": "কুষ্টিয়া",
     "area": "",
+    "upazila": "কুষ্টিয়া সদর",
     "established": 2011,
     "seats": 100
   },
@@ -216,6 +244,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "খুলনা",
     "district": "সাতক্ষীরা",
     "area": "",
+    "upazila": "সাতক্ষীরা সদর",
     "established": 2011,
     "seats": 100
   },
@@ -225,6 +254,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "কিশোরগঞ্জ",
     "area": "",
+    "upazila": "কিশোরগঞ্জ সদর",
     "established": 2011,
     "seats": 100
   },
@@ -234,18 +264,19 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "গাজীপুর",
     "area": "",
+    "upazila": "গাজীপুর সদর",
     "established": 2013,
     "seats": 125
   },
   {
-    "name": "",
+    "name": "Jamalpur Medical College (Sheikh Hasina MC)",
     "type": "government",
     "division": "ময়মনসিংহ",
     "district": "জামালপুর",
     "area": "",
+    "upazila": "জামালপুর সদর",
     "established": 2014,
-    "seats": 100,
-    "needsReview": true
+    "seats": 100
   },
   {
     "name": "Manikganj Medical College (Colonel Malek MC)",
@@ -253,6 +284,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "মানিকগঞ্জ",
     "area": "",
+    "upazila": "মানিকগঞ্জ সদর",
     "established": 2014,
     "seats": 125
   },
@@ -262,6 +294,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "বরিশাল",
     "district": "পটুয়াখালী",
     "area": "",
+    "upazila": "পটুয়াখালী সদর",
     "established": 2014,
     "seats": 100
   },
@@ -271,6 +304,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "চট্টগ্রাম",
     "district": "রাঙ্গামাটি",
     "area": "",
+    "upazila": "রাঙ্গামাটি সদর",
     "established": 2014,
     "seats": 75
   },
@@ -280,6 +314,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "রাজশাহী",
     "district": "সিরাজগঞ্জ",
     "area": "",
+    "upazila": "সিরাজগঞ্জ সদর",
     "established": 2014,
     "seats": 100
   },
@@ -289,6 +324,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "টাঙ্গাইল",
     "area": "",
+    "upazila": "টাঙ্গাইল সদর",
     "established": 2014,
     "seats": 125
   },
@@ -298,6 +334,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "ঢাকা",
     "area": "",
+    "upazila": "মুগদা",
     "established": 2016,
     "seats": 100
   },
@@ -307,6 +344,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "সিলেট",
     "district": "হবিগঞ্জ",
     "area": "",
+    "upazila": "হবিগঞ্জ সদর",
     "established": 2018,
     "seats": 50
   },
@@ -316,6 +354,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "চট্টগ্রাম",
     "district": "চাঁদপুর",
     "area": "",
+    "upazila": "চাঁদপুর সদর",
     "established": 2018,
     "seats": 50
   },
@@ -325,6 +364,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "খুলনা",
     "district": "মাগুরা",
     "area": "",
+    "upazila": "মাগুরা সদর",
     "established": 2018,
     "seats": 50
   },
@@ -334,6 +374,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "রাজশাহী",
     "district": "নওগাঁ",
     "area": "",
+    "upazila": "নওগাঁ সদর",
     "established": 2018,
     "seats": 50
   },
@@ -343,6 +384,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ময়মনসিংহ",
     "district": "নেত্রকোণা",
     "area": "",
+    "upazila": "নেত্রকোণা সদর",
     "established": 2018,
     "seats": 50
   },
@@ -352,6 +394,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "রংপুর",
     "district": "নীলফামারী",
     "area": "",
+    "upazila": "নীলফামারী সদর",
     "established": 2018,
     "seats": 75
   },
@@ -361,6 +404,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "সিলেট",
     "district": "সুনামগঞ্জ",
     "area": "",
+    "upazila": "সুনামগঞ্জ সদর",
     "established": 2021,
     "seats": 75
   },
@@ -370,6 +414,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "ঢাকা",
     "area": "",
+    "upazila": "ধানমন্ডি",
     "established": 1986,
     "seats": 120
   },
@@ -379,6 +424,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "চট্টগ্রাম",
     "district": "চট্টগ্রাম",
     "area": "",
+    "upazila": "খুলশী",
     "established": 1989,
     "seats": 75
   },
@@ -388,6 +434,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "কিশোরগঞ্জ",
     "area": "",
+    "upazila": "বাজিতপুর",
     "established": 1992,
     "seats": 100
   },
@@ -397,6 +444,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "ঢাকা",
     "area": "",
+    "upazila": "উত্তরা",
     "established": 1992,
     "seats": 90
   },
@@ -406,6 +454,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "ঢাকা",
     "area": "",
+    "upazila": "ধানমন্ডি",
     "established": 1992,
     "seats": 100
   },
@@ -415,6 +464,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "ঢাকা",
     "area": "",
+    "upazila": "উত্তরা",
     "established": 1994,
     "seats": 140
   },
@@ -424,6 +474,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "ঢাকা",
     "area": "",
+    "upazila": "সূত্রাপুর",
     "established": 1994,
     "seats": 130
   },
@@ -433,6 +484,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ময়মনসিংহ",
     "district": "ময়মনসিংহ",
     "area": "",
+    "upazila": "ময়মনসিংহ সদর",
     "established": 1995,
     "seats": 130
   },
@@ -442,6 +494,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "সিলেট",
     "district": "সিলেট",
     "area": "",
+    "upazila": "সিলেট সদর",
     "established": 1995,
     "seats": 125
   },
@@ -451,6 +504,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "ঢাকা",
     "area": "",
+    "upazila": "সাভার",
     "established": 1998,
     "seats": 50
   },
@@ -460,6 +514,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "সিলেট",
     "district": "সিলেট",
     "area": "",
+    "upazila": "দক্ষিণ সুরমা",
     "established": 1998,
     "seats": 120
   },
@@ -469,6 +524,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "ঢাকা",
     "area": "",
+    "upazila": "রমনা",
     "established": 2000,
     "seats": 140
   },
@@ -478,6 +534,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "গাজীপুর",
     "area": "",
+    "upazila": "গাজীপুর সদর",
     "established": 2000,
     "seats": 130
   },
@@ -487,6 +544,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "রাজশাহী",
     "district": "সিরাজগঞ্জ",
     "area": "",
+    "upazila": "সিরাজগঞ্জ সদর",
     "established": 2000,
     "seats": 85
   },
@@ -496,6 +554,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "ঢাকা",
     "area": "",
+    "upazila": "তুরাগ",
     "established": 2000,
     "seats": 120
   },
@@ -505,6 +564,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "টাঙ্গাইল",
     "area": "",
+    "upazila": "মির্জাপুর",
     "established": 2001,
     "seats": 115
   },
@@ -514,6 +574,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "গাজীপুর",
     "area": "",
+    "upazila": "গাজীপুর সদর",
     "established": 2002,
     "seats": 107
   },
@@ -523,6 +584,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "ঢাকা",
     "area": "",
+    "upazila": "শাহবাগ",
     "established": 2002,
     "seats": 120
   },
@@ -532,6 +594,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "চট্টগ্রাম",
     "district": "চট্টগ্রাম",
     "area": "",
+    "upazila": "চন্দনাইশ",
     "established": 2002,
     "seats": 120
   },
@@ -541,6 +604,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "ঢাকা",
     "area": "",
+    "upazila": "গুলশান",
     "established": 2003,
     "seats": 90
   },
@@ -550,6 +614,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "ঢাকা",
     "area": "",
+    "upazila": "সাভার",
     "established": 2003,
     "seats": 155
   },
@@ -559,6 +624,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "রাজশাহী",
     "district": "রাজশাহী",
     "area": "",
+    "upazila": "শাহ মখদুম",
     "established": 2003,
     "seats": 85
   },
@@ -568,6 +634,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "ঢাকা",
     "area": "",
+    "upazila": "মিরপুর",
     "established": 2005,
     "seats": 60
   },
@@ -577,6 +644,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "চট্টগ্রাম",
     "district": "কুমিল্লা",
     "area": "",
+    "upazila": "কুমিল্লা সদর",
     "established": 2005,
     "seats": 75
   },
@@ -586,6 +654,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "চট্টগ্রাম",
     "district": "কুমিল্লা",
     "area": "",
+    "upazila": "বুড়িচং",
     "established": 2005,
     "seats": 115
   },
@@ -595,6 +664,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "রাজশাহী",
     "district": "সিরাজগঞ্জ",
     "area": "",
+    "upazila": "চৌহালি",
     "established": 2005,
     "seats": 100
   },
@@ -604,6 +674,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "চট্টগ্রাম",
     "district": "চট্টগ্রাম",
     "area": "",
+    "upazila": "ডবলমুরিং",
     "established": 2005,
     "seats": 100
   },
@@ -613,6 +684,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "সিলেট",
     "district": "সিলেট",
     "area": "",
+    "upazila": "সিলেট সদর",
     "established": 2005,
     "seats": 100
   },
@@ -622,6 +694,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "চট্টগ্রাম",
     "district": "চট্টগ্রাম",
     "area": "",
+    "upazila": "পাঁচলাইশ",
     "established": 2006,
     "seats": 65
   },
@@ -631,6 +704,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "ঢাকা",
     "area": "",
+    "upazila": "মিরপুর",
     "established": 2006,
     "seats": 90
   },
@@ -640,6 +714,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "ঢাকা",
     "area": "",
+    "upazila": "উত্তরা",
     "established": 2007,
     "seats": 90
   },
@@ -649,6 +724,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "ঢাকা",
     "area": "",
+    "upazila": "রমনা",
     "established": 2008,
     "seats": 95
   },
@@ -658,6 +734,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "ঢাকা",
     "area": "",
+    "upazila": "রমনা",
     "established": 2008,
     "seats": 100
   },
@@ -667,6 +744,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "রাজশাহী",
     "district": "বগুড়া",
     "area": "",
+    "upazila": "বগুড়া সদর",
     "established": 2008,
     "seats": 145
   },
@@ -676,6 +754,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "ঢাকা",
     "area": "",
+    "upazila": "ধানমন্ডি",
     "established": 2008,
     "seats": 137
   },
@@ -685,6 +764,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "রংপুর",
     "district": "রংপুর",
     "area": "",
+    "upazila": "রংপুর সদর",
     "established": 2008,
     "seats": 130
   },
@@ -694,6 +774,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "রংপুর",
     "district": "রংপুর",
     "area": "",
+    "upazila": "রংপুর সদর",
     "established": 2008,
     "seats": 130
   },
@@ -703,6 +784,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "ফরিদপুর",
     "area": "",
+    "upazila": "ফরিদপুর সদর",
     "established": 2010,
     "seats": 90
   },
@@ -712,6 +794,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "ঢাকা",
     "area": "",
+    "upazila": "ধানমন্ডি",
     "established": 2010,
     "seats": 110
   },
@@ -721,6 +804,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "ঢাকা",
     "area": "",
+    "upazila": "ধানমন্ডি",
     "established": 2010,
     "seats": 107
   },
@@ -730,6 +814,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "ঢাকা",
     "area": "",
+    "upazila": "তেজগাঁও",
     "established": 2010,
     "seats": 115
   },
@@ -739,6 +824,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "ঢাকা",
     "area": "",
+    "upazila": "মোহাম্মদপুর",
     "established": 2011,
     "seats": 90
   },
@@ -748,6 +834,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "ঢাকা",
     "area": "",
+    "upazila": "রমনা",
     "established": 2011,
     "seats": 100
   },
@@ -757,6 +844,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "ঢাকা",
     "area": "",
+    "upazila": "মিরপুর",
     "established": 2011,
     "seats": 70
   },
@@ -766,6 +854,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "চট্টগ্রাম",
     "district": "কুমিল্লা",
     "area": "",
+    "upazila": "কুমিল্লা সদর",
     "established": 2011,
     "seats": 100
   },
@@ -775,6 +864,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "খুলনা",
     "district": "খুলনা",
     "area": "",
+    "upazila": "খুলনা সদর",
     "established": 2011,
     "seats": 100
   },
@@ -784,6 +874,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "রাজশাহী",
     "district": "রাজশাহী",
     "area": "",
+    "upazila": "চন্দ্রিমা",
     "established": 2011,
     "seats": 100
   },
@@ -793,6 +884,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "গাজীপুর",
     "area": "",
+    "upazila": "গাজীপুর সদর",
     "established": 2011,
     "seats": 80
   },
@@ -802,6 +894,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "মানিকগঞ্জ",
     "area": "",
+    "upazila": "মানিকগঞ্জ সদর",
     "established": 2012,
     "seats": 80
   },
@@ -811,6 +904,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "খুলনা",
     "district": "যশোর",
     "area": "",
+    "upazila": "যশোর সদর",
     "established": 2012,
     "seats": 70
   },
@@ -820,6 +914,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "ঢাকা",
     "area": "",
+    "upazila": "খিলক্ষেত",
     "established": 2012,
     "seats": 50
   },
@@ -829,6 +924,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "ঢাকা",
     "area": "",
+    "upazila": "উত্তরা",
     "established": 2013,
     "seats": 50
   },
@@ -838,6 +934,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "কিশোরগঞ্জ",
     "area": "",
+    "upazila": "করিমগঞ্জ",
     "established": 2013,
     "seats": 90
   },
@@ -847,6 +944,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "ঢাকা",
     "area": "",
+    "upazila": "তেজগাঁও",
     "established": 2013,
     "seats": 57
   },
@@ -856,6 +954,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "চট্টগ্রাম",
     "district": "ব্রাহ্মণবাড়িয়া",
     "area": "",
+    "upazila": "ব্রাহ্মণবাড়িয়া সদর",
     "established": 2013,
     "seats": 50
   },
@@ -865,6 +964,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "সিলেট",
     "district": "সিলেট",
     "area": "",
+    "upazila": "সিলেট সদর",
     "established": 2013,
     "seats": 67
   },
@@ -874,6 +974,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "চট্টগ্রাম",
     "district": "চট্টগ্রাম",
     "area": "",
+    "upazila": "চান্দগাঁও",
     "established": 2013,
     "seats": 50
   },
@@ -883,6 +984,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "খুলনা",
     "district": "খুলনা",
     "area": "",
+    "upazila": "খুলনা সদর",
     "established": 2013,
     "seats": 60
   },
@@ -892,6 +994,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "মুন্সিগঞ্জ",
     "area": "",
+    "upazila": "সিরাজদিখান",
     "established": 2014,
     "seats": 50
   },
@@ -901,6 +1004,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "মুন্সিগঞ্জ",
     "area": "",
+    "upazila": "সিরাজদিখান",
     "established": 2014,
     "seats": 61
   },
@@ -910,6 +1014,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "চট্টগ্রাম",
     "district": "চট্টগ্রাম",
     "area": "",
+    "upazila": "বায়েজিদ বোস্তামী",
     "established": 2014,
     "seats": 50
   },
@@ -919,6 +1024,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "নারায়ণগঞ্জ",
     "area": "",
+    "upazila": "রূপগঞ্জ",
     "established": 2015,
     "seats": 50
   },
@@ -928,6 +1034,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "শরীয়তপুর",
     "area": "",
+    "upazila": "ভেদরগঞ্জ",
     "established": 2016,
     "seats": 64
   },
@@ -937,6 +1044,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "খুলনা",
     "district": "খুলনা",
     "area": "",
+    "upazila": "খুলনা সদর",
     "established": 2016,
     "seats": 50
   },
@@ -946,6 +1054,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "ঢাকা",
     "area": "",
+    "upazila": "বাড্ডা",
     "established": 2020,
     "seats": 50
   },
@@ -955,6 +1064,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "বরিশাল",
     "district": "বরিশাল",
     "area": "",
+    "upazila": "বরিশাল সদর",
     "established": 2021,
     "seats": 50
   },
@@ -964,6 +1074,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "ঢাকা",
     "area": "",
+    "upazila": "উত্তরা",
     "established": 2021,
     "seats": 50
   },
@@ -973,6 +1084,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "ঢাকা",
     "area": "",
+    "upazila": "গেন্ডারিয়া",
     "established": 2024,
     "seats": null
   },
@@ -982,6 +1094,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "ঢাকা",
     "district": "ঢাকা",
     "area": "",
+    "upazila": "ক্যান্টনমেন্ট",
     "established": 1999,
     "seats": 125
   },
@@ -991,6 +1104,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "রাজশাহী",
     "district": "বগুড়া",
     "area": "",
+    "upazila": "শাজাহানপুর",
     "established": 2014,
     "seats": 50
   },
@@ -1000,6 +1114,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "চট্টগ্রাম",
     "district": "চট্টগ্রাম",
     "area": "",
+    "upazila": "বায়েজিদ বোস্তামী",
     "established": 2014,
     "seats": 50
   },
@@ -1009,6 +1124,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "চট্টগ্রাম",
     "district": "কুমিল্লা",
     "area": "",
+    "upazila": "কুমিল্লা সদর",
     "established": 2014,
     "seats": 50
   },
@@ -1018,6 +1134,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "খুলনা",
     "district": "যশোর",
     "area": "",
+    "upazila": "যশোর সদর",
     "established": 2014,
     "seats": 50
   },
@@ -1027,6 +1144,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "রংপুর",
     "district": "রংপুর",
     "area": "",
+    "upazila": "রংপুর সদর",
     "established": 2014,
     "seats": 50
   },
@@ -1036,6 +1154,7 @@ export const MEDICAL_COLLEGES: SeedCollege[] = [
     "division": "চট্টগ্রাম",
     "district": "চট্টগ্রাম",
     "area": "",
+    "upazila": "পতেঙ্গা",
     "established": 2024,
     "seats": 50
   }

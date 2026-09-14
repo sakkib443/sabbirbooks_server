@@ -62,6 +62,27 @@ const update = async (req: Request, res: Response) => {
   }
 };
 
+// GET /api/medical-colleges/delivery — the delivery-charge screen.
+const listForDelivery = async (_req: Request, res: Response) => {
+  try {
+    const data = await MedicalCollegeService.listForDelivery();
+    res.status(200).json({ success: true, data });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// PATCH /api/medical-colleges/:id/delivery — a college's rate and upazila.
+const setDelivery = async (req: Request, res: Response) => {
+  try {
+    const data = await MedicalCollegeService.setDelivery(req.params.id, req.body || {});
+    if (!data) return res.status(404).json({ success: false, message: 'College not found' });
+    res.status(200).json({ success: true, message: 'Delivery charge saved', data });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
 // Retire, not delete — students reference these rows.
 const deactivate = async (req: Request, res: Response) => {
   try {
@@ -77,7 +98,9 @@ export const MedicalCollegeController = {
   list,
   regions,
   listAll,
+  listForDelivery,
   create,
   update,
+  setDelivery,
   deactivate,
 };

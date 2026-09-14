@@ -326,6 +326,9 @@ const waitingForCode = async (bookId?: string) => {
   );
 
   return delivered
+    // A guest order has no account to hand access to, so it cannot be "waiting"
+    // on this list's grant button — that buyer opens the book with its code.
+    .filter((o: any) => !!o.user?._id)
     .filter((o: any) =>
       (o.items || []).some((i: any) => i.book && !withAccess.has(`${o.user?._id}|${i.book}`))
     )

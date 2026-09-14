@@ -62,6 +62,8 @@ export interface ISiteSettings {
     localDeliveryCharge: number;
     freeDeliveryAbove: number;
     codExtraCharge: number;
+    /** When the Khulna rules were moved onto per-college rates — see the model. */
+    collegeDeliveryMigratedAt?: Date;
     deliveryNote: string;
     orderSupportPhone: string;
 

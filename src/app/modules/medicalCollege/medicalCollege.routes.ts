@@ -4,6 +4,7 @@ import validateRequest from '../../middlewares/validateRequest';
 import {
   createCollegeValidationSchema,
   updateCollegeValidationSchema,
+  updateCollegeDeliveryValidationSchema,
 } from './medicalCollege.validation';
 import { authMiddleware, authorize, requireCapability } from '../../middlewares/auth';
 
@@ -44,5 +45,19 @@ router.patch(
 
 // Retire rather than delete — see the service for why.
 router.delete('/:id', ...admin, MedicalCollegeController.deactivate);
+
+// ─── Delivery charges ───────────────────────────────────────
+// A college's delivery rate changes what buyers pay, so it sits behind the
+// same gate as the shop's other prices (settings.write), not behind the
+// directory gate above, which a manager holds.
+const pricing = [authMiddleware, authorize('admin'), requireCapability('settings.write')];
+
+router.get('/delivery', ...pricing, MedicalCollegeController.listForDelivery);
+router.patch(
+  '/:id/delivery',
+  ...pricing,
+  validateRequest(updateCollegeDeliveryValidationSchema),
+  MedicalCollegeController.setDelivery
+);
 
 export const MedicalCollegeRoutes = router;

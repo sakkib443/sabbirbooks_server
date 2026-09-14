@@ -68,6 +68,13 @@ async function startServer() {
       // Fills blanks only, so a corrected abbreviation survives every deploy.
       const filled = await MedicalCollegeService.backfillAbbreviations();
       if (filled) console.log(`🔤 College abbreviations — ${filled} filled in.`);
+      // The checkout matches a college's delivery rate on its upazila, and the
+      // rows were seeded without one. Fills blanks only.
+      const upazilas = await MedicalCollegeService.backfillUpazilas();
+      if (upazilas) console.log(`📍 College upazilas — ${upazilas} filled in.`);
+      // Once: the Khulna rules move from Settings onto the college rows.
+      const moved = await MedicalCollegeService.migrateLegacyDeliveryRates();
+      if (moved.length) console.log(`🚚 Delivery rates moved onto colleges — ${moved.join(', ')}`);
     } catch (error) {
       console.error('⚠️  College seed failed (server still starting):', error);
     }

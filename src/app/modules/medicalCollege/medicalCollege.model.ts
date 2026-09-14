@@ -78,6 +78,9 @@ const medicalCollegeSchema = new Schema<IMedicalCollege>(
     division: { type: String, required: true, trim: true },
     district: { type: String, required: true, trim: true },
     area: { type: String, trim: true, default: '' },
+    // See the interface: both drive the per-college delivery charge.
+    upazila: { type: String, trim: true, default: '' },
+    deliveryCharge: { type: Number, default: null, min: 0 },
     established: { type: Number },
     seats: { type: Number, default: null },
     needsReview: { type: Boolean, default: false },

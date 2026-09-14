@@ -43,7 +43,11 @@ export const mongoSettlementDeps: SettlementDeps = {
     return {
       _id: String(doc._id),
       orderNumber: doc.orderNumber,
-      user: String((doc as any).user),
+      // '' for a guest order, which has no account. String(undefined) would be
+      // the text "undefined", and settle() would then look for an order owned
+      // by a user called "undefined" — a cast error that told a guest who had
+      // just paid that the payment failed.
+      user: (doc as any).user ? String((doc as any).user) : '',
       total: doc.total,
       payment: {
         status: (doc.payment?.status as SettlementOrder['payment']['status']) || 'pending',
@@ -54,7 +58,7 @@ export const mongoSettlementDeps: SettlementDeps = {
   },
 
   async settle({ orderId, userId, method, transactionId }) {
-    await OrderService.completePayment(orderId, userId, { method, transactionId });
+    await OrderService.completePayment(orderId, userId || undefined, { method, transactionId });
   },
 
   async markFailed({ orderId, reason }) {

@@ -67,6 +67,11 @@ const upsertOwnerUser = async (input: {
 export interface CouponContext {
   /** Buyer's account id — needed for the per-buyer limit. */
   userId?: unknown;
+  /**
+   * The buyer's mobile number — the per-buyer limit's key for a guest, who has
+   * no account id. Ignored when there is a userId.
+   */
+  phone?: string;
   /** 'cod' | 'manual' | 'sslcommerz' | … — anything not 'cod' is prepaid. */
   paymentMethod?: string | null;
   /** The delivery charge this order would otherwise pay, for freeDelivery. */
@@ -131,12 +136,18 @@ export const evaluateBookCoupon = async (
   }
 
   const perBuyer = Math.max(0, Number(coupon.maxUsesPerBuyer) || 0);
-  if (perBuyer > 0 && ctx.userId) {
+  // A guest is "a buyer" by phone number: the last ten digits, the same key the
+  // order tracker uses, so +880 and 0 spellings of one number count together.
+  const phoneTail = String(ctx.phone || '').replace(/\D/g, '').slice(-10);
+  if (perBuyer > 0 && (ctx.userId || phoneTail.length === 10)) {
     // Counted from the orders, not from a tally on the coupon. A cancelled
     // order should not burn somebody's one use, and the order collection is
     // the only thing that knows which orders those are.
+    const buyerFilter = ctx.userId
+      ? { user: ctx.userId }
+      : { 'shippingAddress.phone': { $regex: new RegExp(`${phoneTail}$`) } };
     const used = await Order.countDocuments({
-      user: ctx.userId,
+      ...buyerFilter,
       couponCode: coupon.code,
       status: { $ne: 'cancelled' },
     });
@@ -204,7 +215,7 @@ export const evaluateBookCoupon = async (
 // real price.
 export const validateCoupon = async (req: Request, res: Response) => {
   try {
-    const { code, amount, paymentMethod, deliveryCharge } = req.body;
+    const { code, amount, paymentMethod, deliveryCharge, phone } = req.body;
     if (!code) return res.status(400).json({ success: false, message: 'Coupon code required' });
 
     // The buyer's own id, so the per-buyer limit is enforced in the preview
@@ -214,7 +225,7 @@ export const validateCoupon = async (req: Request, res: Response) => {
     const { coupon, discountAmount, deliveryDiscount, finalPrice } = await evaluateBookCoupon(
       code,
       amount,
-      { userId: uid(req), paymentMethod, deliveryCharge }
+      { userId: uid(req), phone, paymentMethod, deliveryCharge }
     );
 
     res.json({

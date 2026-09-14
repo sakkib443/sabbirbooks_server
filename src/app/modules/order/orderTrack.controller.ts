@@ -119,7 +119,11 @@ export const trackByPhone = async (req: Request, res: Response) => {
     // Anchored at the end, so 01712345678 and +8801712345678 both match, and a
     // short number cannot match everyone by being a prefix of them.
     const rx = new RegExp(`${tail}$`);
-    const orders = await Order.find({ 'shippingAddress.phone': { $regex: rx } })
+    // Either number the buyer gave. Someone who ordered with their own number
+    // and a parent's as the second will look it up with whichever they have.
+    const orders = await Order.find({
+      $or: [{ 'shippingAddress.phone': { $regex: rx } }, { 'shippingAddress.altPhone': { $regex: rx } }],
+    })
       .select(
         'orderNumber createdAt status deliveryType total items.title items.quantity ' +
           'payment.method payment.status confirmedAt shippedAt deliveredAt cancelledAt courierName trackingCode'

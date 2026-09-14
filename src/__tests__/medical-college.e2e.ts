@@ -64,21 +64,33 @@ async function main() {
     district: after?.district,
   });
 
-  console.log('\n── the row whose name did not extract ──────────');
+  console.log('\n── the Jamalpur row, named by the second PDF ───');
 
+  // The first PDF lost this row's name and it was seeded flagged and hidden.
+  // The second PDF names it, so a fresh seed has no flagged row at all.
   const flagged = await MedicalCollege.find({ needsReview: true }).lean();
-  check('exactly one row is flagged for review', flagged.length === 1, {
-    n: flagged.length,
-  });
-  check('flagged row is hidden from the public list', flagged[0]?.isActive === false);
-  check('flagged row kept its district', flagged[0]?.district === 'জামালপুর', {
-    district: flagged[0]?.district,
-  });
+  check('no row is flagged for review', flagged.length === 0, { n: flagged.length });
+  const jamalpur = await MedicalCollege.findOne({ district: 'জামালপুর', type: 'government' }).lean();
+  check(
+    'Jamalpur Medical College is named, listed and placed',
+    jamalpur?.name === 'Jamalpur Medical College (Sheikh Hasina MC)' &&
+      jamalpur?.isActive === true &&
+      jamalpur?.upazila === 'জামালপুর সদর',
+    { name: jamalpur?.name, upazila: jamalpur?.upazila }
+  );
+  check(
+    'every seeded college has an upazila',
+    (await MedicalCollege.countDocuments({ $or: [{ upazila: '' }, { upazila: { $exists: false } }] })) === 0
+  );
 
   console.log('\n── public list ────────────────────────────────');
 
   const pub = await MedicalCollegeService.listPublic({});
-  check('public list excludes the flagged row', pub.length === 111, { n: pub.length });
+  check('public list has all 112 active colleges', pub.length === 112, { n: pub.length });
+  check(
+    'public list carries the upazila and the delivery rate for checkout',
+    pub.every((c: any) => typeof c.upazila === 'string' && 'deliveryCharge' in c)
+  );
   check(
     'public list never leaks internal fields',
     pub.every((c: any) => c.searchKey === undefined && c.needsReview === undefined)
@@ -97,11 +109,10 @@ async function main() {
   const cased = await MedicalCollegeService.listPublic({ q: 'ARMY MEDICAL' });
   check('search is case-insensitive', cased.length >= 5, { n: cased.length });
 
-  // 36, not 37: the directory holds 37 government colleges but one of them is
-  // the row whose name did not extract, which is seeded inactive and so is
-  // correctly absent from a list meant for the signup dropdown.
+  // All 37: the one government row that used to be seeded inactive (its name
+  // had not extracted) is named and active now.
   const govOnly = await MedicalCollegeService.listPublic({ type: 'government' });
-  check('filters by type, excluding the inactive row', govOnly.length === 36, {
+  check('filters by type', govOnly.length === 37, {
     n: govOnly.length,
   });
   check(
@@ -114,7 +125,19 @@ async function main() {
 
   console.log('\n── admin edit clears the review flag ──────────');
 
-  const fixed = await MedicalCollegeService.update(String(flagged[0]._id), {
+  // A seed no longer produces a flagged row, so make one the way an admin
+  // import or a future bad extraction would.
+  const flaggedRow = await MedicalCollege.create({
+    name: '(নাম যাচাই করুন) জামালপুর — 1999',
+    searchKey: 'jamalpur',
+    type: 'private',
+    division: 'ময়মনসিংহ',
+    district: 'জামালপুর',
+    established: 1999,
+    needsReview: true,
+    isActive: false,
+  });
+  const fixed = await MedicalCollegeService.update(String(flaggedRow._id), {
     name: 'Sheikh Hasina Medical College, Jamalpur',
     isActive: true,
   });

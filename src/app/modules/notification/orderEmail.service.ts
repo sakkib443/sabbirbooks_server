@@ -47,6 +47,9 @@ const tk = (n: any) => '৳' + Number(n || 0).toLocaleString('en-US');
  * Falls back to the order list when an id is somehow missing.
  */
 const trackUrl = (order: any): string => {
+  // A guest has no dashboard to land on. The home page's tracker finds the
+  // order by the phone number it was placed with, no login needed.
+  if (!order?.user) return `${clientUrl()}/#track-order`;
   const base = `${clientUrl()}/dashboard/user/orders`;
   const id = order?._id ? String(order._id) : '';
   return id ? `${base}/${id}` : base;
@@ -65,11 +68,14 @@ const bdDate = (d: any): string => {
   }
 };
 
-// The buyer's email + a name to greet. The shipping address carries the name they
-// typed for this parcel; the email only ever lives on the User record.
+// The buyer's email + a name to greet. The order's own email comes first — it is
+// the one the buyer typed for this order, and the only one a guest has — and the
+// account's email covers orders placed before checkout asked for it.
 const buyerContact = async (order: any): Promise<{ email: string; name: string }> => {
-  const u: any = await User.findById(order?.user).select('email firstName lastName name').lean();
-  const email = (u?.email || '').trim();
+  const u: any = order?.user
+    ? await User.findById(order.user).select('email firstName lastName name').lean()
+    : null;
+  const email = (order?.shippingAddress?.email || u?.email || '').trim();
   const name =
     (order?.shippingAddress?.name || '').trim() ||
     `${u?.firstName || u?.name || ''} ${u?.lastName || ''}`.trim() ||

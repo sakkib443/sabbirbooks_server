@@ -432,8 +432,10 @@ async function main() {
     check(textsFor(RETRY_PHONE).length === 2, 'a third attempt after success still sends nothing');
   }
 
-  console.log('\n── An order with no phone number is skipped, not crashed ──');
+  console.log('\n── A phone number that is not one: refused at checkout, skipped by SMS ──');
   {
+    // Checkout now refuses it outright — with ordering open to guests, the
+    // number is the only way back to the buyer, so it has to be a real one.
     const before = sent.length;
     const r = await api()
       .post('/api/orders')
@@ -445,8 +447,19 @@ async function main() {
         medicalCollegeName: 'Dhaka Medical College',
       });
     await new Promise((r2) => setTimeout(r2, 300));
-    check(r.status === 201, `the order is still placed (${r.status})`);
+    check(r.status === 400, `checkout refuses the order (${r.status})`);
     check(sent.length === before, 'and no garbage went to the gateway');
+
+    // An older order, or one an admin edited, can still hold such a number.
+    // The SMS service must skip it rather than send to it or crash.
+    const legacy = await placeOrder('01799999999', 'cod');
+    await Order.updateOne({ _id: legacy.id }, { $set: { 'shippingAddress.phone': 'not-a-number' } });
+    const doc: any = await Order.findById(legacy.id);
+    const beforeLegacy = sent.length;
+    const { OrderSmsService } = await import('../app/modules/notification/orderSms.service');
+    await OrderSmsService.send(doc, 'confirmed');
+    await new Promise((r2) => setTimeout(r2, 200));
+    check(sent.length === beforeLegacy, 'a stored order with a garbage number is skipped by SMS, not crashed');
   }
 
   restoreConsole();

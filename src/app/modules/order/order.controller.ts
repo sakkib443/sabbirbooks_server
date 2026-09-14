@@ -2,16 +2,24 @@
 import { Request, Response } from 'express';
 import { OrderService } from './order.service';
 
-// CREATE order (auth) — computes prices server-side, returns pending order
+// CREATE order (signed in or guest) — computes prices server-side, returns the
+// pending order plus its access key. The key is in this one response only: it
+// is how a guest's browser pays for the order and reads it back afterwards.
 const createOrder = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
-    const order = await OrderService.createOrder(user._id, req.body);
-    res.status(201).json({ success: true, message: 'Order created', data: order });
+    const order: any = await OrderService.createOrder(user?._id, req.body);
+    const data = order.toJSON();
+    delete data.accessKeyHash;
+    data.accessKey = order.$locals?.accessKey;
+    res.status(201).json({ success: true, message: 'Order created', data });
   } catch (error: any) {
     res.status(400).json({ success: false, message: error.message });
   }
 };
+
+/** The access key a guest's browser sends back — see OrderService.accessKeyMatches. */
+const orderKey = (req: Request): string | undefined => req.header('x-order-key') || undefined;
 
 // DELETE one order (owner accounts only) — permanent, and puts any stock this
 // order had taken back on the shelf. See OrderService.deleteOrder.
@@ -98,11 +106,11 @@ const getMyOrders = async (req: Request, res: Response) => {
   }
 };
 
-// GET single order (auth owner or admin)
+// GET single order (owner, admin, or the holder of the order's access key)
 const getOrderById = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
-    const order = await OrderService.getOrderById(req.params.id, user);
+    const order = await OrderService.getOrderById(req.params.id, user, orderKey(req));
     res.status(200).json({ success: true, data: order });
   } catch (error: any) {
     const code = error.message?.includes('not allowed') ? 403 : 404;
@@ -143,22 +151,28 @@ const updateOrderStatus = async (req: Request, res: Response) => {
   }
 };
 
-// POST pay via bKash (auth)
+// POST pay via bKash (owner or access key)
 const payWithBkash = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
-    const result = await OrderService.payWithBkash(req.params.id, user._id);
+    const result = await OrderService.payWithBkash(req.params.id, {
+      userId: user?._id,
+      accessKey: orderKey(req),
+    });
     res.status(200).json({ success: true, message: 'bKash payment initiated', data: result });
   } catch (error: any) {
     res.status(400).json({ success: false, message: error.message });
   }
 };
 
-// POST pay via SSLCommerz (auth)
+// POST pay via SSLCommerz (owner or access key)
 const payWithSslcommerz = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
-    const result = await OrderService.payWithSslcommerz(req.params.id, user._id);
+    const result = await OrderService.payWithSslcommerz(req.params.id, {
+      userId: user?._id,
+      accessKey: orderKey(req),
+    });
     res.status(200).json({ success: true, message: 'SSLCommerz session initiated', data: result });
   } catch (error: any) {
     res.status(400).json({ success: false, message: error.message });
@@ -169,7 +183,7 @@ const payWithSslcommerz = async (req: Request, res: Response) => {
 const completePayment = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
-    const order = await OrderService.completePayment(req.params.id, user._id, req.body);
+    const order = await OrderService.completePayment(req.params.id, user?._id, req.body);
     res.status(200).json({ success: true, message: 'Payment completed', data: order });
   } catch (error: any) {
     res.status(400).json({ success: false, message: error.message });

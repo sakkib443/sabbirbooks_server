@@ -27,6 +27,20 @@ export interface IMedicalCollege {
   district: string;
   /** Upazila or neighbourhood, as printed in the source list. */
   area?: string;
+  /**
+   * The upazila or city thana the campus stands in, spelt exactly as the
+   * storefront's address list spells it (sabbirbooks/src/components/checkout/
+   * bdGeoData.ts). It is half of the test for the college's own delivery
+   * charge — see collegeRateApplies in order.service — so a spelling that list
+   * does not have quietly switches that rate off.
+   */
+  upazila?: string;
+  /**
+   * What delivery costs, in taka, when a parcel goes to this college's own
+   * district AND upazila. null = no special rate; the standard charge applies.
+   * 0 = free, with no cash-on-delivery surcharge either.
+   */
+  deliveryCharge?: number | null;
   established?: number;
   seats?: number | null;
   /**

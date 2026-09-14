@@ -90,6 +90,12 @@ const settingsSchema = new Schema<ISiteSettings>(
         freeDeliveryAbove: { type: Number, default: 0 },
         // Extra fee some sellers add for collecting cash. 0 = no surcharge.
         codExtraCharge: { type: Number, default: 0 },
+        // When the two Khulna rules above (freeDeliveryCollege, localDelivery*)
+        // were copied onto the college rows as per-college rates. Set once by
+        // MedicalCollegeService.migrateLegacyDeliveryRates; after that the
+        // colleges are the only source of a special rate, and this stamp stops
+        // a later deploy from re-applying one the admin has cleared.
+        collegeDeliveryMigratedAt: { type: Date },
 
         // Shown on the checkout page and the order confirmation.
         deliveryNote: {

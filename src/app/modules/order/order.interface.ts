@@ -80,7 +80,40 @@ export interface IShippingAddress {
   // city field and the notification address line stay populated without a
   // separate free-text town; this holds the same value under its real name.
   upazila?: string;
+  /**
+   * A second number the courier can try. Optional; stored normalised
+   * (01XXXXXXXXX) like `phone`, and searched by the public order tracker too.
+   */
+  altPhone?: string;
+  /**
+   * The buyer's email for THIS order. Optional, and the only email a buyer
+   * without an account has — order emails go here first, then to the account.
+   */
+  email?: string;
   note?: string;
+}
+
+/**
+ * Which rule priced the delivery row, recorded so the admin can see why an
+ * order paid what it paid:
+ *   digital    nothing ships
+ *   free-above the order crossed the free-delivery threshold
+ *   college    the college's own rate — parcel going to its district + upazila
+ *   standard   the shop's normal charge
+ */
+export type TDeliveryRule = 'digital' | 'free-above' | 'college' | 'standard';
+
+/**
+ * The buyer's medical college, as it was when they ordered. Every order carries
+ * one (a guest has no profile to look it up on later), and the district and
+ * upazila are kept because they are what the delivery rate was matched on.
+ */
+export interface IOrderCollege {
+  /** The directory row, when the buyer picked a listed college. */
+  college?: Types.ObjectId;
+  name: string;
+  district?: string;
+  upazila?: string;
 }
 
 export interface IOrder {
@@ -89,7 +122,21 @@ export interface IOrder {
   // from an atomic counter at create time; existing rows are numbered by a
   // one-time backfill (createdAt order). Optional so pre-backfill rows still type.
   orderSeq?: number;
-  user: Types.ObjectId;
+  /**
+   * The buyer's account — absent for a guest order. Ordering no longer needs an
+   * account: book access comes from the code printed in the book, not from the
+   * order, so the order only has to reach the right person, which the phone
+   * number and address already do.
+   */
+  user?: Types.ObjectId;
+  college?: IOrderCollege;
+  deliveryRule?: TDeliveryRule;
+  /**
+   * sha256 of the order's access key. The key itself goes to the buyer once, in
+   * the create response, and is what lets a buyer without an account pay for
+   * and look at their own order. select:false — never sent back out.
+   */
+  accessKeyHash?: string;
   items: IOrderItem[];
   deliveryType: TDeliveryType;
   shippingAddress?: IShippingAddress;
