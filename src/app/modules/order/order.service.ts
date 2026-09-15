@@ -1439,6 +1439,11 @@ const bdMidnightUtc = (y: number, m: number, d: number) =>
  *   UPCOMING  sold but not yet collected — value minus earned. What is still
  *             out with couriers and buyers.
  *
+ * Each of those is also split in two, because an order's total carries the
+ * delivery charge and the shop wants to see its book sales without it:
+ * `delivery` is the charge on its own and `books` is the rest. `copies` counts
+ * the books themselves, and `byBook` breaks the period down by title.
+ *
  * Cancelled orders are excluded everywhere: they are not a sale.
  *
  * The caller may pass a date range (from/to, ISO days in BD time). Without one
@@ -1477,20 +1482,30 @@ const getBookOrderStats = async (opts?: {
   const live = { status: { $ne: 'cancelled' } };
   // Money in hand: delivered, or already paid (which is every successful
   // online payment, and a COD order once it was handed over).
-  const earnedWhen = {
-    $cond: [
-      { $or: [{ $eq: ['$status', 'delivered'] }, { $eq: ['$payment.status', 'paid'] }] },
-      '$total',
-      0,
-    ],
+  const isEarned = { $or: [{ $eq: ['$status', 'delivered'] }, { $eq: ['$payment.status', 'paid'] }] };
+  // An order's total is what its books sold for (after offers and coupons) plus
+  // the delivery charge, and the delivery charge is the courier's money passing
+  // through — so every figure below is also kept with the delivery charge taken
+  // out. Orders from before the field existed count as no delivery charge.
+  const deliveryOf = { $ifNull: ['$deliveryCharge', 0] };
+  // Copies, not lines: one line of three books is three books.
+  const copiesOf = {
+    $reduce: {
+      input: { $ifNull: ['$items', []] },
+      initialValue: 0,
+      in: { $add: ['$$value', { $ifNull: ['$$this.quantity', 1] }] },
+    },
   };
   const moneyGroup = {
     orders: { $sum: 1 },
+    copies: { $sum: copiesOf },
     value: { $sum: '$total' },
-    earned: { $sum: earnedWhen },
+    earned: { $sum: { $cond: [isEarned, '$total', 0] } },
+    delivery: { $sum: deliveryOf },
+    earnedDelivery: { $sum: { $cond: [isEarned, deliveryOf, 0] } },
   };
 
-  const [totalsAgg, todayAgg, newOrders, dailyAgg, statusAgg, methodAgg, couponsAgg] =
+  const [totalsAgg, todayAgg, newOrders, dailyAgg, statusAgg, methodAgg, couponsAgg, bookAgg] =
     await Promise.all([
       Order.aggregate([{ $match: live }, { $group: { _id: null, ...moneyGroup } }]),
       Order.aggregate([
@@ -1511,7 +1526,15 @@ const getBookOrderStats = async (opts?: {
       ]),
       Order.aggregate([
         { $match: { createdAt: { $gte: rangeStart, $lt: rangeEnd } } },
-        { $group: { _id: '$status', orders: { $sum: 1 }, value: { $sum: '$total' } } },
+        {
+          $group: {
+            _id: '$status',
+            orders: { $sum: 1 },
+            copies: { $sum: copiesOf },
+            value: { $sum: '$total' },
+            delivery: { $sum: deliveryOf },
+          },
+        },
       ]),
       Order.aggregate([
         { $match: { ...live, createdAt: { $gte: rangeStart, $lt: rangeEnd } } },
@@ -1519,7 +1542,9 @@ const getBookOrderStats = async (opts?: {
           $group: {
             _id: { $ifNull: ['$payment.method', 'unpaid'] },
             orders: { $sum: 1 },
+            copies: { $sum: copiesOf },
             value: { $sum: '$total' },
+            delivery: { $sum: deliveryOf },
           },
         },
       ]),
@@ -1534,16 +1559,89 @@ const getBookOrderStats = async (opts?: {
           },
         },
       ]),
+      // Each title in the period: how many copies, and what they sold for. An
+      // order's discount (offers + coupon) belongs to the whole order, so its
+      // book money is shared across its lines by list price — with one title
+      // per order, which is nearly every order, that is simply the order's.
+      Order.aggregate([
+        { $match: { ...live, createdAt: { $gte: rangeStart, $lt: rangeEnd } } },
+        {
+          $project: {
+            createdAt: 1,
+            items: 1,
+            bookMoney: { $subtract: ['$total', deliveryOf] },
+            lines: { $size: { $ifNull: ['$items', []] } },
+            listTotal: {
+              $reduce: {
+                input: { $ifNull: ['$items', []] },
+                initialValue: 0,
+                in: {
+                  $add: [
+                    '$$value',
+                    { $multiply: [{ $ifNull: ['$$this.price', 0] }, { $ifNull: ['$$this.quantity', 1] }] },
+                  ],
+                },
+              },
+            },
+          },
+        },
+        { $unwind: '$items' },
+        { $sort: { createdAt: 1 } },
+        {
+          $group: {
+            _id: '$items.book',
+            // The title as the most recent order spelt it.
+            title: { $last: '$items.title' },
+            copies: { $sum: { $ifNull: ['$items.quantity', 1] } },
+            orderIds: { $addToSet: '$_id' },
+            sales: {
+              $sum: {
+                $cond: [
+                  { $gt: ['$listTotal', 0] },
+                  {
+                    $multiply: [
+                      '$bookMoney',
+                      {
+                        $divide: [
+                          { $multiply: [{ $ifNull: ['$items.price', 0] }, { $ifNull: ['$items.quantity', 1] }] },
+                          '$listTotal',
+                        ],
+                      },
+                    ],
+                  },
+                  { $divide: ['$bookMoney', { $max: ['$lines', 1] }] },
+                ],
+              },
+            },
+          },
+        },
+        {
+          $project: {
+            _id: 0,
+            book: '$_id',
+            title: 1,
+            copies: 1,
+            orders: { $size: '$orderIds' },
+            sales: { $round: ['$sales', 0] },
+          },
+        },
+        { $sort: { copies: -1, sales: -1 } },
+      ]),
     ]);
 
+  type MoneyRow = {
+    orders: number;
+    copies: number;
+    value: number;
+    earned: number;
+    delivery: number;
+    earnedDelivery: number;
+  };
+  const ZERO: MoneyRow = { orders: 0, copies: 0, value: 0, earned: 0, delivery: 0, earnedDelivery: 0 };
+
   // Fill every day in the window, so the chart has no gaps to interpolate over.
-  const byDay = new Map(
-    (dailyAgg as Array<{ _id: string; orders: number; value: number; earned: number }>).map((r) => [
-      r._id,
-      r,
-    ])
-  );
-  const daily: Array<{ date: string; day: number; orders: number; value: number; earned: number }> = [];
+  const byDay = new Map((dailyAgg as Array<MoneyRow & { _id: string }>).map((r) => [r._id, r]));
+  const daily: Array<MoneyRow & { date: string; day: number }> = [];
   for (let t = rangeStart.getTime(); t < rangeEnd.getTime(); t += 24 * 60 * 60 * 1000) {
     const d = new Date(t);
     const key = d.toISOString().slice(0, 10);
@@ -1552,44 +1650,81 @@ const getBookOrderStats = async (opts?: {
       date: key,
       day: d.getUTCDate(),
       orders: row?.orders ?? 0,
+      copies: row?.copies ?? 0,
       value: row?.value ?? 0,
       earned: row?.earned ?? 0,
+      delivery: row?.delivery ?? 0,
+      earnedDelivery: row?.earnedDelivery ?? 0,
     });
   }
 
-  const money = (agg: Array<{ orders: number; value: number; earned: number }>) => {
-    const a = agg[0];
-    const value = a?.value ?? 0;
-    const earned = a?.earned ?? 0;
-    return { orders: a?.orders ?? 0, value, earned, upcoming: Math.max(0, value - earned) };
+  /**
+   * One bucket of money, three ways:
+   *   value / earned / upcoming   with the delivery charge — what buyers pay
+   *   delivery.{…}                the delivery charge on its own
+   *   books.{…}                   the books on their own (value − delivery)
+   * `copies` is how many books those orders hold.
+   */
+  const money = (a: MoneyRow = ZERO) => {
+    const upcoming = Math.max(0, a.value - a.earned);
+    const bookValue = a.value - a.delivery;
+    const bookEarned = a.earned - a.earnedDelivery;
+    return {
+      orders: a.orders,
+      copies: a.copies,
+      value: a.value,
+      earned: a.earned,
+      upcoming,
+      delivery: {
+        value: a.delivery,
+        earned: a.earnedDelivery,
+        upcoming: Math.max(0, a.delivery - a.earnedDelivery),
+      },
+      books: {
+        value: bookValue,
+        earned: bookEarned,
+        upcoming: Math.max(0, bookValue - bookEarned),
+      },
+    };
   };
 
-  const rangeTotals = daily.reduce(
-    (t, d) => ({ orders: t.orders + d.orders, value: t.value + d.value, earned: t.earned + d.earned }),
-    { orders: 0, value: 0, earned: 0 }
+  const rangeTotals = daily.reduce<MoneyRow>(
+    (t, d) => ({
+      orders: t.orders + d.orders,
+      copies: t.copies + d.copies,
+      value: t.value + d.value,
+      earned: t.earned + d.earned,
+      delivery: t.delivery + d.delivery,
+      earnedDelivery: t.earnedDelivery + d.earnedDelivery,
+    }),
+    { ...ZERO }
   );
+
+  type SplitRow = { _id: string; orders: number; copies: number; value: number; delivery: number };
+  const splitRows = (rows: SplitRow[]) =>
+    rows.reduce(
+      (acc, r) => ({
+        ...acc,
+        [r._id]: { orders: r.orders, copies: r.copies, value: r.value, delivery: r.delivery },
+      }),
+      {} as Record<string, { orders: number; copies: number; value: number; delivery: number }>
+    );
 
   const c = (couponsAgg as Array<{ orders: number; discount: number; payout: number }>)[0];
 
   return {
     newOrders,
-    today: money(todayAgg),
-    totals: money(totalsAgg),
+    today: money((todayAgg as MoneyRow[])[0]),
+    totals: money((totalsAgg as MoneyRow[])[0]),
     range: {
       from: rangeStart.toISOString().slice(0, 10),
       to: new Date(rangeEnd.getTime() - 1).toISOString().slice(0, 10),
-      ...rangeTotals,
-      upcoming: Math.max(0, rangeTotals.value - rangeTotals.earned),
+      ...money(rangeTotals),
       daily,
     },
-    byStatus: (statusAgg as Array<{ _id: string; orders: number; value: number }>).reduce(
-      (acc, r) => ({ ...acc, [r._id]: { orders: r.orders, value: r.value } }),
-      {} as Record<string, { orders: number; value: number }>
-    ),
-    byMethod: (methodAgg as Array<{ _id: string; orders: number; value: number }>).reduce(
-      (acc, r) => ({ ...acc, [r._id]: { orders: r.orders, value: r.value } }),
-      {} as Record<string, { orders: number; value: number }>
-    ),
+    byStatus: splitRows(statusAgg as SplitRow[]),
+    byMethod: splitRows(methodAgg as SplitRow[]),
+    byBook: bookAgg as Array<{ book: string; title: string; copies: number; orders: number; sales: number }>,
     coupons: { orders: c?.orders ?? 0, discount: c?.discount ?? 0, payout: c?.payout ?? 0 },
   };
 };
