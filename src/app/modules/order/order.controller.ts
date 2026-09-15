@@ -121,11 +121,13 @@ const getOrderById = async (req: Request, res: Response) => {
 // GET all orders (admin, paginated + status filter)
 const getAllOrders = async (req: Request, res: Response) => {
   try {
-    const { status, page, limit } = req.query;
+    const { status, page, limit, from, to } = req.query;
     const result = await OrderService.getAllOrders({
       status: status as string,
       page: page ? Number(page) : 1,
       limit: limit ? Number(limit) : 20,
+      from: from as string | undefined,
+      to: to as string | undefined,
     });
     res.status(200).json({
       success: true,
@@ -133,7 +135,8 @@ const getAllOrders = async (req: Request, res: Response) => {
       meta: { total: result.total, page: result.page, totalPages: result.totalPages },
     });
   } catch (error: any) {
-    res.status(500).json({ success: false, message: error.message });
+    const code = error.message === 'Invalid date range' ? 400 : 500;
+    res.status(code).json({ success: false, message: error.message });
   }
 };
 

@@ -692,10 +692,24 @@ const getAllOrders = async (query?: {
   status?: string;
   page?: number;
   limit?: number;
+  from?: string;
+  to?: string;
 }): Promise<{ orders: IOrder[]; total: number; page: number; totalPages: number }> => {
-  const { status, page = 1, limit = 20 } = query || {};
+  const { status, page = 1, limit = 20, from, to } = query || {};
   const filter: any = {};
   if (status && status !== 'all') filter.status = status;
+
+  // When the order was placed: from (inclusive) up to `to` (exclusive), as exact
+  // instants. The caller decides what a "day" is — the Book Orders screen counts
+  // 3 PM to 3 PM Bangladesh time — so no one screen's calendar is baked in here.
+  const since = from ? new Date(from) : null;
+  const until = to ? new Date(to) : null;
+  if ((since && Number.isNaN(since.getTime())) || (until && Number.isNaN(until.getTime()))) {
+    throw new Error('Invalid date range');
+  }
+  if (since || until) {
+    filter.createdAt = { ...(since ? { $gte: since } : {}), ...(until ? { $lt: until } : {}) };
+  }
 
   const total = await Order.countDocuments(filter);
   // Populate the buyer so the admin view can show who placed the order — needed
