@@ -3,9 +3,9 @@
  * The admin order list, narrowed to a time window
  * (isolated in-memory MongoDB, real Express app via supertest; never the live DB).
  *
- * The Book Orders screen counts a day from 3 PM to 3 PM Bangladesh time and
- * sends the exact instants: "16 Sep" is 15 Sep 15:00 BD (09:00Z) up to
- * 16 Sep 15:00 BD (09:00Z). The start is included, the end is not.
+ * The Book Orders screen counts a day from noon to noon Bangladesh time and
+ * sends the exact instants: "16 Sep" is 15 Sep 12:00 BD (06:00Z) up to
+ * 16 Sep 12:00 BD (06:00Z). The start is included, the end is not.
  *
  * Run:  npx ts-node --transpile-only src/__tests__/order-list-dates.e2e.ts
  */
@@ -50,14 +50,14 @@ async function main() {
     await Order.collection.updateOne({ _id: o._id }, { $set: { createdAt: new Date(iso) } });
   };
 
-  // 15 Sep 14:59:59 BD — the last second of the 15 Sep day.
-  await placedAt('A', '2026-09-15T08:59:59.000Z');
-  // 15 Sep 15:00:00 BD — the first second of the 16 Sep day.
-  await placedAt('B', '2026-09-15T09:00:00.000Z', 'delivered');
-  // 16 Sep 14:59:59 BD — still the 16 Sep day.
-  await placedAt('C', '2026-09-16T08:59:59.000Z');
-  // 16 Sep 15:00:00 BD — already the 17 Sep day.
-  await placedAt('D', '2026-09-16T09:00:00.000Z');
+  // 15 Sep 11:59:59 BD — the last second of the 15 Sep day.
+  await placedAt('A', '2026-09-15T05:59:59.000Z');
+  // 15 Sep 12:00:00 BD — the first second of the 16 Sep day.
+  await placedAt('B', '2026-09-15T06:00:00.000Z', 'delivered');
+  // 16 Sep 11:59:59 BD — still the 16 Sep day.
+  await placedAt('C', '2026-09-16T05:59:59.000Z');
+  // 16 Sep 12:00:00 BD — already the 17 Sep day.
+  await placedAt('D', '2026-09-16T06:00:00.000Z');
 
   await api().post('/api/auth/register').send({
     firstName: 'A', lastName: 'B', email: 'admin@t.com', password: 'pass1234', whatsappNumber: '01712345678',
@@ -73,13 +73,13 @@ async function main() {
     return { status: r.status, names, total: r.body?.meta?.total, message: r.body?.message };
   };
 
-  const DAY16_FROM = '2026-09-15T09:00:00.000Z';
-  const DAY16_TO = '2026-09-16T09:00:00.000Z';
+  const DAY16_FROM = '2026-09-15T06:00:00.000Z';
+  const DAY16_TO = '2026-09-16T06:00:00.000Z';
 
-  console.log('\n── One 3 PM → 3 PM day ──');
+  console.log('\n── One noon → noon day ──');
   {
     const r = await list(`&from=${DAY16_FROM}&to=${DAY16_TO}`);
-    check(r.status === 200 && r.names === 'BC', `"16 Sep" holds B (15 Sep 3:00 PM) and C (16 Sep 2:59 PM) — not A or D (got ${r.names})`, r);
+    check(r.status === 200 && r.names === 'BC', `"16 Sep" holds B (15 Sep 12:00 PM) and C (16 Sep 11:59 AM) — not A or D (got ${r.names})`, r);
     check(r.total === 2, `meta.total counts the window, not every order (${r.total})`);
   }
 

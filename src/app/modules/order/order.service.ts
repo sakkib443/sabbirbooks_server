@@ -701,7 +701,7 @@ const getAllOrders = async (query?: {
 
   // When the order was placed: from (inclusive) up to `to` (exclusive), as exact
   // instants. The caller decides what a "day" is — the Book Orders screen counts
-  // 3 PM to 3 PM Bangladesh time — so no one screen's calendar is baked in here.
+  // noon to noon Bangladesh time — so no one screen's calendar is baked in here.
   const since = from ? new Date(from) : null;
   const until = to ? new Date(to) : null;
   if ((since && Number.isNaN(since.getTime())) || (until && Number.isNaN(until.getTime()))) {
