@@ -699,16 +699,22 @@ const getAllOrders = async (query?: {
   const filter: any = {};
   if (status && status !== 'all') filter.status = status;
 
-  // When the order was placed: from (inclusive) up to `to` (exclusive), as exact
-  // instants. The caller decides what a "day" is — the Book Orders screen counts
-  // noon to noon Bangladesh time — so no one screen's calendar is baked in here.
+  // Which day the order belongs to: from (inclusive) up to `to` (exclusive), as
+  // exact instants. The caller decides what a "day" is — the Book Orders screen
+  // counts noon to noon Bangladesh time — so no one screen's calendar is baked
+  // in here.
   const since = from ? new Date(from) : null;
   const until = to ? new Date(to) : null;
   if ((since && Number.isNaN(since.getTime())) || (until && Number.isNaN(until.getTime()))) {
     throw new Error('Invalid date range');
   }
   if (since || until) {
-    filter.createdAt = { ...(since ? { $gte: since } : {}), ...(until ? { $lt: until } : {}) };
+    const window = { ...(since ? { $gte: since } : {}), ...(until ? { $lt: until } : {}) };
+    // An order the admin moved to another day answers on THAT day and no
+    // longer on the day it was placed — that is the whole point of moving it.
+    // `dispatchDate: null` also matches every order stored before the field
+    // existed, which is what keeps the untouched ones on their order date.
+    filter.$or = [{ dispatchDate: window }, { dispatchDate: null, createdAt: window }];
   }
 
   const total = await Order.countDocuments(filter);
@@ -741,7 +747,13 @@ const getAllOrders = async (query?: {
 const updateOrderStatus = async (
   id: string,
   status: string,
-  extra?: { courierName?: string; trackingCode?: string; adminNote?: string }
+  extra?: {
+    courierName?: string;
+    trackingCode?: string;
+    /** The courier's tracking page — what the shipped SMS links to. */
+    trackingUrl?: string;
+    adminNote?: string;
+  }
 ): Promise<IOrder> => {
   if (!isValidObjectId(id)) throw new Error('Invalid order id');
   const order: any = await Order.findById(id);
@@ -754,6 +766,10 @@ const updateOrderStatus = async (
 
   if (extra?.courierName !== undefined) order.courierName = extra.courierName;
   if (extra?.trackingCode !== undefined) order.trackingCode = extra.trackingCode;
+  // Set BEFORE the switch below, because moving to 'shipped' sends the text
+  // that carries this link. Written a moment later and the buyer gets a
+  // shipping notice with nothing to press.
+  if (extra?.trackingUrl !== undefined) order.trackingUrl = extra.trackingUrl;
   if (extra?.adminNote !== undefined) order.adminNote = extra.adminNote;
 
   switch (status) {
@@ -826,12 +842,12 @@ const updateOrderStatus = async (
   // Confirmed for the first time (e.g. an admin confirming a pending COD order) →
   // the "order confirmed" email. Not on cancellation, and not again once already
   // confirmed. Fire-and-forget; a no-op until SMTP credentials are set.
+  // No text goes out here any more. The buyer was told "কনফার্ম হয়েছে" the
+  // moment they ordered, so a second one when an admin presses Confirm says
+  // nothing new — the shop asked for it to stop (20 Sep 2026). The email
+  // stays: it is free and it carries the whole receipt.
   if (!wasConfirmed && order.confirmedAt && order.status !== 'cancelled') {
     void OrderEmailService.sendOrderConfirmedEmail(order);
-    // The COD buyer's second text: what to have ready when the rider knocks.
-    // A prepaid order was confirmed by its own payment, and shouldSend keeps
-    // this quiet for it.
-    void OrderSmsService.send(order, 'confirmed');
   }
 
   // Handed to the courier.
@@ -892,19 +908,51 @@ const deleteOrder = async (id: string): Promise<void> => {
  */
 const updateOrdersStatus = async (
   ids: string[],
-  status: string
+  status: string,
+  // One courier, one consignment, one tracking link: marking a college's whole
+  // batch shipped is exactly when the same link belongs on all of them.
+  extra?: { courierName?: string; trackingCode?: string; trackingUrl?: string }
 ): Promise<{ updated: number; failed: number }> => {
   let updated = 0;
   let failed = 0;
   for (const id of ids || []) {
     try {
-      await updateOrderStatus(id, status);
+      await updateOrderStatus(id, status, extra);
       updated += 1;
     } catch {
       failed += 1;
     }
   }
   return { updated, failed };
+};
+
+/**
+ * Move orders to another day — or back to the day they were placed.
+ *
+ * The shop sends a college's orders out together: three days of Cumilla orders
+ * leave on the 21st, so they have to appear in the 21st's packing list and
+ * disappear from the 19th's and the 20th's. That is all this does. The status
+ * does not move, no stock is touched and the buyer is told nothing — it is
+ * bookkeeping about WHEN a parcel goes, not a step in fulfilment, and an admin
+ * who also wants the orders marked shipped presses that separately.
+ *
+ * `date` is the instant the chosen shop-day starts; the caller owns the
+ * noon-to-noon rule. Null puts the orders back on the day they were placed.
+ *
+ * Reports how many orders it addressed rather than how many documents Mongo
+ * actually rewrote: re-applying the date an order already has changes no
+ * document, and "0 orders moved" would read as a failure when the orders are
+ * exactly where the admin asked for them.
+ */
+const setOrdersDispatchDate = async (
+  ids: string[],
+  date: Date | null
+): Promise<{ updated: number }> => {
+  const valid = (ids || []).filter((id) => isValidObjectId(id));
+  if (valid.length === 0) return { updated: 0 };
+  if (date && Number.isNaN(date.getTime())) throw new Error('Invalid date');
+  const res = await Order.updateMany({ _id: { $in: valid } }, { $set: { dispatchDate: date } });
+  return { updated: res.matchedCount ?? 0 };
 };
 
 /** Bulk version of the above — one pass, and it reports what actually went. */
@@ -1285,6 +1333,11 @@ const adminUpdateOrder = async (
     };
     buyer?: { email?: string; phoneNumber?: string; whatsappNumber?: string };
     adminNote?: string;
+    // The courier's own fields, correctable after the fact: a link pasted with
+    // a typo is otherwise only fixable by walking the order back to 'shipped'.
+    courierName?: string;
+    trackingCode?: string;
+    trackingUrl?: string;
   }
 ): Promise<IOrder> => {
   if (!isValidObjectId(id)) throw new Error('Invalid order id');
@@ -1333,6 +1386,11 @@ const adminUpdateOrder = async (
   }
 
   if (body.adminNote !== undefined) order.adminNote = body.adminNote;
+  if (body.courierName !== undefined) order.courierName = body.courierName;
+  if (body.trackingCode !== undefined) order.trackingCode = body.trackingCode;
+  // Correcting the link does NOT re-send the shipping text: the buyer already
+  // had one, and OrderSmsService only fires on a status transition.
+  if (body.trackingUrl !== undefined) order.trackingUrl = body.trackingUrl;
 
   // A guest order has no account for the buyer fields to land on, so the email
   // goes onto the order itself — where the order emails look first anyway.
@@ -1764,5 +1822,6 @@ export const OrderService = {
   deleteOrder,
   deleteOrders,
   updateOrdersStatus,
+  setOrdersDispatchDate,
   adminUpdateOrder,
 };

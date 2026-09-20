@@ -3,6 +3,7 @@ import { z } from 'zod';
 const body = z.object({
   name: z.string().min(2, 'College name is required'),
   type: z.enum(['government', 'private', 'army']),
+  university: z.string().max(120).optional(),
   division: z.string().min(1, 'Division is required'),
   district: z.string().min(1, 'District is required'),
   area: z.string().optional(),

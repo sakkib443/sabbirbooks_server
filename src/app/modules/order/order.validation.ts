@@ -58,6 +58,11 @@ export const updateOrderStatusValidationSchema = z.object({
     // Optional courier details captured at the same time as "shipped".
     courierName: z.string().optional(),
     trackingCode: z.string().optional(),
+    // The courier's tracking page. Not z.string().url(): couriers hand out
+    // links in every shape, including bare "steadfast.com.bd/t/ABC123", and a
+    // shipping notice that fails validation over a missing scheme helps
+    // nobody. The SMS builder is what makes it pressable.
+    trackingUrl: z.string().optional(),
     adminNote: z.string().optional(),
   }),
 });

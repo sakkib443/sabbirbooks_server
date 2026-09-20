@@ -180,7 +180,9 @@ const listPublic = async (query: { q?: string; type?: string; district?: string 
   return MedicalCollege.find(filter)
     // abbreviation ships with the list because the ambassador form previews the
     // coupon code as the applicant types — one payload, no request per keystroke.
-    .select('name type division district area upazila deliveryCharge abbreviation')
+    // university rides along for the order list, which groups its per-college
+    // PDFs by it. One more short string on a 112-row payload.
+    .select('name type university division district area upazila deliveryCharge abbreviation')
     .sort({ type: 1, name: 1 })
     .lean();
 };

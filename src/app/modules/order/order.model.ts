@@ -166,7 +166,29 @@ const orderSchema = new Schema<IOrder>(
     cancelledAt: { type: Date },
     courierName: { type: String, trim: true },
     trackingCode: { type: String, trim: true },
+    // The courier's own tracking page for this parcel. Kept apart from
+    // `trackingCode` because it is the thing a buyer can actually press: the
+    // shipped SMS carries it, and a code without a link is a code nobody looks
+    // up. Stored exactly as the courier hands it over.
+    trackingUrl: { type: String, trim: true },
     adminNote: { type: String, trim: true },
+
+    // The day this order counts as going out, when that is NOT the day it was
+    // placed.
+    //
+    // The shop batches a college's orders: three days of Cumilla orders leave
+    // together on the 21st. Those orders were placed on the 19th and 20th, so
+    // the packing list for the 21st has to contain them and the lists for the
+    // 19th and 20th must not — which is exactly what the admin means by
+    // "change the delivery date". Null (and missing, on every order that
+    // predates this field) means the order still counts on the day it was
+    // placed.
+    //
+    // A date-time rather than a "2026-09-21" string: the shop's day runs noon
+    // → noon Bangladesh time, so a bare date would have to be re-interpreted
+    // on every read. The API stores the chosen day's window start, and the
+    // list filter compares it exactly as it compares createdAt.
+    dispatchDate: { type: Date, default: null },
   },
   { timestamps: true }
 );
@@ -175,5 +197,8 @@ orderSchema.index({ user: 1, createdAt: -1 });
 orderSchema.index({ status: 1 });
 // The admin orders page filters by payment method (COD queue vs. wallet queue).
 orderSchema.index({ 'payment.method': 1, 'payment.status': 1 });
+// The day filter reads dispatchDate first and falls back to createdAt, so both
+// halves of that OR need an index or a date-filtered page scans the collection.
+orderSchema.index({ dispatchDate: 1, createdAt: -1 });
 
 export const Order = model<IOrder>('Order', orderSchema);

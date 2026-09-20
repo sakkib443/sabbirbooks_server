@@ -42,7 +42,7 @@ import { User } from '../user/user.model';
 import { SmsService } from './sms.service';
 import { SmsMessage, OrderSmsInput } from './sms.message';
 
-export type OrderSmsEvent = 'placed' | 'paid' | 'confirmed' | 'shipped' | 'delivered';
+export type OrderSmsEvent = 'placed' | 'paid' | 'shipped' | 'delivered';
 
 /**
  * The buyer's mobile number.
@@ -81,12 +81,14 @@ const buildInput = (order: any): OrderSmsInput => ({
   orderNumber: order?.orderNumber || String(order?._id || ''),
   total: Number(order?.total) || 0,
   paymentMethod: order?.payment?.method ?? null,
+  // Read here rather than passed in, so whichever path marks an order shipped
+  // sends the link that is actually on the order at that moment.
+  trackingUrl: order?.trackingUrl || null,
 });
 
 const TEXT: Record<OrderSmsEvent, (i: OrderSmsInput) => string> = {
   placed: SmsMessage.orderPlaced,
   paid: SmsMessage.paymentReceived,
-  confirmed: SmsMessage.orderConfirmed,
   shipped: SmsMessage.orderShipped,
   delivered: SmsMessage.orderDelivered,
 };
@@ -115,10 +117,15 @@ const shouldSend = (event: OrderSmsEvent, order: any): boolean => {
   if (order?.status === 'cancelled') return false;
 
   // The two paths are exclusive on purpose: a prepaid buyer's 'paid' text
-  // already says "your order is confirmed", so sending them 'placed' and
-  // 'confirmed' as well would be three texts saying one thing.
+  // already says "your order is confirmed", so sending them 'placed' as well
+  // would be two texts saying one thing.
+  //
+  // 'placed' stays COD-only for the same reason it always was. An order on its
+  // way to a hosted payment page is not real yet — most of those are closed
+  // unpaid and swept away 90 minutes later — and "আপনার অর্ডার কনফার্ম হয়েছে"
+  // is a worse thing to send to that buyer than it ever was to send
+  // "received".
   if (event === 'placed') return cod;
-  if (event === 'confirmed') return cod;
   if (event === 'paid') return !cod;
   // Shipped goes to everybody. It is not about money — it is "be reachable,
   // the courier is coming", and a prepaid buyer needs that as much as a COD

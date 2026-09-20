@@ -23,6 +23,8 @@ export interface IMedicalCollege {
   abbreviation?: string;
   abbreviationSource?: 'official' | 'derived';
   type: TCollegeType;
+  /** Affiliated university. Blank until an admin fills it in — see the model. */
+  university?: string;
   division: string;
   district: string;
   /** Upazila or neighbourhood, as printed in the source list. */

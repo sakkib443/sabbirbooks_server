@@ -35,6 +35,8 @@ export interface OrderSmsInput {
   total: number;
   /** 'cod' | 'bkash' | 'sslcommerz' | … — decides which of the two paths ran. */
   paymentMethod?: string | null;
+  /** The courier's tracking page, when the shop has been given one. */
+  trackingUrl?: string | null;
 }
 
 export interface AffiliateSmsInput {
@@ -47,17 +49,29 @@ export interface AffiliateSmsInput {
 
 export const SmsMessage = {
   /**
-   * 1. The moment an order is placed. Everybody gets this one.
+   * 1. The moment an order is placed.
    *
-   * Deliberately says "received", not "confirmed" — for a COD order nothing is
-   * confirmed until the shop has looked at it, and a text that says otherwise
-   * is the one that generates the "where is my book" call.
+   * Says confirmed, in Bengali, at the shop's instruction (20 Sep 2026). It
+   * used to say "received, we will confirm it shortly", which set the buyer
+   * waiting for a phone call that the shop no longer wants to promise — and a
+   * promised call that does not come is what produced the "where is my book"
+   * messages this text was meant to prevent.
+   *
+   * Note what this does NOT do: the order's own status is untouched. A COD
+   * order still waits for a person at the shop to confirm it before stock
+   * moves and the book's QR content opens. This is what the buyer is told,
+   * not what the system did.
+   *
+   * Bengali costs: every character outside GSM-7 pushes the whole message into
+   * UCS-2, where one part is 70 characters instead of 160. This one runs to
+   * about three parts with a 26-character order number in it. That is the
+   * shop's call, made knowingly — see orderShipped for the same trade.
    */
   orderPlaced: (i: OrderSmsInput) =>
     lines(
       `${i.shopName}`,
-      `Order ${i.orderNumber} received. Amount ${tk(i.total)}.`,
-      'We will confirm it shortly. Thank you!'
+      `আপনার অর্ডার ${i.orderNumber} কনফার্ম হয়েছে। মোট ${tk(i.total)}।`,
+      'ধন্যবাদ!'
     ),
 
   /**
@@ -73,18 +87,10 @@ export const SmsMessage = {
       'Your order is confirmed. We are packing it now.'
     ),
 
-  /**
-   * 3. Cash on delivery only — a person at the shop confirmed it.
-   *
-   * Says the amount to keep ready, which is the single most useful thing a COD
-   * buyer can be told before the rider knocks.
-   */
-  orderConfirmed: (i: OrderSmsInput) =>
-    lines(
-      `${i.shopName}`,
-      `Order ${i.orderNumber} is confirmed. Cash on delivery ${tk(i.total)}.`,
-      'Please keep the amount ready. Thank you!'
-    ),
+  // 3. There is no confirmation text any more. The shop's buyers are told
+  // "confirmed" the moment they order (above), so a second text saying the
+  // same thing when an admin presses Confirm is a message the buyer has
+  // already had — see orderSms.service.ts, which no longer has the event.
 
   /**
    * 4. On its way.
@@ -101,12 +107,14 @@ export const SmsMessage = {
   orderShipped: (i: OrderSmsInput) =>
     lines(
       `${i.shopName}`,
-      `Order ${i.orderNumber} has been shipped.`,
-      // A hyphen, not an em dash. The dash is not in GSM-7, and one character
-      // outside it forces the whole message into UCS-2 — the limit drops from
-      // 160 to 70 and this three-line text starts costing three credits
-      // instead of one. Every shipping notice, for one punctuation mark.
-      'Please keep your phone on - the courier will call. Thank you!'
+      `আপনার অর্ডারটি পাঠিয়ে দেওয়া হয়েছে (${i.orderNumber})।`,
+      // The link is the whole point of this text now, so it goes on its own
+      // line where a phone will linkify it. Without one the message still has
+      // to be worth sending, so it falls back to the thing the buyer can act
+      // on: be reachable, or the parcel comes back and a COD sale is lost.
+      i.trackingUrl
+        ? `ট্র্যাক করতে ভিজিট করুন: ${i.trackingUrl}`
+        : 'কুরিয়ার ফোন করবে, ফোন খোলা রাখুন।'
     ),
 
   /**

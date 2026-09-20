@@ -176,7 +176,14 @@ export interface IOrder {
   cancelledAt?: Date;
   courierName?: string;
   trackingCode?: string;
+  /** The courier's tracking page for this parcel — what the shipped SMS links to. */
+  trackingUrl?: string;
   adminNote?: string;
+  /**
+   * The day this order counts as going out, when that is not the day it was
+   * placed. Null/absent means "the day it was placed" — see order.model.ts.
+   */
+  dispatchDate?: Date | null;
   createdAt?: Date;
   updatedAt?: Date;
 }

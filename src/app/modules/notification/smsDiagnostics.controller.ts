@@ -216,10 +216,31 @@ export const smsTest = async (req: Request, res: Response) => {
 };
 
 /**
+ * How many messages a gateway will bill this text as.
+ *
+ * One character outside GSM-7 pushes the WHOLE message into UCS-2, where a
+ * part is 70 characters instead of 160 — so a Bengali notice costs two to
+ * three times an English one of the same length. Tested as "is it all
+ * ASCII": the shop writes either plain English or Bengali, and the handful
+ * of GSM-7 characters outside ASCII (£, é, Ø) appear in neither.
+ *
+ * Split messages lose characters to the concatenation header, hence 153/67
+ * for anything past the first part.
+ */
+const smsParts = (text: string): number => {
+  const unicode = /[^\x00-\x7F]/.test(text);
+  const single = unicode ? 70 : 160;
+  const perPart = unicode ? 67 : 153;
+  return text.length <= single ? 1 : Math.ceil(text.length / perPart);
+};
+
+/**
  * GET /api/notifications/sms-preview
  *
- * The five messages exactly as they would arrive, with their lengths. Sends
- * nothing. Useful for checking the shop name and the wording before a campaign.
+ * Every buyer-facing message exactly as it would arrive, with its length and
+ * what it will be billed as. Sends nothing. Useful for checking the shop name
+ * and the wording — and, since the notices went Bengali, for seeing what a
+ * change costs before it goes out to a few hundred buyers.
  */
 export const smsPreview = async (_req: Request, res: Response) => {
   const site = String(config.client_url || 'magicviva.com')
@@ -236,7 +257,13 @@ export const smsPreview = async (_req: Request, res: Response) => {
   const samples = {
     orderPlaced: SmsMessage.orderPlaced(order),
     paymentReceived: SmsMessage.paymentReceived(order),
-    orderConfirmed: SmsMessage.orderConfirmed(order),
+    // Both shapes of the shipping notice: the shop pastes a courier link on
+    // most parcels, but not on all, and the two cost different money.
+    orderShipped: SmsMessage.orderShipped({
+      ...order,
+      trackingUrl: 'https://steadfast.com.bd/t/ABC123XYZ',
+    }),
+    orderShippedNoLink: SmsMessage.orderShipped(order),
     orderDelivered: SmsMessage.orderDelivered(order),
     affiliateApproved: SmsMessage.affiliateApproved({
       shopName: config.alerts.shop_name,
@@ -252,7 +279,7 @@ export const smsPreview = async (_req: Request, res: Response) => {
     data: Object.fromEntries(
       Object.entries(samples).map(([k, v]) => [
         k,
-        { text: v, characters: v.length, messages: v.length > 160 ? 2 : 1 },
+        { text: v, characters: v.length, messages: smsParts(v) },
       ])
     ),
   });

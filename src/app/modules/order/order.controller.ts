@@ -58,10 +58,43 @@ const updateOrdersStatus = async (req: Request, res: Response) => {
     if (ids.length === 0) {
       return res.status(400).json({ success: false, message: 'No orders selected' });
     }
-    const result = await OrderService.updateOrdersStatus(ids, status);
+    // Marking a whole consignment shipped is the one bulk action that carries
+    // details: one courier, one tracking link, every parcel in the sack.
+    const extra = {
+      courierName: req.body?.courierName === undefined ? undefined : String(req.body.courierName),
+      trackingCode: req.body?.trackingCode === undefined ? undefined : String(req.body.trackingCode),
+      trackingUrl: req.body?.trackingUrl === undefined ? undefined : String(req.body.trackingUrl),
+    };
+    const result = await OrderService.updateOrdersStatus(ids, status, extra);
     res.status(200).json({
       success: true,
       message: `${result.updated} order(s) updated${result.failed ? `, ${result.failed} failed` : ''}`,
+      data: result,
+    });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+// PATCH the day a batch of orders goes out — the order list's multi-select.
+// An empty/absent date puts them back on the day they were placed.
+const setOrdersDispatchDate = async (req: Request, res: Response) => {
+  try {
+    const ids: string[] = Array.isArray(req.body?.ids) ? req.body.ids.map(String) : [];
+    if (ids.length === 0) {
+      return res.status(400).json({ success: false, message: 'No orders selected' });
+    }
+    const raw = req.body?.dispatchDate;
+    const date = raw === null || raw === undefined || raw === '' ? null : new Date(String(raw));
+    if (date && Number.isNaN(date.getTime())) {
+      return res.status(400).json({ success: false, message: 'Invalid date' });
+    }
+    const result = await OrderService.setOrdersDispatchDate(ids, date);
+    res.status(200).json({
+      success: true,
+      message: date
+        ? `${result.updated} order(s) moved to the chosen delivery date`
+        : `${result.updated} order(s) back on their order date`,
       data: result,
     });
   } catch (error: any) {
@@ -284,5 +317,6 @@ export const OrderController = {
   deleteOrder,
   deleteOrders,
   updateOrdersStatus,
+  setOrdersDispatchDate,
   adminUpdateOrder,
 };

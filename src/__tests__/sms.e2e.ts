@@ -189,16 +189,40 @@ async function main() {
       name,
       (build as unknown as (input: typeof o & typeof a) => string)({ ...o, ...a }),
     ]);
-    check(all.length >= 6, `all ${all.length} templates are checked, not a hand-typed subset`);
+    check(all.length >= 5, `all ${all.length} templates are checked, not a hand-typed subset`);
+
+    // The two the shop asked for in Bengali (20 Sep 2026). Bengali is UCS-2,
+    // where a part is 70 characters instead of 160, so these bill as two
+    // messages where an English one bills as one. That was a knowing trade;
+    // this is what stops it quietly becoming three.
+    const BENGALI_ON_PURPOSE = new Set(['orderPlaced', 'orderShipped']);
+    const isAscii = (t: string) => [...t].every((ch) => ch.charCodeAt(0) < 128);
+    const parts = (t: string) => {
+      const single = isAscii(t) ? SMS_SINGLE_PART : 70;
+      const perPart = isAscii(t) ? 153 : 67;
+      return t.length <= single ? 1 : Math.ceil(t.length / perPart);
+    };
+
     for (const [name, body] of all) {
       check(body.length <= SMS_SINGLE_PART, `${name} is ${body.length} chars — one message`);
       check(body.split('\n').length === 3, `${name} is three lines`);
-      // A single Bengali character would force UCS-2 and cut the limit to 70.
-      check(!/[^\x20-\x7E\n]/.test(body), `${name} is plain ASCII, so it bills as GSM-7`);
+      if (BENGALI_ON_PURPOSE.has(name)) {
+        check(parts(body) <= 2, `${name} is Bengali on purpose and bills as ${parts(body)} part(s), not more`);
+      } else {
+        // A single Bengali character would force UCS-2 and cut the limit to 70.
+        check(isAscii(body), `${name} is plain ASCII, so it bills as GSM-7`);
+      }
     }
+
+    // The shipping notice with a real courier link in it — the shape that
+    // actually goes out, and the one that costs the most. Pinned so a longer
+    // greeting or a second line cannot push it to four parts unnoticed.
+    const shipped = SmsMessage.orderShipped({ ...o, trackingUrl: 'https://steadfast.com.bd/t/ABC123XYZ' });
+    check(parts(shipped) <= 3, `the shipping notice with a link bills as ${parts(shipped)} part(s)`);
+    check(shipped.includes('https://steadfast.com.bd/t/ABC123XYZ'), 'and carries the link itself');
   }
 
-  console.log('\n── Cash on delivery: four texts, in order ──');
+  console.log('\n── Cash on delivery: three texts, in order ──');
   const COD_PHONE = '01711110001';
   let codOrderId = '';
   {
@@ -209,25 +233,22 @@ async function main() {
 
     const texts = textsFor(COD_PHONE);
     check(texts.length === 1, `1 text so far (${texts.length})`);
-    check(/received/i.test(texts[0]?.body || ''), 'it says the order was received');
-    check(
-      !/confirmed/i.test(texts[0]?.body || ''),
-      'and does NOT claim it is confirmed — a person has not looked at it yet'
-    );
+    // The shop's wording since 20 Sep 2026: confirmed on the spot, in Bengali,
+    // and no promise that somebody will ring to confirm it.
+    check(texts[0]?.body.includes('কনফার্ম হয়েছে'), 'it says the order is confirmed');
+    check(!/call|ফোন/i.test(texts[0]?.body || ''), 'and promises no phone call');
     check(texts[0]?.body.includes('Magic Viva'), 'with the shop name on it');
   }
 
   {
+    // Confirming is silent. The buyer was told "confirmed" when they ordered,
+    // so a second text saying it again is one the shop pays for and the buyer
+    // has already read.
     await setStatus(codOrderId, 'processing');
     await new Promise((r) => setTimeout(r, 300));
 
     const texts = textsFor(COD_PHONE);
-    check(texts.length === 2, `confirming sends the second text (${texts.length})`);
-    check(/confirmed/i.test(texts[1]?.body || ''), 'which says it is confirmed');
-    check(
-      /cash on delivery/i.test(texts[1]?.body || ''),
-      'and names the amount to have ready'
-    );
+    check(texts.length === 1, 'confirming sends nothing (' + texts.length + ')');
   }
 
   {
@@ -238,9 +259,10 @@ async function main() {
     await new Promise((r) => setTimeout(r, 300));
 
     const texts = textsFor(COD_PHONE);
-    check(texts.length === 3, `shipping sends the third (${texts.length})`);
-    check(/shipped/i.test(texts[2]?.body || ''), 'which says it is on its way');
-    check(/phone/i.test(texts[2]?.body || ''), 'and asks them to keep the phone on');
+    check(texts.length === 2, 'shipping sends the second (' + texts.length + ')');
+    check(texts[1]?.body.includes('পাঠিয়ে দেওয়া হয়েছে'), 'which says it is on its way');
+    // No courier link was set on this order, so the fallback line stands in.
+    check(texts[1]?.body.includes('ফোন খোলা রাখুন'), 'and, with no link, asks them to keep the phone on');
   }
 
   {
@@ -248,9 +270,9 @@ async function main() {
     await new Promise((r) => setTimeout(r, 300));
 
     const texts = textsFor(COD_PHONE);
-    check(texts.length === 4, `delivering sends the fourth (${texts.length})`);
-    check(/delivered/i.test(texts[3]?.body || ''), 'which says it arrived');
-    check(/code/i.test(texts[3]?.body || ''), 'and tells them the book has a code inside — the only way in now');
+    check(texts.length === 3, 'delivering sends the third (' + texts.length + ')');
+    check(/delivered/i.test(texts[2]?.body || ''), 'which says it arrived');
+    check(/code/i.test(texts[2]?.body || ''), 'and tells them the book has a code inside — the only way in now');
   }
 
   console.log('\n── Clicking a status twice does not text twice ──');
@@ -266,7 +288,7 @@ async function main() {
 
     const o: any = await Order.findById(codOrderId).lean();
     check(
-      JSON.stringify([...o.smsSent].sort()) === JSON.stringify(['confirmed', 'delivered', 'placed', 'shipped']),
+      JSON.stringify([...o.smsSent].sort()) === JSON.stringify(['delivered', 'placed', 'shipped']),
       `the order records what it sent (${JSON.stringify(o.smsSent)})`
     );
   }

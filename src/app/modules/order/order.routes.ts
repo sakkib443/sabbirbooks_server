@@ -145,6 +145,18 @@ router.patch(
   OrderController.updateOrdersStatus
 );
 
+// ─── Bulk delivery-date change ───────────────────────────────
+// Moving a batch to the day it actually goes out. Same gate as the other bulk
+// fulfilment action: it changes which packing list an order appears on, not the
+// record of the sale. Declared before '/:id' so it is not read as an order id.
+router.patch(
+  '/bulk-dispatch-date',
+  authMiddleware,
+  authorize('admin'),
+  requireCapability('orders.write'),
+  OrderController.setOrdersDispatchDate
+);
+
 // ─── Owner correction pass over one order ────────────────────
 // Editing a buyer's email and address is a records change, not a fulfilment
 // one, so it sits with delete on the owner-only gate rather than orders.write.

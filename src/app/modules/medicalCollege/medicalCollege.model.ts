@@ -75,6 +75,11 @@ const medicalCollegeSchema = new Schema<IMedicalCollege>(
       enum: ['government', 'private', 'army'],
       required: true,
     },
+    // The university this college is affiliated with. Blank on every seeded
+    // row: the source PDF does not carry it, and guessing an affiliation is
+    // worse than showing none, so the admin screen fills these in. The order
+    // list groups its per-college PDFs by it when they are filled.
+    university: { type: String, trim: true, default: '' },
     division: { type: String, required: true, trim: true },
     district: { type: String, required: true, trim: true },
     area: { type: String, trim: true, default: '' },
