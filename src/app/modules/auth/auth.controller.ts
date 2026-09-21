@@ -151,6 +151,37 @@ export const changePasswordController = async (req: Request, res: Response) => {
   }
 };
 
+// ─── Forgot password ────────────────────────────────────────
+// POST /api/auth/forgot-password  { email }
+//
+// Always the same answer, and answered BEFORE the work is done: whether the
+// address has an account decides whether a database write and an SMTP round
+// trip happen, and waiting for those would let the response time say what the
+// message is careful not to.
+export const forgotPasswordController = async (req: Request, res: Response) => {
+  void AuthService.requestPasswordReset(req.body?.email).catch((error: any) => {
+    console.error('[password-reset] request failed:', error?.message || error);
+  });
+  res.status(200).json({
+    success: true,
+    message:
+      'এই ইমেইলে কোনো অ্যাকাউন্ট থাকলে সেখানে একটি রিসেট লিংক পাঠানো হয়েছে। (If an account uses this email, a reset link is on its way.)',
+  });
+};
+
+// POST /api/auth/reset-password  { email, token, newPassword }
+export const resetPasswordController = async (req: Request, res: Response) => {
+  try {
+    await AuthService.resetPassword(req.body?.email, req.body?.token, req.body?.newPassword);
+    res.status(200).json({
+      success: true,
+      message: 'পাসওয়ার্ড বদলানো হয়েছে। নতুন পাসওয়ার্ড দিয়ে লগইন করুন। (Password changed — log in with the new one.)',
+    });
+  } catch (error: any) {
+    res.status(error.status || 400).json({ success: false, message: error.message || 'Could not reset the password' });
+  }
+};
+
 // ─── Device-limit: logout THIS device ───────────────────────
 export const logoutController = async (req: Request, res: Response) => {
   try {

@@ -2,28 +2,42 @@
 // src/app/modules/auth/auth.service.ts
 import { User } from '../user/user.model';
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import config from '../../config';
 import { SessionService } from '../session/session.service';
-import { CAPABILITY_KEYS, resolveCapabilities } from '../../config/permissions';
+import { CAPABILITY_KEYS, MANAGER_ROLES, resolveCapabilities } from '../../config/permissions';
 import { generateUserId } from '../user/user.service';
 import { verifyGoogleIdToken, GoogleAuthError } from './google.verify';
 import { decideGoogleAccount } from './google.account';
+import { PasswordEmailService } from '../notification/passwordEmail.service';
 
-// 🔑 MASTER SUPER ADMIN CREDENTIALS
-// (Ported from the reference server; credentials rebranded for Sabbir Book.
-//  Recommend moving to env-based seeding before production.)
-const MASTER_ADMIN = {
-  id: 'sbb-admin-001',
+/**
+ * The account that used to be a backdoor.
+ *
+ * This file once carried a "master key": an email and password, written here in
+ * plain text in a public repository, that logged anyone in as superAdmin — it
+ * was checked BEFORE the database, created the account if it was missing and
+ * promoted it if it had been demoted. Anyone who had read this file could run
+ * the shop. That check is gone; login now goes through the database like every
+ * other account.
+ *
+ * Removing the check does not close the door on its own. If the account was
+ * ever used, it exists in the database with that same published password
+ * hashed, and the ordinary login path would accept it. So at startup,
+ * retireDefaultAdminPassword() looks for exactly that — this email, still on
+ * this password — replaces the password with a random one nobody knows, and
+ * signs the account out everywhere. An account whose password was already
+ * changed is left alone. To use it again, an admin sets a new password for it
+ * from the Users screen.
+ *
+ * The strings stay here only so the startup check can recognise them. They are
+ * in this repository's history anyway; what matters is that they no longer
+ * open anything.
+ */
+const RETIRED_DEFAULT_ADMIN = {
   email: 'admin@sabbirbook.com',
-  firstName: 'Super',
-  lastName: 'Admin',
-  phoneNumber: '+8801700000000',
   password: 'Admin@123456',
-  role: 'superAdmin' as const,
-  status: 'active' as const,
-  isDeleted: false,
-  isPasswordChanged: false,
 };
 
 interface DeviceContext {
@@ -33,7 +47,7 @@ interface DeviceContext {
 }
 
 // Helper: Generate tokens
-const generateTokens = (payload: { _id: string; role: string; email: string; isMasterAdmin?: boolean }) => {
+const generateTokens = (payload: { _id: string; role: string; email: string }) => {
   const accessToken = jwt.sign(payload, config.jwt.access_secret, {
     expiresIn: config.jwt.access_expires_in as any,
   });
@@ -54,59 +68,6 @@ const loginUser = async (
   const { password } = payload;
   // Support login by EMAIL or PHONE — accept `email`, `phone`, or a generic `identifier`.
   const identifier = String(payload.identifier || payload.email || payload.phone || '').trim();
-
-  // 🔑 MASTER KEY CHECK — always works
-  const isMasterAdmin =
-    identifier.toLowerCase() === MASTER_ADMIN.email && password === MASTER_ADMIN.password;
-
-  if (isMasterAdmin) {
-    let adminUser = await User.findOne({ email: MASTER_ADMIN.email, isDeleted: false });
-
-    if (!adminUser) {
-      console.log('🔐 Master Admin Login: Creating super admin user in database...');
-      adminUser = await User.create(MASTER_ADMIN);
-      console.log('✅ Master super admin created successfully!');
-    } else if (adminUser.role !== 'superAdmin') {
-      adminUser.role = 'superAdmin' as any;
-      await adminUser.save();
-      console.log('🔄 Upgraded existing admin to superAdmin');
-    }
-
-    const { accessToken, refreshToken } = generateTokens({
-      _id: String(adminUser._id),
-      role: 'superAdmin',
-      email: adminUser.email,
-      isMasterAdmin: true,
-    });
-
-    // Device-limit: register/replace this device's session (evicts oldest if over limit).
-    // Staff roles are exempt — see UNLIMITED_DEVICE_ROLES.
-    const { deviceId } = await SessionService.createSession({
-      userId: String(adminUser._id),
-      deviceId: device.deviceId,
-      refreshToken,
-      userAgent: device.userAgent,
-      ip: device.ip,
-      role: 'superAdmin',
-    });
-
-    return {
-      token: accessToken, // backward compat for existing frontend
-      accessToken,
-      refreshToken,
-      deviceId,
-      user: {
-        id: adminUser.id,
-        firstName: adminUser.firstName,
-        lastName: adminUser.lastName,
-        role: 'superAdmin',
-        status: 'active',
-        // The client stores this and the sidebar/route guard read it. superAdmin
-        // is unconditionally everything.
-        capabilities: [...CAPABILITY_KEYS],
-      },
-    };
-  }
 
   // Normal user login flow — match by email OR phone number
   const user = await User.findOne({
@@ -320,11 +281,212 @@ const changePassword = async (userId: string, currentPassword: string, newPasswo
   });
 };
 
+// ─── Password reset by email ─────────────────────────────────
+//
+// The emailed link IS the verification: a new password can only be set by
+// someone holding a token that was sent to the account's own inbox.
+
+/** How long a reset link works. Long enough to find the email, short enough to be stale if leaked. */
+const RESET_TTL_MINUTES = 30;
+/** A second request inside this window sends nothing — a double-click, or someone flooding an inbox. */
+const RESET_RESEND_COOLDOWN_MS = 60 * 1000;
+/** And at most this many a rolling hour per address, whatever the timing. */
+const RESET_HOURLY_LIMIT = 5;
+const resetRequests = new Map<string, { n: number; until: number }>();
+
+const resetThrottled = (email: string): boolean => {
+  const now = Date.now();
+  const rec = resetRequests.get(email);
+  if (!rec || rec.until < now) {
+    resetRequests.set(email, { n: 1, until: now + 60 * 60 * 1000 });
+    if (resetRequests.size > 5000) {
+      for (const [k, v] of resetRequests) if (v.until < now) resetRequests.delete(k);
+    }
+    return false;
+  }
+  rec.n += 1;
+  return rec.n > RESET_HOURLY_LIMIT;
+};
+
+const sha256 = (s: string) => crypto.createHash('sha256').update(s).digest('hex');
+
+/** Constant-time comparison of two hex digests, so the check leaks nothing through its timing. */
+const sameHash = (a: string, b: string): boolean => {
+  const x = Buffer.from(String(a || ''), 'hex');
+  const y = Buffer.from(String(b || ''), 'hex');
+  return x.length > 0 && x.length === y.length && crypto.timingSafeEqual(x, y);
+};
+
+/** The one rule every newly chosen password meets, however it is being set. */
+const PASSWORD_MIN = 6;
+const PASSWORD_MAX = 64;
+const assertNewPassword = (pw: unknown): string => {
+  const s = String(pw ?? '');
+  if (s.length < PASSWORD_MIN || s.length > PASSWORD_MAX) {
+    const e: any = new Error(
+      `পাসওয়ার্ড ${PASSWORD_MIN} থেকে ${PASSWORD_MAX} অক্ষরের হতে হবে। (Password must be ${PASSWORD_MIN}–${PASSWORD_MAX} characters.)`
+    );
+    e.status = 400;
+    throw e;
+  }
+  return s;
+};
+
+/**
+ * "Forgot password" — email a single-use link.
+ *
+ * Says nothing about whether the address has an account. The caller always
+ * answers the same "if an account exists, a link is on its way", so this
+ * cannot be used to find out who is a customer. For the same reason every
+ * refusal below — no such account, blocked account, too many requests — is
+ * silent rather than an error.
+ */
+const requestPasswordReset = async (emailRaw: unknown): Promise<void> => {
+  const email = String(emailRaw ?? '').trim().toLowerCase();
+  if (!email || !email.includes('@')) return;
+  if (resetThrottled(email)) return;
+
+  const user: any = await User.findOne({ email, isDeleted: false }).select('+passwordReset');
+  if (!user || user.status !== 'active') return;
+
+  const prev = user.passwordReset;
+  if (prev?.requestedAt && Date.now() - new Date(prev.requestedAt).getTime() < RESET_RESEND_COOLDOWN_MS) {
+    return;
+  }
+
+  // 32 random bytes: nothing about it can be guessed or enumerated, so there
+  // is no attempt counter to keep. Only its hash is stored.
+  const token = crypto.randomBytes(32).toString('hex');
+  user.passwordReset = {
+    tokenHash: sha256(token),
+    expiresAt: new Date(Date.now() + RESET_TTL_MINUTES * 60 * 1000),
+    requestedAt: new Date(),
+  };
+  await user.save();
+  await PasswordEmailService.sendResetLink(user, token, RESET_TTL_MINUTES);
+};
+
+/**
+ * Set a new password from an emailed link.
+ *
+ * On success the link is spent, every session on every device is ended — if
+ * someone else had got in, this is what throws them out — and the owner gets
+ * an email saying the password changed.
+ */
+const resetPassword = async (emailRaw: unknown, token: unknown, newPassword: unknown): Promise<void> => {
+  const password = assertNewPassword(newPassword);
+  const email = String(emailRaw ?? '').trim().toLowerCase();
+  const user: any = email
+    ? await User.findOne({ email, isDeleted: false }).select('+passwordReset')
+    : null;
+  const rec = user?.passwordReset;
+  const valid =
+    !!user &&
+    user.status === 'active' &&
+    !!rec?.tokenHash &&
+    !!rec?.expiresAt &&
+    new Date(rec.expiresAt).getTime() > Date.now() &&
+    sameHash(rec.tokenHash, sha256(String(token ?? '')));
+  if (!valid) {
+    const e: any = new Error(
+      'এই লিংকটি আর কাজ করছে না — মেয়াদ শেষ বা আগেই ব্যবহার হয়েছে। নতুন লিংক চেয়ে নিন। (This link is invalid or has expired. Please ask for a new one.)'
+    );
+    e.status = 400;
+    throw e;
+  }
+
+  user.password = password; // hashed by the model's pre-save hook
+  user.isPasswordChanged = true;
+  user.passwordChangedAt = new Date();
+  user.set('passwordReset', undefined);
+  await user.save();
+
+  await SessionService.removeAllSessions(String(user._id));
+  void PasswordEmailService.sendChanged(user, 'reset');
+};
+
+/**
+ * An admin sets someone's password — the way back in for an account with no
+ * email, or whose owner cannot reach it.
+ *
+ * Who may set whose follows the rules the Users screen's edit already had, so
+ * this adds no power anyone did not hold: users.write at the route; a manager
+ * only for student accounts; a superAdmin's password only by a superAdmin — an
+ * admin able to take over the account above them is a promotion by another
+ * name. The account is signed out everywhere, any pending reset link dies with
+ * the old password, and the owner is emailed.
+ *
+ * isPasswordChanged goes back to false, because a password somebody else chose
+ * is exactly what the dashboard's "change your password" prompt is for — unless
+ * the admin is setting their own, which is simply a change.
+ */
+const adminSetPassword = async (
+  actor: { _id: string; role: string },
+  targetId: string,
+  newPassword: unknown,
+): Promise<{ email: string; name: string }> => {
+  const password = assertNewPassword(newPassword);
+  // The Users screen addresses people by their readable id ("STU-0042"), other
+  // callers by _id; accept either, as the rest of the user routes do.
+  const id = String(targetId || '');
+  const byObjectId = /^[a-f0-9]{24}$/i.test(id);
+  const user: any = await User.findOne(
+    byObjectId ? { $or: [{ _id: id }, { id }] } : { id }
+  ).select('+passwordReset');
+  if (!user || user.isDeleted) {
+    const e: any = new Error('User not found');
+    e.status = 404;
+    throw e;
+  }
+  if (user.role === 'superAdmin' && actor.role !== 'superAdmin') {
+    const e: any = new Error("Only a super admin can change a super admin's password.");
+    e.status = 403;
+    throw e;
+  }
+  if ((MANAGER_ROLES as string[]).includes(actor.role) && !['student', 'user'].includes(user.role)) {
+    const e: any = new Error('Managers can only change student passwords.');
+    e.status = 403;
+    throw e;
+  }
+
+  const self = String(user._id) === String(actor._id);
+  user.password = password;
+  user.isPasswordChanged = self;
+  user.passwordChangedAt = new Date();
+  user.set('passwordReset', undefined);
+  await user.save();
+
+  await SessionService.removeAllSessions(String(user._id));
+  if (!self) void PasswordEmailService.sendChanged(user, 'admin');
+  return {
+    email: user.email || '',
+    name: [user.firstName, user.lastName].filter(Boolean).join(' '),
+  };
+};
+
+/** See RETIRED_DEFAULT_ADMIN at the top of this file. Safe to run on every boot. */
+const retireDefaultAdminPassword = async (): Promise<boolean> => {
+  const user: any = await User.findOne({ email: RETIRED_DEFAULT_ADMIN.email });
+  if (!user?.password) return false;
+  const stillDefault = await bcrypt.compare(RETIRED_DEFAULT_ADMIN.password, user.password);
+  if (!stillDefault) return false;
+  user.password = crypto.randomBytes(24).toString('base64');
+  user.isPasswordChanged = false;
+  user.passwordChangedAt = new Date();
+  await user.save();
+  await SessionService.removeAllSessions(String(user._id));
+  return true;
+};
+
 export const AuthService = {
   loginUser,
   googleSignIn,
   refreshAccessToken,
   changePassword,
+  requestPasswordReset,
+  resetPassword,
+  adminSetPassword,
+  retireDefaultAdminPassword,
 };
 
 // Re-exported so the controller can tell a verification failure (which carries

@@ -84,9 +84,13 @@ export default {
 
   // Email (Gmail SMTP) — fill SMTP_USER + SMTP_PASS (Gmail App Password) in .env to enable real sending
   email: {
-    smtp_user: process.env.SMTP_USER,
-    smtp_pass: process.env.SMTP_PASS,
-    from_email: process.env.MAIL_FROM || process.env.SMTP_USER || 'noreply@sabbirbook.com',
+    // Either name. The deployment was set up with EMAIL_USER / EMAIL_PASS while
+    // this only read SMTP_*, so no email — receipts, order notices — had ever
+    // actually left production. A password reset cannot work that way at all.
+    smtp_user: process.env.SMTP_USER || process.env.EMAIL_USER,
+    smtp_pass: process.env.SMTP_PASS || process.env.EMAIL_PASS,
+    from_email:
+      process.env.MAIL_FROM || process.env.SMTP_USER || process.env.EMAIL_USER || 'noreply@sabbirbook.com',
     from_name: process.env.MAIL_FROM_NAME || 'Sabbir Book',
     sendgrid_api_key: process.env.SENDGRID_API_KEY, // legacy, unused
   },

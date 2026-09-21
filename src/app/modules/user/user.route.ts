@@ -121,6 +121,11 @@ router.patch(
 // Managers are allowed here but the controller restricts them to student/user targets only.
 // These must come AFTER specific routes
 router.get('/:id', authMiddleware, authorize('admin', 'superAdmin', 'trainingManager', 'contentManager', 'manager'), requireCapability('users.read'), UserController.getSingleUserController);
+// The one way to set someone else's password — same gate as editing them, with
+// the per-role rules in AuthService.adminSetPassword. Unlike a plain edit it
+// signs them out everywhere and emails them, which is why PATCH /:id no longer
+// takes a password at all.
+router.patch('/:id/password', authMiddleware, authorize('admin', 'superAdmin', 'trainingManager', 'contentManager', 'manager'), requireCapability('users.write'), UserController.adminSetPasswordController);
 router.patch('/:id', authMiddleware, authorize('admin', 'superAdmin', 'trainingManager', 'contentManager', 'manager'), requireCapability('users.write'), UserController.updateUserController);
 router.delete('/:id', authMiddleware, authorize('admin', 'superAdmin', 'trainingManager', 'contentManager', 'manager'), requireCapability('users.write'), requireCapability('records.delete'), UserController.deleteUserController);
 

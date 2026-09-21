@@ -6,6 +6,8 @@ import {
   refreshTokenController,
   getMeController,
   changePasswordController,
+  forgotPasswordController,
+  resetPasswordController,
   logoutController,
   logoutAllController,
   sessionsController,
@@ -25,6 +27,12 @@ router.get('/me', authMiddleware, getMeController);
 
 // Change password
 router.post('/change-password', authMiddleware, changePasswordController);
+
+// Forgot password — public by nature. The email link is the verification;
+// see AuthService.requestPasswordReset for why these never say whether an
+// address has an account, and how they are throttled.
+router.post('/forgot-password', forgotPasswordController);
+router.post('/reset-password', resetPasswordController);
 
 // ── Device-limit session management (all require a valid access token) ──
 router.post('/logout', authMiddleware, logoutController);

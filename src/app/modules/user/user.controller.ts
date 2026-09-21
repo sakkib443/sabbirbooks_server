@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { Request, Response } from 'express';
 import { UserService } from './user.service';
+import { AuthService } from '../auth/auth.service';
 import {
   CAPABILITIES,
   GRANTABLE_CAPABILITIES,
@@ -214,6 +215,15 @@ export const updateUserController = async (req: Request, res: Response) => {
       }
     }
 
+    // A password set through a plain edit left the old devices signed in and
+    // told the owner nothing. There is one way to do it now, and it does both.
+    if (req.body?.password !== undefined) {
+      return res.status(400).json({
+        success: false,
+        message: 'Use PATCH /api/user/:id/password to change a password',
+      });
+    }
+
     // `permissions` is stripped in the service too; rejecting it loudly here
     // makes the escalation attempt visible instead of silently ignored.
     if (req.body?.permissions !== undefined) {
@@ -285,7 +295,29 @@ export const deleteUserController = async (req: Request, res: Response) => {
   }
 };
 
+// PATCH /api/users/:id/password  { newPassword } — owner accounts only.
+// See AuthService.adminSetPassword for the super-admin rule and what else
+// happens to the account.
+const adminSetPasswordController = async (req: Request, res: Response) => {
+  try {
+    const actor = (req as any).user || {};
+    const result = await AuthService.adminSetPassword(
+      { _id: String(actor._id || ''), role: String(actor.role || '') },
+      String(req.params.id),
+      req.body?.newPassword,
+    );
+    res.status(200).json({
+      success: true,
+      message: 'Password changed. They have been signed out of every device.',
+      data: result,
+    });
+  } catch (error: any) {
+    res.status(error.status || 400).json({ success: false, message: error.message || 'Could not change the password' });
+  }
+};
+
 export const UserController = {
+  adminSetPasswordController,
   createUserController,
   createStaffController,
   createStudentController,

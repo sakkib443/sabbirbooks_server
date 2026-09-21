@@ -34,6 +34,20 @@ const userSchema = new Schema<IUser>(
     gender: { type: String, enum: ['male', 'female', 'other'], required: false },
     password: { type: String, required: false, default: '' },
     isPasswordChanged: { type: Boolean, default: false },
+    passwordChangedAt: { type: Date },
+    // A pending reset link, one per account. Asking again replaces it; using
+    // it, or any other password change, removes it. Only the hash of the token
+    // is kept, so the database alone cannot be turned into working reset
+    // links, and `select: false` keeps even the hash out of every query that
+    // does not ask for it by name — user lists, /me, populated order buyers.
+    passwordReset: {
+      type: new Schema(
+        { tokenHash: String, expiresAt: Date, requestedAt: Date },
+        { _id: false }
+      ),
+      default: undefined,
+      select: false,
+    },
     role: {
       type: String,
       enum: [...ROLES],

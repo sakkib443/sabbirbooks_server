@@ -18,6 +18,18 @@ export interface IUser {
   gender?: 'male' | 'female' | 'other';
   password?: string;
   isPasswordChanged?: boolean;
+  /** When the password last changed — by its owner, a reset link or an admin. */
+  passwordChangedAt?: Date;
+  /**
+   * A pending "forgot password" link. Only the SHA-256 of the emailed token is
+   * stored; the token itself exists nowhere but the owner's inbox. Not selected
+   * by default — see user.model.ts.
+   */
+  passwordReset?: {
+    tokenHash: string;
+    expiresAt: Date;
+    requestedAt: Date;
+  };
   role: Role;
   /**
    * Capability overrides. ABSENT (undefined) means "fall back to the role's

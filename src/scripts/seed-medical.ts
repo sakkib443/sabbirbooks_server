@@ -16,12 +16,21 @@
  *  - Course `id` is NOT auto-generated (unlike category/book); we compute the
  *    next free numeric id ourselves.
  *  - Categories have no duplicate-name guard, so we pre-check by name.
- *  - Master admin logs in as `superAdmin`, which bypasses all authorize() gates.
+ *  - Logs in as an admin account named by SEED_ADMIN_EMAIL / SEED_ADMIN_PASSWORD.
+ *    It used the server's hard-coded "master key" until that was removed as the
+ *    backdoor it was; point these at a real admin on whatever server you seed.
  */
 
 const BASE = process.env.SEED_API_BASE || 'http://localhost:5000';
 const DEVICE_ID = 'seed-script-device';
-const ADMIN = { email: 'admin@sabbirbook.com', password: 'Admin@123456' };
+const ADMIN = {
+  email: process.env.SEED_ADMIN_EMAIL || '',
+  password: process.env.SEED_ADMIN_PASSWORD || '',
+};
+if (!ADMIN.email || !ADMIN.password) {
+  console.error('Set SEED_ADMIN_EMAIL and SEED_ADMIN_PASSWORD to an admin account on the target server.');
+  process.exit(1);
+}
 
 // Placeholder assets (all must be valid URLs to pass zod .url()).
 const IMG_SQUARE = 'https://placehold.co/400x400';

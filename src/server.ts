@@ -80,6 +80,25 @@ async function startServer() {
     }
   }
 
+  // ─── Close the old master-key account ──────────────────────────
+  //
+  // Its password was published in this public repository and used to log in
+  // as superAdmin before the database was even asked. The check is gone from
+  // the login path; this makes sure the account it may have created is not
+  // still sitting in the database on that same password. A no-op once done,
+  // and on any account whose password was already changed. See
+  // RETIRED_DEFAULT_ADMIN in auth.service.ts.
+  if (dbReady) {
+    try {
+      const { AuthService } = await import('./app/modules/auth/auth.service');
+      if (await AuthService.retireDefaultAdminPassword()) {
+        console.warn('🔒 The old master-key admin account was still on its published password — it has been replaced and the account signed out. An admin can set a new one from Users.');
+      }
+    } catch (error) {
+      console.error('⚠️  Default admin check failed (server still starting):', error);
+    }
+  }
+
   // ─── Close checkouts that were abandoned at the gateway ────────
   //
   // An order is written before the buyer is sent to SSLCommerz, so a buyer who
