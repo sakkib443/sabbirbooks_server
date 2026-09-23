@@ -5,6 +5,7 @@ import { Book } from '../book/book.model';
 import { User } from '../user/user.model';
 import { hasCapability } from '../../config/permissions';
 import { withMediaTokens } from './mediaToken';
+import { fileOwnerCache, readerAccessCache } from './mediaAccessCache';
 import { sanitizeQuestionPayload } from './sanitizeAnswer';
 
 // ─── Scan ───────────────────────────────────────────────────
@@ -732,28 +733,42 @@ const getNextTopicForReader = async (topicId: string, userId: string) => {
  * orphaned upload is not a public bucket.
  */
 const canReadProtectedMedia = async (fileName: string, userId?: string | null): Promise<boolean> => {
-  // Anchored to the end of the stored URL so "12-a.jpg" cannot match a request
-  // for "…/912-a.jpg". The filename itself is already sanitised by multer and
-  // re-validated by the controller before it reaches here.
-  const suffix = new RegExp(`/${fileName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
+  // Which book this file belongs to, and whether its chapter is free. Asked of
+  // the database once and then remembered for a few minutes — every figure on
+  // a page is its own request, and this lookup is a collection scan. See
+  // mediaAccessCache for what is remembered and for how long.
+  let owner = fileOwnerCache.get(fileName);
 
-  const question = await BookQuestion.findOne({
-    isDeleted: false,
-    $or: [{ 'videos.url': suffix }, { 'attachments.fileUrl': suffix }, { images: suffix }],
-  })
-    .select('bookId chapterId')
-    .lean();
+  if (!owner) {
+    // Anchored to the end of the stored URL so "12-a.jpg" cannot match a request
+    // for "…/912-a.jpg". The filename itself is already sanitised by multer and
+    // re-validated by the controller before it reaches here.
+    const suffix = new RegExp(`/${fileName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
 
-  if (!question) return false;
+    const question = await BookQuestion.findOne({
+      isDeleted: false,
+      $or: [{ 'videos.url': suffix }, { 'attachments.fileUrl': suffix }, { images: suffix }],
+    })
+      .select('bookId chapterId')
+      .lean();
 
+    if (!question) return false;
 
-  // A chapter the shop has marked FREE is readable by anyone, exactly as its
-  // scan is — otherwise the free page opens for a stranger and then renders
-  // every figure broken, because each <img> asks a route that wanted a reader.
-  const chapter = await BookChapter.findById(question.chapterId).select('isFree').lean();
-  if (chapter?.isFree === true) return true;
+    // A chapter the shop has marked FREE is readable by anyone, exactly as its
+    // scan is — otherwise the free page opens for a stranger and then renders
+    // every figure broken, because each <img> asks a route that wanted a reader.
+    const chapter = await BookChapter.findById(question.chapterId).select('isFree').lean();
+
+    owner = { bookId: String(question.bookId), isFree: chapter?.isFree === true };
+    fileOwnerCache.set(fileName, owner);
+  }
+
+  if (owner.isFree) return true;
 
   if (!userId) return false;
+
+  const readerKey = `${userId}:${owner.bookId}`;
+  if (readerAccessCache.get(readerKey)) return true;
 
   // The staff who write this content have to be able to see it. `hasBookAccess`
   // below asks one question — did this person buy the book — and an admin never
@@ -762,9 +777,14 @@ const canReadProtectedMedia = async (fileName: string, userId?: string | null): 
   // editor's own routes require, so nobody gains a view they did not already
   // have through the panel.
   const staff = await User.findById(userId).select('role permissions').lean();
-  if (staff && hasCapability(staff.role, staff.permissions, 'content.write')) return true;
+  const allowed =
+    (staff && hasCapability(staff.role, staff.permissions, 'content.write')) ||
+    (await BookAccessService.hasBookAccess(userId, owner.bookId));
 
-  return BookAccessService.hasBookAccess(userId, question.bookId);
+  // Only a yes is remembered: a no is asked again next time, so nobody who has
+  // just activated their book waits out a stale refusal.
+  if (allowed) readerAccessCache.set(readerKey, true);
+  return Boolean(allowed);
 };
 
 /** Next question still missing an answer — powers the admin "keep going" button. */

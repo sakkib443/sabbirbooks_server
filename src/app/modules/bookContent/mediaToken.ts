@@ -13,16 +13,47 @@ import config from '../../config';
  *
  * It is minted only on responses that already passed an access check, so
  * holding one is never more than what the holder had just been granted.
+ *
+ * ── Why the token is minted for a WINDOW, not for "now" ──
+ *
+ * The token is stamped onto every media URL in a scan response. Minting it
+ * from the current second gave every scan a different token, so every image
+ * URL was a different URL, so the browser's cache never matched one — a reader
+ * who came back to the same topic downloaded every figure and every PDF again.
+ * The Cache-Control and ETag on those responses could never do anything.
+ *
+ * So the same reader gets the SAME token all day: it is signed over the start
+ * of the current 24-hour window rather than the moment of signing, and HS256 is
+ * deterministic, so the string is identical. The URL stays identical with it,
+ * and the pictures come out of the browser's own cache.
+ *
+ * It stays valid into the following window as well. Without that grace, a page
+ * opened at one minute to midnight would start answering 401 a minute later,
+ * which is exactly what used to happen to a PDF link left open for half an
+ * hour. A leaked URL is therefore usable for up to two days rather than thirty
+ * minutes — still media-only, still one reader's, and the same trade the shop
+ * already makes by letting one account read a book for good.
  */
 
-const MEDIA_TOKEN_TTL_SECONDS = 60 * 30;
+const WINDOW_SECONDS = 24 * 60 * 60;
 
 type MediaTokenPayload = { sub: string; scope: 'media' };
 
-export const signMediaToken = (userId: string): string =>
-  jwt.sign({ sub: String(userId), scope: 'media' } satisfies MediaTokenPayload, config.jwt.access_secret, {
-    expiresIn: MEDIA_TOKEN_TTL_SECONDS,
-  });
+/** Start of the day-long window an instant falls in, in seconds. */
+const windowStart = (nowMs: number = Date.now()) =>
+  Math.floor(nowMs / 1000 / WINDOW_SECONDS) * WINDOW_SECONDS;
+
+export const signMediaToken = (userId: string): string => {
+  const issued = windowStart();
+  return jwt.sign(
+    {
+      ...({ sub: String(userId), scope: 'media' } satisfies MediaTokenPayload),
+      iat: issued,
+      exp: issued + WINDOW_SECONDS * 2,
+    },
+    config.jwt.access_secret
+  );
+};
 
 /** userId the token was minted for, or null if it is invalid, expired, or not a media token. */
 export const verifyMediaToken = (token: string): string | null => {
