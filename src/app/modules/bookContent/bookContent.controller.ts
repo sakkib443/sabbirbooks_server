@@ -5,9 +5,10 @@ import path from 'path';
 import jwt from 'jsonwebtoken';
 import config from '../../config';
 import { publicBaseUrl } from '../../utils/publicBaseUrl';
-import { PROTECTED_MEDIA_DIR } from '../../config/localUpload';
+import { MATERIALS_DIR, PROTECTED_MEDIA_DIR } from '../../config/localUpload';
 import { BookContentService } from './bookContent.service';
 import { verifyMediaToken, withMediaTokens } from './mediaToken';
+import { ensureVariant, makeVariants, variantOf } from './mediaVariants';
 
 // Small table rather than a `mime` dependency: these are the only extensions
 // the uploader accepts, and a wrong Content-Type here means a video that will
@@ -141,6 +142,11 @@ const uploadFile = async (req: Request, res: Response) => {
       ? `${base}/api/book-content/media/${file.filename}`
       : file.path || file.secure_url || file.url;
 
+    // The small copies the reader actually shows, made now so the first
+    // student to open the answer is not the one who waits for them. The
+    // original is untouched and the answer stores its URL, as before.
+    if (file.filename) await makeVariants(PROTECTED_MEDIA_DIR, file.filename);
+
     res.status(200).json({ success: true, data: describeUpload(file, fileUrl) });
   } catch (error: any) {
     res.status(400).json({ success: false, message: error.message });
@@ -169,6 +175,11 @@ const uploadPublicFile = async (req: Request, res: Response) => {
     const fileUrl = file.filename
       ? `${base}/uploads/materials/${file.filename}`
       : file.path || file.secure_url || file.url;
+
+    // A cover is shown a few hundred pixels wide and was going out as a
+    // print-resolution PNG. The small copies go up beside it, under the same
+    // static mount; the URL stored on the book does not change.
+    if (file.filename) await makeVariants(MATERIALS_DIR, file.filename);
 
     res.status(200).json({ success: true, data: describeUpload(file, fileUrl) });
   } catch (error: any) {
@@ -207,7 +218,13 @@ const serveProtectedMedia = async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, message: 'Bad file name' });
     }
 
-    const allowed = await BookContentService.canReadProtectedMedia(fileName, userId);
+    // A request for a small copy is a request for the picture it was made
+    // from: the answer stores the original's name, and that is the name the
+    // access check knows. See mediaVariants.
+    const variant = variantOf(fileName);
+    const accessName = variant ? variant.origin : fileName;
+
+    const allowed = await BookContentService.canReadProtectedMedia(accessName, userId);
     if (!allowed) {
       // 401 for a caller we could not identify — their media token has very
       // likely just expired, and the page should send them to sign in rather
@@ -217,11 +234,19 @@ const serveProtectedMedia = async (req: Request, res: Response) => {
       return res.status(code).json({ success: false, message: 'No access to this file' });
     }
 
-    const filePath = path.join(PROTECTED_MEDIA_DIR, fileName);
+    let filePath = path.join(PROTECTED_MEDIA_DIR, accessName);
     // Resolved and re-checked: symlinks and odd encodings can still land
     // outside the directory even after basename().
     if (!path.resolve(filePath).startsWith(path.resolve(PROTECTED_MEDIA_DIR))) {
       return res.status(400).json({ success: false, message: 'Bad file name' });
+    }
+
+    // Made on the first request when it is not there yet, which is how every
+    // figure uploaded before this existed gets its small copies. If it cannot
+    // be made, the original answers — a heavy figure beats a missing one.
+    if (variant) {
+      const made = await ensureVariant(PROTECTED_MEDIA_DIR, variant.origin, variant.kind);
+      if (made) filePath = made;
     }
 
     let stat: fs.Stats;
@@ -231,10 +256,22 @@ const serveProtectedMedia = async (req: Request, res: Response) => {
       return res.status(404).json({ success: false, message: 'File not found' });
     }
 
-    const type = mime(fileName);
+    const type = mime(path.basename(filePath));
     // Private: this is per-user authorised content, so no shared cache may keep
     // a copy and hand it to the next person.
-    res.setHeader('Cache-Control', 'private, max-age=3600');
+    //
+    // A file here never changes once written — every upload gets its own name —
+    // so the browser is told it may keep it for a day, and the ETag lets it ask
+    // "still the same?" in one cheap round trip after that.
+    const etag = `W/"${stat.size.toString(16)}-${Math.round(stat.mtimeMs).toString(16)}"`;
+    if (req.headers['if-none-match'] === etag) {
+      res.setHeader('ETag', etag);
+      res.setHeader('Cache-Control', 'private, max-age=86400');
+      return res.status(304).end();
+    }
+    res.setHeader('ETag', etag);
+    res.setHeader('Last-Modified', stat.mtime.toUTCString());
+    res.setHeader('Cache-Control', 'private, max-age=86400');
     res.setHeader('Content-Type', type);
     res.setHeader('Accept-Ranges', 'bytes');
 

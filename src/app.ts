@@ -5,6 +5,8 @@ import helmet from 'helmet';
 import mongoSanitize from 'express-mongo-sanitize';
 
 import globalErrorHandler from './app/middlewares/globalErrorHandler';
+import { MATERIALS_DIR } from './app/config/localUpload';
+import { ensureVariant, variantOf } from './app/modules/bookContent/mediaVariants';
 
 import { UserRoutes } from './app/modules/user/user.route';
 import { AuthRoutes } from './app/modules/auth/auth.routes';
@@ -150,6 +152,17 @@ app.use('/api/partners', PartnerRoutes);
 // relying on the app-wide helmet default surviving future edits: if this header
 // goes back to same-origin, every answer image and video silently breaks again.
 // Range requests (which <video> seeking needs) are handled by express.static.
+// Small copies of a public picture — "cover.png.view.webp" — made the first
+// time one is asked for, so covers uploaded long before any of this get them
+// too. Sits in front of express.static, which then serves the file it wrote;
+// if it could not be written the request 404s and the page falls back to the
+// original. Nothing else here is touched: same directory, same URLs.
+app.get('/uploads/materials/:fileName', async (req: Request, _res: Response, next) => {
+  const variant = variantOf(path.basename(req.params.fileName || ''));
+  if (variant) await ensureVariant(MATERIALS_DIR, variant.origin, variant.kind).catch(() => null);
+  next();
+});
+
 app.use(
   '/uploads/materials',
   express.static(path.join(process.cwd(), 'uploads', 'materials'), {

@@ -10,7 +10,8 @@ import fs from 'fs';
 // load never crashes; locally use <serverRoot>/uploads. (Cloud storage still needed for
 // uploads to actually persist/serve on serverless — see deploy notes.)
 const UPLOAD_ROOT = process.env.VERCEL ? '/tmp' : process.cwd();
-const MATERIALS_DIR = path.join(UPLOAD_ROOT, 'uploads', 'materials');
+/** Public files: covers, sample PDFs — served statically by app.ts. */
+export const MATERIALS_DIR = path.join(UPLOAD_ROOT, 'uploads', 'materials');
 try {
   fs.mkdirSync(MATERIALS_DIR, { recursive: true });
 } catch (err: any) {

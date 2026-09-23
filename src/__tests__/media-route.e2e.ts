@@ -86,6 +86,13 @@ async function main() {
   });
 
   const buyer = new mongoose.Types.ObjectId();
+  // The grant is what opens a book now — a delivered order does not, and has
+  // not since the printed codes shipped (see book-access.e2e.ts, which pins
+  // that rule). This test is about the route's wiring, so the buyer is given
+  // the grant redeeming a code would have produced; the order below stays
+  // because a real buyer has one.
+  const { BookAccess } = await import('../app/modules/bookAccess/bookAccess.model');
+  await BookAccess.create({ userId: buyer, bookId: book._id, source: 'manual' });
   await Order.create({
     user: buyer,
     items: [{ book: book._id, title: 'Anatomy', price: 500, quantity: 1, format: 'printed' }],
