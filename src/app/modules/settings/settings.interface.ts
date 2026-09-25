@@ -1,3 +1,25 @@
+/**
+ * One rung of the bulk-discount ladder: "buy `minQty` copies, get this off".
+ *
+ * `type` decides how the cut is measured, matching the book-offer and coupon
+ * vocabulary the admin already knows:
+ *   percent — that share of the book total
+ *   fixed   — that many taka, flat
+ *
+ * The cut is taken off the BOOK total (after each book's own offer, before
+ * delivery) — the same base a coupon works on, so the two are comparable and
+ * can never between them discount more than the books cost.
+ */
+export interface IQuantityDiscountTier {
+    /** Copies in the order at or above which this rung applies. */
+    minQty: number;
+    type: 'percent' | 'fixed';
+    /** Percent (0–90) or taka, per `type`. */
+    value: number;
+    /** Shown to the buyer on the order summary. Blank = a generated default. */
+    label?: string;
+}
+
 export interface ISiteSettings {
     // Brand / Identity
     brandName: string;
@@ -67,7 +89,17 @@ export interface ISiteSettings {
     deliveryNote: string;
     orderSupportPhone: string;
 
-    // Landing page
+    /**
+     * Bulk discount: buy this many copies, get this much off.
+     *
+     * One ladder for the whole shop, matched on the TOTAL number of copies in
+     * the order (a buyer taking three titles is buying in bulk just as much as
+     * one taking three of the same). The best qualifying rung wins; they never
+     * add up.
+     */
+    quantityDiscounts: IQuantityDiscountTier[];
+
+    // Landing page (see the tier type above the interface)
     landingBookSlug: string;
     landingHeadline: string;
     landingSubheadline: string;

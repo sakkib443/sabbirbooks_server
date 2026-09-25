@@ -15,6 +15,7 @@ import { Book } from '../book/book.model';
 import { priceBookUnit, hasOffers } from '../book/book.pricing';
 import { BookCoupon } from '../bookCoupon/bookCoupon.model';
 import { evaluateBookCoupon } from '../bookCoupon/bookCoupon.controller';
+import { pickQuantityTier, usableTiers } from './quantityDiscount';
 import { User } from '../user/user.model';
 import { BkashService } from '../payment/bkash.service';
 import { SslcommerzService } from '../payment/sslcommerz.service';
@@ -453,6 +454,21 @@ const createOrder = async (
   // verbatim.
   const offersDiscount = Math.round(orderDiscount);
 
+  // ── Bulk discount — "buy N copies, get X off" ───────────────────────────────
+  // Applied BEFORE the coupon and on the same base (books after their own
+  // offers), then subtracted from what the coupon is evaluated against. Running
+  // both off the untouched base would let a big order with a code discount more
+  // than the books cost.
+  const totalCopies = items.reduce((n, it) => n + (Number(it.quantity) || 0), 0);
+  const settingsForBulk: any = await SettingsService.getSettingsService();
+  const bulk = pickQuantityTier(
+    settingsForBulk?.quantityDiscounts,
+    totalCopies,
+    Math.max(0, subtotal - offersDiscount)
+  );
+  const quantityDiscount = bulk ? Math.round(bulk.amount) : 0;
+  const quantityDiscountLabel = bulk?.label || '';
+
   // ── Coupon — stacks on top of the book's own offers ─────────────────────────
   // Evaluated against the product total AFTER those offers, so the code discounts
   // the already-reduced price (the buyer keeps their pre-order / online / normal
@@ -470,7 +486,7 @@ const createOrder = async (
   let couponFreeDelivery = false;
   const rawCoupon = (payload.couponCode || '').trim();
   if (rawCoupon) {
-    const afterOffers = Math.max(0, subtotal - offersDiscount);
+    const afterOffers = Math.max(0, subtotal - offersDiscount - quantityDiscount);
     // Throws a buyer-friendly Error (expired / used up / wrong payment method)
     // which fails the order — the buyer explicitly applied the code and expects
     // its price, so silently dropping it and charging more than shown would be
@@ -488,8 +504,8 @@ const createOrder = async (
     couponDocId = coupon._id;
   }
 
-  // Grand total discount = the book's offers plus the coupon.
-  const discount = offersDiscount + couponDiscount;
+  // Grand total discount = the book's offers, plus the bulk rung, plus the coupon.
+  const discount = offersDiscount + quantityDiscount + couponDiscount;
 
   // The buyer's medical college — required on EVERY order. The shop sells to
   // medical students and the college is how orders are batched and delivered,
@@ -543,6 +559,8 @@ const createOrder = async (
     couponCode,
     couponDiscount,
     couponPayout,
+    quantityDiscount,
+    quantityDiscountLabel,
     deliveryWaived,
     deliveryCharge,
     total,
@@ -642,6 +660,10 @@ const getCheckoutOptions = async (subtotal = 0) => {
     freeDeliveryAbove: Number(s?.freeDeliveryAbove) || 0,
     deliveryNote: s?.deliveryNote || '',
     supportPhone: s?.orderSupportPhone || s?.phoneNumber || '',
+    // The bulk ladder, so checkout can price it live and nudge the buyer
+    // ("একটা বেশি নিলে ১০% ছাড়"). The server re-prices it at order time either
+    // way, exactly like the per-college delivery rate above.
+    quantityDiscounts: usableTiers(s?.quantityDiscounts),
     wallets: {
       bkash: s?.paymentBkashNumber || '',
       rocket: s?.paymentRocketNumber || '',

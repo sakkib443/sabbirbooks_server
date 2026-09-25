@@ -149,6 +149,11 @@ export interface IOrder {
   couponCode?: string;
   couponDiscount?: number;
   couponPayout?: number;
+  // Bulk discount, snapshotted like the coupon: the taka the "buy N copies"
+  // ladder took off, and the rung's label as it was shown at checkout. Both
+  // are frozen here so editing the ladder later never rewrites an old order.
+  quantityDiscount?: number;
+  quantityDiscountLabel?: string;
   /** Taka a free-delivery coupon took off the delivery charge. */
   deliveryWaived?: number;
   // Snapshotted at checkout from the site settings, so changing the rate later

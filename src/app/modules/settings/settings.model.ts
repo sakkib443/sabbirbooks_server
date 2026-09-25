@@ -1,5 +1,17 @@
 import { Schema, model } from 'mongoose';
-import { ISiteSettings } from './settings.interface';
+import { ISiteSettings, IQuantityDiscountTier } from './settings.interface';
+
+// One rung of the bulk ladder. minQty starts at 2 because "1+ copies" is not a
+// bulk discount, it is the price — that belongs on the book's own offer.
+const quantityDiscountSchema = new Schema<IQuantityDiscountTier>(
+    {
+        minQty: { type: Number, required: true, min: 2 },
+        type: { type: String, enum: ['percent', 'fixed'], default: 'percent' },
+        value: { type: Number, required: true, min: 0, max: 100000 },
+        label: { type: String, default: '', trim: true },
+    },
+    { _id: false }
+);
 
 const settingsSchema = new Schema<ISiteSettings>(
     {
@@ -104,6 +116,14 @@ const settingsSchema = new Schema<ISiteSettings>(
         },
         // Support number printed on the order confirmation screen.
         orderSupportPhone: { type: String, default: '' },
+
+        // ── Bulk discount ──────────────────────────────────────────────────
+        // "Buy N copies, get X off." One ladder for the whole shop, matched on
+        // the total copies in the order. Empty array = feature off, which is
+        // the default, so an existing shop is unaffected until the admin adds
+        // a rung. Order.service picks the best qualifying rung; see
+        // quantityDiscount.ts for why the percent ceiling is 90 here too.
+        quantityDiscounts: { type: [quantityDiscountSchema], default: [] },
 
         // ── Landing page ───────────────────────────────────────────────────
         // The public site is one page about one book. This says which book —

@@ -110,6 +110,9 @@ const orderSchema = new Schema<IOrder>(
     // what the shop owes the coupon owner for this sale; the report sums it.
     couponDiscount: { type: Number, default: 0, min: 0 },
     couponPayout: { type: Number, default: 0, min: 0 },
+    // Bulk discount snapshot — see order.interface.
+    quantityDiscount: { type: Number, default: 0, min: 0 },
+    quantityDiscountLabel: { type: String, default: '', trim: true },
     // What a free-delivery coupon took off the delivery row. Recorded so the
     // admin can see WHY an order shows ৳0 delivery — otherwise it is
     // indistinguishable from a college that qualifies for free local delivery.
