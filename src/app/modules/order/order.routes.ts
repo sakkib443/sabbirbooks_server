@@ -133,6 +133,17 @@ router.patch(
   OrderController.updateOrderStatus
 );
 
+// ─── Admin: a sticky note on one order ───────────────────────
+// Same gate as the status change: it is a fulfilment annotation, written by
+// whoever is actually packing the orders, and the buyer never sees it.
+router.patch(
+  '/:id/note',
+  authMiddleware,
+  authorize('admin'),
+  requireCapability('orders.write'),
+  OrderController.setOrderNote
+);
+
 // ─── Bulk status change ──────────────────────────────────────
 // Same gate as the single-order status route (orders.write): confirming or
 // cancelling many at once is the same decision, taken in bulk. Declared before

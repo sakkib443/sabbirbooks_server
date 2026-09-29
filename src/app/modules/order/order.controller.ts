@@ -128,6 +128,17 @@ const getCheckoutOptions = async (req: Request, res: Response) => {
   }
 };
 
+// PATCH /orders/:id/note — the admin's sticky note on one order.
+const setOrderNote = async (req: Request, res: Response) => {
+  try {
+    const order = await OrderService.setOrderNote(req.params.id, req.body?.adminNote ?? '');
+    res.status(200).json({ success: true, message: 'Note saved', data: order });
+  } catch (error: any) {
+    const code = error.message === 'Order not found' ? 404 : 400;
+    res.status(code).json({ success: false, message: error.message });
+  }
+};
+
 // GET my orders (auth)
 const getMyOrders = async (req: Request, res: Response) => {
   try {
@@ -302,6 +313,7 @@ export const OrderController = {
   createOrder,
   getStats,
   getCheckoutOptions,
+  setOrderNote,
   getMyOrders,
   getOrderById,
   getAllOrders,

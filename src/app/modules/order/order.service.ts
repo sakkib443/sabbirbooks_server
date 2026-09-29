@@ -673,6 +673,29 @@ const getCheckoutOptions = async (subtotal = 0) => {
   };
 };
 
+/**
+ * The admin's own note on one order — "call after 6pm", "wants it gift wrapped".
+ *
+ * Its own route rather than a corner of adminUpdateOrder: that one is the
+ * owner-only correction pass over the whole record (address, email, payment
+ * state), and a sticky note is a working annotation the staff who actually
+ * pack the orders need. Nothing else on the order moves, and nothing the buyer
+ * sees changes — this text appears only on the admin list.
+ *
+ * Blank clears the note. Trimmed, so a note of spaces does not leave the row
+ * flagged as having one.
+ */
+const setOrderNote = async (id: string, note: string): Promise<IOrder> => {
+  if (!isValidObjectId(id)) throw new Error('Invalid order id');
+  const order = await Order.findByIdAndUpdate(
+    id,
+    { $set: { adminNote: String(note ?? '').trim() } },
+    { new: true }
+  );
+  if (!order) throw new Error('Order not found');
+  return order;
+};
+
 // ─── GET my orders ───────────────────────────────────────────
 // items.book is populated with three fields only — the buyer's order list shows
 // a cover thumbnail, and the line's title/price are already snapshotted on the
@@ -1827,6 +1850,7 @@ export const OrderService = {
   createOrder,
   getBookOrderStats,
   getCheckoutOptions,
+  setOrderNote,
   getMyOrders,
   getOrderById,
   getAllOrders,
