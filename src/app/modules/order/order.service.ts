@@ -496,6 +496,7 @@ const createOrder = async (
       // A guest's "one use per buyer" is counted by phone number.
       phone: shipping?.phone,
       paymentMethod: method,
+      quantity: totalCopies,
     });
     couponCode = coupon.code;
     couponDiscount = discountAmount;

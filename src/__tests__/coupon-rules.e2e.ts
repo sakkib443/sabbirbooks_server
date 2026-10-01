@@ -211,6 +211,23 @@ async function main() {
     );
   }
 
+  console.log('── Fixed amount: per order vs per book ──');
+  {
+    await make({ code: 'PERORDER', discountType: 'fixed', discountValue: 100 });
+    const o = await evaluateBookCoupon('PERORDER', 2000, { quantity: 3 });
+    check('a per-order fixed coupon takes its amount once', o.discountAmount === 100, o.discountAmount);
+    await make({ code: 'PERBOOK', discountType: 'fixed', discountValue: 20, fixedPer: 'book' });
+    const b = await evaluateBookCoupon('PERBOOK', 2000, { quantity: 3 });
+    check('a per-book fixed coupon takes it once per copy', b.discountAmount === 60, b.discountAmount);
+    const one = await evaluateBookCoupon('PERBOOK', 2000);
+    check('no quantity counts as one copy', one.discountAmount === 20, one.discountAmount);
+    const clamp = await evaluateBookCoupon('PERBOOK', 50, { quantity: 5 });
+    check('per-book never exceeds the price', clamp.discountAmount === 50, clamp.discountAmount);
+    await make({ code: 'PCTBOOK', discountValue: 10, fixedPer: 'book' });
+    const pct = await evaluateBookCoupon('PCTBOOK', 1000, { quantity: 3 });
+    check('per-book is ignored for a percentage', pct.discountAmount === 100, pct.discountAmount);
+  }
+
   console.log('\n── Still refused for the old reasons ──────────────────');
   {
     await make({ code: 'OFF', isActive: false });

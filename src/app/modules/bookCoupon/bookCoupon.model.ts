@@ -41,6 +41,12 @@ const bookCouponSchema = new Schema(
     // cannot zero a price; a fixed amount is clamped to the price at checkout.
     discountType: { type: String, enum: ['percent', 'fixed'], default: 'percent' },
     discountValue: { type: Number, default: 0, min: 0 },
+    /**
+     * For a FIXED amount only: 'order' takes it off the whole order once (the
+     * original behaviour, and the default for every existing coupon); 'book'
+     * takes it off every copy, so ৳20 on 3 books is ৳60.
+     */
+    fixedPer: { type: String, enum: ['order', 'book'], default: 'order' },
 
     /**
      * Ceiling on a percentage discount, in taka. 0 = uncapped.

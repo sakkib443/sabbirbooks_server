@@ -76,6 +76,8 @@ export interface CouponContext {
   paymentMethod?: string | null;
   /** The delivery charge this order would otherwise pay, for freeDelivery. */
   deliveryCharge?: number;
+  /** Copies in the order, for a fixed-per-book coupon. */
+  quantity?: number;
 }
 
 export interface CouponEvaluation {
@@ -191,6 +193,10 @@ export const evaluateBookCoupon = async (
     if (cap > 0) discountAmount = Math.min(discountAmount, cap);
   } else {
     discountAmount = Math.max(0, Number(coupon.discountValue) || 0);
+    // Per-book: once per copy. A missing quantity counts as one copy, never zero.
+    if (coupon.fixedPer === 'book') {
+      discountAmount *= Math.max(1, Math.floor(Number(ctx.quantity) || 1));
+    }
   }
   discountAmount = Math.min(discountAmount, price); // never below zero
 
@@ -215,7 +221,7 @@ export const evaluateBookCoupon = async (
 // real price.
 export const validateCoupon = async (req: Request, res: Response) => {
   try {
-    const { code, amount, paymentMethod, deliveryCharge, phone } = req.body;
+    const { code, amount, paymentMethod, deliveryCharge, phone, quantity } = req.body;
     if (!code) return res.status(400).json({ success: false, message: 'Coupon code required' });
 
     // The buyer's own id, so the per-buyer limit is enforced in the preview
@@ -225,7 +231,7 @@ export const validateCoupon = async (req: Request, res: Response) => {
     const { coupon, discountAmount, deliveryDiscount, finalPrice } = await evaluateBookCoupon(
       code,
       amount,
-      { userId: uid(req), phone, paymentMethod, deliveryCharge }
+      { userId: uid(req), phone, paymentMethod, deliveryCharge, quantity }
     );
 
     res.json({
@@ -236,6 +242,7 @@ export const validateCoupon = async (req: Request, res: Response) => {
         name: coupon.name || '',
         discountType: coupon.discountType,
         discountValue: coupon.discountValue,
+        fixedPer: coupon.fixedPer || 'order',
         discountAmount,
         // Sent separately from the product discount: the checkout shows them on
         // two different lines, and a free-delivery code with no discount would
@@ -336,6 +343,7 @@ const normalizeCouponLimits = (data: any) => {
     if (data[key] !== undefined) data[key] = Math.max(0, Number(data[key]) || 0);
   }
   if (data.freeDelivery !== undefined) data.freeDelivery = Boolean(data.freeDelivery);
+  if (data.fixedPer !== undefined) data.fixedPer = data.fixedPer === 'book' ? 'book' : 'order';
 
   // A window that closes before it opens accepts nothing, and would be found
   // out by a buyer rather than by the admin who typed it.
