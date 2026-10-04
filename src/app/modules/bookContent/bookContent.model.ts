@@ -130,6 +130,10 @@ const bookQuestionSchema = new Schema<IBookQuestion>(
     attachments: { type: [attachmentSchema], default: [] },
     images: { type: [String], default: [] },
 
+    // Shown in place of the built-in "video unavailable" line. See the
+    // interface; empty means the default, and a video makes it moot.
+    videoNote: { type: String, default: '', trim: true, maxlength: 500 },
+
     order: { type: Number, required: true, default: 1 },
     isPublished: { type: Boolean, default: true },
     isDeleted: { type: Boolean, default: false },

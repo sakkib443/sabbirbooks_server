@@ -90,7 +90,7 @@ const scanTopic = async (qrCode: string, userId?: string | null): Promise<ScanRe
     BookPart.findById(topic.partId).select('title titleBn').lean(),
     BookQuestion.find({ topicId: topic._id, isDeleted: false, isPublished: true })
       .sort({ order: 1 })
-      .select('questionNo questionText questionTextBn answerHtml videos attachments images order')
+      .select('questionNo questionText questionTextBn answerHtml videos attachments images videoNote order')
       .lean(),
   ]);
 
@@ -446,6 +446,36 @@ const getQuestionsByTopic = async (topicId: string) =>
   BookQuestion.find({ topicId, isDeleted: false }).sort({ order: 1 }).lean();
 
 const getTopicById = async (id: string) => BookTopic.findById(id).lean();
+
+/**
+ * The "no video yet" notes already written somewhere in this book.
+ *
+ * There is no separate table of saved messages, and deliberately so. A book
+ * waiting on recordings says the same two or three things over and over, and
+ * the questions themselves already hold them — so the editor offers back what
+ * it finds here and the admin picks instead of retyping. A message stops being
+ * offered once the last question using it has moved on, which is the right
+ * kind of forgetting: a one-off typed in 2024 should not haunt the dropdown
+ * forever.
+ *
+ * Each question keeps its own copy of the text. Editing one never rewrites
+ * another, because a shared message that silently changes under forty
+ * questions is a worse surprise than retyping one.
+ */
+const getVideoNotes = async (bookId: string) => {
+  const notes = await BookQuestion.distinct('videoNote', {
+    bookId: new Types.ObjectId(bookId),
+    isDeleted: false,
+    videoNote: { $nin: ['', null] },
+  });
+  return (notes as string[])
+    .map(n => String(n || '').trim())
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b, 'bn'))
+    // A ceiling so a book that somehow collected hundreds cannot turn the
+    // dropdown into a scroll of its own.
+    .slice(0, 50);
+};
 
 // ─── Reorder ────────────────────────────────────────────────
 
@@ -938,6 +968,7 @@ export const BookContentService = {
   restoreQuestion,
   getQuestionsByTopic,
   getTopicById,
+  getVideoNotes,
   reorder,
   getNextUnanswered,
   getNextTopicForReader,

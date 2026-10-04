@@ -64,6 +64,9 @@ router.get('/stats/:bookId', ...admin, BookContentController.getStats);
 router.get('/qr-sheet/:bookId', ...admin, BookContentController.getQrSheet);
 router.get('/next-unanswered/:bookId', ...admin, BookContentController.getNextUnanswered);
 router.get('/questions/topic/:topicId', ...admin, BookContentController.getQuestionsByTopic);
+// Messages this book already uses where a video is missing, so the editor can
+// offer them back instead of making the admin retype one. See getVideoNotes.
+router.get('/video-notes/:bookId', ...admin, BookContentController.getVideoNotes);
 
 router.patch('/reorder/:level', ...admin, BookContentController.reorder);
 

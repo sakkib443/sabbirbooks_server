@@ -92,6 +92,16 @@ export interface IBookQuestion {
   attachments: IQuestionAttachment[];
   images: string[];
 
+  /**
+   * What the reader is told when this question has no video yet.
+   *
+   * Empty = the built-in apology. Anything else replaces it, so a question
+   * waiting on a recording can say so in its own words ("এই প্রশ্নের ভিডিও
+   * শীঘ্রই যোগ করা হবে") instead of blaming a fault that does not exist.
+   * Ignored entirely once a video is attached.
+   */
+  videoNote?: string;
+
   order: number;
   isPublished: boolean;
   isDeleted: boolean;

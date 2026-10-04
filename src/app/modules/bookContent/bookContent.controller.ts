@@ -338,6 +338,15 @@ const getQuestionsByTopic = async (req: Request, res: Response) => {
   }
 };
 
+const getVideoNotes = async (req: Request, res: Response) => {
+  try {
+    const result = await BookContentService.getVideoNotes(req.params.bookId);
+    res.status(200).json({ success: true, data: result });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
 const getNextTopicForReader = async (req: Request, res: Response) => {
   try {
     const userId = (req as any).user?._id;
@@ -475,6 +484,7 @@ export const BookContentController = {
   getStats,
   getQrSheet,
   getQuestionsByTopic,
+  getVideoNotes,
   getNextUnanswered,
   getNextTopicForReader,
   reorder,
