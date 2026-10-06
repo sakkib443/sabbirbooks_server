@@ -50,6 +50,20 @@ async function startServer() {
     }
   }
 
+  // ─── English copy for the site's English mode ──────────────────
+  //
+  // Fills only English fields that are still blank, and only beside the exact
+  // Bengali it translates — see fillEnglishContent. Non-fatal like the rest.
+  if (dbReady) {
+    try {
+      const { fillEnglishContent } = await import('./app/utils/fillEnglishContent');
+      const n = await fillEnglishContent();
+      if (n) console.log(`🌐 English copy filled on ${n} document(s).`);
+    } catch (error) {
+      console.error('⚠️  English-copy fill failed (server still starting):', error);
+    }
+  }
+
   // ─── Seed the medical-college directory, once ──────────────────
   //
   // Students pick their college from this list at signup, so it has to exist

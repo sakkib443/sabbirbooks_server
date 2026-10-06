@@ -8,6 +8,7 @@ import { IBook, IBookFeature, IBookOffer, IBookOffers } from './book.interface';
 const bookFeatureSchema = new Schema<IBookFeature>(
   {
     text: { type: String, required: true },
+    textEn: { type: String, default: '' },
     weight: { type: Number, default: 1 },
     highlight: { type: Boolean, default: false },
   },
@@ -50,6 +51,8 @@ const bookSchema = new Schema<IBook>(
     slug: { type: String, required: false, unique: true },
     author: { type: String, required: false },
     description: { type: String, required: false },
+    // English version for the site's English mode. Blank = show `description`.
+    descriptionEn: { type: String, default: '' },
     coverImage: { type: String, required: false },
 
     price: { type: Number, required: false, default: 0 },

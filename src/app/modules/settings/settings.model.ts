@@ -114,6 +114,8 @@ const settingsSchema = new Schema<ISiteSettings>(
             type: String,
             default: 'সারা দেশে ১-৩ কর্মদিবসের ভিতরে পৌঁছে যাবে ইনশাআল্লাহ।',
         },
+        // The same note for the site's English mode. Blank = show deliveryNote.
+        deliveryNoteEn: { type: String, default: '' },
         // Support number printed on the order confirmation screen.
         orderSupportPhone: { type: String, default: '' },
 

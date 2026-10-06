@@ -87,6 +87,7 @@ export interface ISiteSettings {
     /** When the Khulna rules were moved onto per-college rates — see the model. */
     collegeDeliveryMigratedAt?: Date;
     deliveryNote: string;
+    deliveryNoteEn?: string;
     orderSupportPhone: string;
 
     /**

@@ -660,6 +660,7 @@ const getCheckoutOptions = async (subtotal = 0) => {
     codExtraCharge: Number(s?.codExtraCharge) || 0,
     freeDeliveryAbove: Number(s?.freeDeliveryAbove) || 0,
     deliveryNote: s?.deliveryNote || '',
+    deliveryNoteEn: s?.deliveryNoteEn || '',
     supportPhone: s?.orderSupportPhone || s?.phoneNumber || '',
     // The bulk ladder, so checkout can price it live and nudge the buyer
     // ("একটা বেশি নিলে ১০% ছাড়"). The server re-prices it at order time either

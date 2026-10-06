@@ -19,6 +19,7 @@ const bookBodySchema = z.object({
   slug: z.string().optional(),
   author: z.string().optional(),
   description: z.string().optional(),
+  descriptionEn: z.string().optional(),
   coverImage: z.string().url('Cover image must be a valid URL').optional().or(z.literal('')),
 
   price: z.number().min(0, 'Price must be 0 or more').optional(),
@@ -68,6 +69,7 @@ const bookBodySchema = z.object({
     .array(
       z.object({
         text: z.string().min(1),
+        textEn: z.string().optional(),
         weight: z.number().optional(),
         highlight: z.boolean().optional(),
       })

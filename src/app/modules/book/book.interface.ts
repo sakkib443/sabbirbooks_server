@@ -3,6 +3,8 @@
 // re-arrange the pitch from the admin form without a deploy.
 export interface IBookFeature {
   text: string;
+  /** English version for the site's English mode. Blank = show `text`. */
+  textEn?: string;
   weight?: number;
   highlight?: boolean;
 }
@@ -36,6 +38,7 @@ export interface IBook {
   slug?: string;
   author?: string;
   description?: string;
+  descriptionEn?: string;
   coverImage?: string;
 
   price?: number;
