@@ -11,9 +11,12 @@ import { Settings } from '../modules/settings/settings.model';
  *
  * Keys are the Bengali with formatting marks and whitespace stripped, so a
  * stray space or a colour mark ([[red b|…]]) changing does not stop the match.
+ * NFC first: Bengali য় has two encodings (one code point, or য + nukta), and
+ * the live description used the other one from this file — so it never matched.
  */
 const key = (s: string) =>
   String(s || '')
+    .normalize('NFC')
     .replace(/\[\[[^|\]]*\|([^\]]*)\]\]/g, '$1')
     .replace(/\s+/g, '');
 

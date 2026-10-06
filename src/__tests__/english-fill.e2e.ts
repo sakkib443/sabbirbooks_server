@@ -57,6 +57,16 @@ async function main() {
 
   check('second run does nothing', (await fillEnglishContent()) === 0);
 
+  // The live description spells য় as the single code point U+09DF.
+  const composed = await Book.create({
+    title: 'X', slug: 'x', price: 1, format: 'printed', id: 2,
+    description: String(live.description).replace(/য়/g, 'য়'),
+  } as any);
+  check('the composed য় spelling is a different string', (composed as any).description !== live.description);
+  await fillEnglishContent();
+  const c: any = await Book.findById(composed._id).lean();
+  check('still matched and translated', /^Dear 1st Prof/.test(c.descriptionEn), c.descriptionEn);
+
   console.log(`\n${passed} passed, ${failed} failed\n`);
   await mongoose.disconnect();
   await mongod.stop();
