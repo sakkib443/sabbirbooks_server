@@ -242,7 +242,24 @@ async function main() {
     const created = new Date(yr, mo, Math.max(today - 2 - i, 1), 12, 0);
     orders.push(makeOrder(seq++, created, 'pending'));
   }
+  /*
+   * A shop with years behind it, on demand.
+   *
+   * `DEMO_BULK_ORDERS=1300` adds that many older orders, spread back over the
+   * past few months. The admin order screen pages through what it finds and
+   * counts all of it, and neither the paging nor the drawing of a few thousand
+   * rows can be judged against the two dozen above.
+   */
+  const bulk = Number(process.env.DEMO_BULK_ORDERS) || 0;
+  for (let i = 0; i < bulk; i++) {
+    const daysBack = 3 + Math.floor((i / Math.max(bulk, 1)) * 120);
+    const created = new Date(nowDate.getTime() - daysBack * 24 * 60 * 60 * 1000);
+    created.setHours(8 + (i % 12), (i * 11) % 60, 0, 0);
+    orders.push(makeOrder(seq++, created, spread[i % spread.length]));
+  }
+
   await Order.insertMany(orders, { timestamps: false } as never);
+  if (bulk) console.log(`  ${orders.length} orders seeded (${bulk} bulk)`);
 
   const { default: app } = await import('../app');
 
