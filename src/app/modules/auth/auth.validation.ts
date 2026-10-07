@@ -1,5 +1,6 @@
 // src/app/modules/auth/auth.validation.ts
 import { z } from 'zod';
+import { isReachableNumber, WHATSAPP_NUMBER_MESSAGE } from '../../utils/phone';
 
 // Login by EMAIL or PHONE (+ password). At least one identifier is required.
 export const loginValidationSchema = z.object({
@@ -24,15 +25,12 @@ export const registerValidationSchema = z.object({
     email: z.string().email({ message: 'Valid email is required' }),
     phoneNumber: z.string().optional(),
     // Every customer is reached on WhatsApp, so the shop asks for it up front.
-    // Bangladeshi mobiles only: 11 digits starting 01, optionally carrying a
-    // +88 / 88 country prefix. Kept in step with the identical rule in
-    // user.validation.ts — the two signup schemas must not drift.
-    whatsappNumber: z
-      .string()
-      .trim()
-      .regex(/^(?:\+?88)?01[3-9]\d{8}$/, {
-        message: 'Give a valid WhatsApp number, e.g. 01712345678',
-      }),
+    // Any country's number is accepted, with a Bangladeshi one still held to
+    // the local shape — see utils/phone. Both signup schemas call the same
+    // function so the two doors cannot drift apart.
+    whatsappNumber: z.string().trim().refine(isReachableNumber, {
+      message: WHATSAPP_NUMBER_MESSAGE,
+    }),
     // Directory id when the student picked from the list. The free-text name is
     // what they typed when their college was not in the directory yet.
     medicalCollege: z.string().optional(),

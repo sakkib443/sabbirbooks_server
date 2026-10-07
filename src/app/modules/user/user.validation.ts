@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { GRANTABLE_CAPABILITIES, ROLES } from "../../config/permissions";
+import { isReachableNumber, WHATSAPP_NUMBER_MESSAGE } from "../../utils/phone";
 
 // zod's enum() wants a non-empty tuple; the shared lists are readonly arrays.
 const roleEnum = z.enum(ROLES as unknown as [string, ...string[]]);
@@ -13,15 +14,12 @@ export const signupValidationSchema = z.object({
     lastName: z.string().min(1, { message: "Last name is required" }),
     email: z.string().email({ message: "Valid email is required" }),
     phoneNumber: z.string().optional(),
-    // Kept identical to the rule in auth.validation.ts — both schemas guard a
-    // public student signup, and letting them drift means one door enforces the
+    // The same function auth.validation.ts calls — both schemas guard a public
+    // student signup, and letting them drift means one door enforces the
     // number and the other does not.
-    whatsappNumber: z
-      .string()
-      .trim()
-      .regex(/^(?:\+?88)?01[3-9]\d{8}$/, {
-        message: "Give a valid WhatsApp number, e.g. 01712345678",
-      }),
+    whatsappNumber: z.string().trim().refine(isReachableNumber, {
+      message: WHATSAPP_NUMBER_MESSAGE,
+    }),
     medicalCollege: z.string().optional(),
     medicalCollegeName: z.string().optional(),
     location: z.string().optional(),
