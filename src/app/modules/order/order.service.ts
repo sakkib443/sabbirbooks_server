@@ -1542,9 +1542,45 @@ const getDownloadUrl = async (
 // month" line up with the shop's own clock rather than the server's UTC.
 const BD_OFFSET_MS = 6 * 60 * 60 * 1000;
 
-/** The UTC instant of Bangladesh-midnight for a given BD calendar date. */
-const bdMidnightUtc = (y: number, m: number, d: number) =>
-  new Date(Date.UTC(y, m, d) - BD_OFFSET_MS);
+/*
+ * ── The shop's day ─────────────────────────────────────────────────────
+ *
+ * Noon to noon, Bangladesh time, and a date NAMES THE DAY THAT ENDS AT ITS
+ * NOON: "16 Sep" is every order placed from 15 Sep 12:00 up to 16 Sep 12:00.
+ * That is the day the Book Orders screen batches couriers by — the packing
+ * list closes at noon because the courier comes in the afternoon — and the
+ * client's own books are kept the same way.
+ *
+ * This dashboard used to count calendar days, midnight to midnight, so its
+ * chart and the order screen disagreed about which day an afternoon order
+ * belonged to. Same rule both sides now; the client version of it lives in
+ * the web app at src/lib/shopDay.js and these two must stay in step.
+ */
+const SHOP_DAY_SHIFT_MS = 12 * 60 * 60 * 1000;
+
+/** YYYY-MM-DD in Bangladesh for an instant. */
+const bdDate = (instant: Date) =>
+  new Date(instant.getTime() + BD_OFFSET_MS).toISOString().slice(0, 10);
+
+/** A YYYY-MM-DD moved by n days. */
+const addDays = (day: string, n: number) => {
+  const d = new Date(`${day}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+};
+
+/** The instant a shop day closes: noon, Bangladesh time, on that date. */
+const cutoffOf = (day: string) => new Date(`${day}T12:00:00+06:00`);
+
+/** Orders placed in [from, to) for the shop days fromDay…toDay, both included. */
+const dayWindow = (fromDay: string, toDay: string) => ({
+  $gte: cutoffOf(addDays(fromDay, -1)),
+  $lt: cutoffOf(toDay),
+});
+
+/** The last date of a month, as a YYYY-MM-DD. */
+const lastDateOfMonth = (y: number, m: number) =>
+  new Date(Date.UTC(y, m + 1, 0)).toISOString().slice(0, 10);
 
 /**
  * The money behind the book orders, for the dashboard and the analytics page.
@@ -1577,26 +1613,37 @@ const getBookOrderStats = async (opts?: {
   const now = new Date();
   const bdNow = new Date(now.getTime() + BD_OFFSET_MS);
 
-  const todayStart = bdMidnightUtc(bdNow.getUTCFullYear(), bdNow.getUTCMonth(), bdNow.getUTCDate());
-  const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
+  /*
+   * "Today" — the same day the Book Orders screen means by it.
+   *
+   * The day NAMED by today's date, which closes at today's noon. So at nine in
+   * the evening this is a window that shut nine hours ago and the order that
+   * just came in belongs to tomorrow's list — exactly what the order screen
+   * says, and the point of changing this: the two screens have to answer the
+   * same question with the same number.
+   */
+  const todayDay = bdDate(now);
 
-  // The window the chart and the range totals cover.
-  const parseDay = (s?: string): Date | null => {
-    if (!s) return null;
-    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s.trim());
-    if (!m) return null;
-    return bdMidnightUtc(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
-  };
+  // The window the chart and the range totals cover, as shop-day NAMES. Days
+  // are carried as dates rather than instants from here on: the fill loop
+  // below walks the same names the aggregation groups by, which is what the
+  // old code could not do — it stepped in 24-hour jumps from a UTC instant
+  // and read the date off the wrong side of the boundary, so every chart was
+  // a day out and the last day of the range was missing altogether.
+  const asDay = (s?: string): string | null =>
+    s && /^\d{4}-\d{2}-\d{2}$/.test(s.trim()) ? s.trim() : null;
 
-  let rangeStart = parseDay(opts?.from);
-  let rangeEnd = parseDay(opts?.to);
-  if (rangeEnd) rangeEnd = new Date(rangeEnd.getTime() + 24 * 60 * 60 * 1000); // inclusive day
-  if (!rangeStart || !rangeEnd || rangeEnd <= rangeStart) {
+  let fromDay = asDay(opts?.from);
+  let toDay = asDay(opts?.to);
+  if (!fromDay || !toDay || toDay < fromDay) {
     const y = Number.isFinite(opts?.year) ? (opts!.year as number) : bdNow.getUTCFullYear();
     const m = Number.isFinite(opts?.month) ? (opts!.month as number) : bdNow.getUTCMonth();
-    rangeStart = bdMidnightUtc(y, m, 1);
-    rangeEnd = bdMidnightUtc(y, m + 1, 1);
+    fromDay = `${y}-${String(m + 1).padStart(2, '0')}-01`;
+    toDay = lastDateOfMonth(y, m);
   }
+
+  const rangeWindow = dayWindow(fromDay, toDay);
+  const todayWindow = dayWindow(todayDay, todayDay);
 
   const live = { status: { $ne: 'cancelled' } };
   // Money in hand: delivered, or already paid (which is every successful
@@ -1628,23 +1675,33 @@ const getBookOrderStats = async (opts?: {
     await Promise.all([
       Order.aggregate([{ $match: live }, { $group: { _id: null, ...moneyGroup } }]),
       Order.aggregate([
-        { $match: { ...live, createdAt: { $gte: todayStart, $lt: todayEnd } } },
+        { $match: { ...live, createdAt: todayWindow } },
         { $group: { _id: null, ...moneyGroup } },
       ]),
       // "New" = still waiting for the admin to confirm it — the work queue.
       Order.countDocuments({ status: 'pending' }),
       Order.aggregate([
-        { $match: { ...live, createdAt: { $gte: rangeStart, $lt: rangeEnd } } },
+        { $match: { ...live, createdAt: rangeWindow } },
         {
           $group: {
-            _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: 'Asia/Dhaka' } },
+            // The shop day an order belongs to: shift twelve hours forward
+            // and read the Bangladeshi date, so everything from one noon to
+            // the next answers to the date that noon closes. 11 AM on the
+            // 15th lands on the 15th; 1 PM lands on the 16th.
+            _id: {
+              $dateToString: {
+                format: '%Y-%m-%d',
+                date: { $add: ['$createdAt', SHOP_DAY_SHIFT_MS] },
+                timezone: 'Asia/Dhaka',
+              },
+            },
             ...moneyGroup,
           },
         },
         { $sort: { _id: 1 } },
       ]),
       Order.aggregate([
-        { $match: { createdAt: { $gte: rangeStart, $lt: rangeEnd } } },
+        { $match: { createdAt: rangeWindow } },
         {
           $group: {
             _id: '$status',
@@ -1656,7 +1713,7 @@ const getBookOrderStats = async (opts?: {
         },
       ]),
       Order.aggregate([
-        { $match: { ...live, createdAt: { $gte: rangeStart, $lt: rangeEnd } } },
+        { $match: { ...live, createdAt: rangeWindow } },
         {
           $group: {
             _id: { $ifNull: ['$payment.method', 'unpaid'] },
@@ -1683,7 +1740,7 @@ const getBookOrderStats = async (opts?: {
       // book money is shared across its lines by list price — with one title
       // per order, which is nearly every order, that is simply the order's.
       Order.aggregate([
-        { $match: { ...live, createdAt: { $gte: rangeStart, $lt: rangeEnd } } },
+        { $match: { ...live, createdAt: rangeWindow } },
         {
           $project: {
             createdAt: 1,
@@ -1758,16 +1815,16 @@ const getBookOrderStats = async (opts?: {
   };
   const ZERO: MoneyRow = { orders: 0, copies: 0, value: 0, earned: 0, delivery: 0, earnedDelivery: 0 };
 
-  // Fill every day in the window, so the chart has no gaps to interpolate over.
+  // Fill every day in the window, so the chart has no gaps to interpolate
+  // over. Walked by NAME, from one shop day to the next, which is how a row
+  // and the orders it holds are guaranteed to be the same day.
   const byDay = new Map((dailyAgg as Array<MoneyRow & { _id: string }>).map((r) => [r._id, r]));
   const daily: Array<MoneyRow & { date: string; day: number }> = [];
-  for (let t = rangeStart.getTime(); t < rangeEnd.getTime(); t += 24 * 60 * 60 * 1000) {
-    const d = new Date(t);
-    const key = d.toISOString().slice(0, 10);
+  for (let key = fromDay; key <= toDay; key = addDays(key, 1)) {
     const row = byDay.get(key);
     daily.push({
       date: key,
-      day: d.getUTCDate(),
+      day: Number(key.slice(8, 10)),
       orders: row?.orders ?? 0,
       copies: row?.copies ?? 0,
       value: row?.value ?? 0,
@@ -1836,8 +1893,8 @@ const getBookOrderStats = async (opts?: {
     today: money((todayAgg as MoneyRow[])[0]),
     totals: money((totalsAgg as MoneyRow[])[0]),
     range: {
-      from: rangeStart.toISOString().slice(0, 10),
-      to: new Date(rangeEnd.getTime() - 1).toISOString().slice(0, 10),
+      from: fromDay,
+      to: toDay,
       ...money(rangeTotals),
       daily,
     },
