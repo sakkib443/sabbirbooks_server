@@ -165,6 +165,18 @@ async function main() {
     status: 'active',
   });
 
+  // The shop-floor manager, so the three-day order window and the trimmed
+  // menu can be looked at without borrowing a real account.
+  await User.create({
+    id: 'MGR-demo',
+    email: 'manager@demo.local',
+    firstName: 'Demo',
+    lastName: 'Manager',
+    password: 'demo1234',
+    role: 'manager',
+    status: 'active',
+  });
+
   // A student whose medical college snapshotted a district + division, so the
   // checkout address prefill can be seen filling the cascade.
   const student = await User.create({

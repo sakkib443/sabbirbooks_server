@@ -1,6 +1,32 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { Request, Response } from 'express';
 import { OrderService } from './order.service';
+import {
+  clampWindow,
+  isDayScoped,
+  managerDashboardRange,
+  managerDayRange,
+  rangeInstants,
+} from './managerScope';
+
+/**
+ * Stop a day-scoped manager from changing an order they cannot see.
+ *
+ * Returns true when it has already answered the request. Hiding the rest of
+ * the order book in the browser is presentation; this is the part that holds,
+ * because an id can be typed into a URL.
+ */
+const refusedOutsideScope = async (req: Request, res: Response, ids: string[]) => {
+  const user = (req as any).user;
+  if (!isDayScoped(user)) return false;
+  const ok = await OrderService.ordersWithinWindow(ids, rangeInstants(managerDayRange()));
+  if (ok) return false;
+  res.status(403).json({
+    success: false,
+    message: 'That order is outside the days you can work on (yesterday, today and tomorrow).',
+  });
+  return true;
+};
 
 // CREATE order (signed in or guest) — computes prices server-side, returns the
 // pending order plus its access key. The key is in this one response only: it
@@ -65,6 +91,7 @@ const updateOrdersStatus = async (req: Request, res: Response) => {
       trackingCode: req.body?.trackingCode === undefined ? undefined : String(req.body.trackingCode),
       trackingUrl: req.body?.trackingUrl === undefined ? undefined : String(req.body.trackingUrl),
     };
+    if (await refusedOutsideScope(req, res, ids)) return;
     const result = await OrderService.updateOrdersStatus(ids, status, extra);
     res.status(200).json({
       success: true,
@@ -89,6 +116,7 @@ const setOrdersDispatchDate = async (req: Request, res: Response) => {
     if (date && Number.isNaN(date.getTime())) {
       return res.status(400).json({ success: false, message: 'Invalid date' });
     }
+    if (await refusedOutsideScope(req, res, ids)) return;
     const result = await OrderService.setOrdersDispatchDate(ids, date);
     res.status(200).json({
       success: true,
@@ -131,6 +159,7 @@ const getCheckoutOptions = async (req: Request, res: Response) => {
 // PATCH /orders/:id/note — the admin's sticky note on one order.
 const setOrderNote = async (req: Request, res: Response) => {
   try {
+    if (await refusedOutsideScope(req, res, [req.params.id])) return;
     const order = await OrderService.setOrderNote(req.params.id, req.body?.adminNote ?? '');
     res.status(200).json({ success: true, message: 'Note saved', data: order });
   } catch (error: any) {
@@ -166,12 +195,16 @@ const getOrderById = async (req: Request, res: Response) => {
 const getAllOrders = async (req: Request, res: Response) => {
   try {
     const { status, page, limit, from, to } = req.query;
+    // A manager sees three days of orders, whatever the request asks for.
+    const scoped = isDayScoped((req as any).user)
+      ? clampWindow(managerDayRange(), from as string, to as string)
+      : null;
     const result = await OrderService.getAllOrders({
       status: status as string,
       page: page ? Number(page) : 1,
       limit: limit ? Number(limit) : 20,
-      from: from as string | undefined,
-      to: to as string | undefined,
+      from: scoped ? scoped.from : (from as string | undefined),
+      to: scoped ? scoped.to : (to as string | undefined),
     });
     res.status(200).json({
       success: true,
@@ -187,6 +220,7 @@ const getAllOrders = async (req: Request, res: Response) => {
 // PATCH status (admin fulfillment)
 const updateOrderStatus = async (req: Request, res: Response) => {
   try {
+    if (await refusedOutsideScope(req, res, [req.params.id])) return;
     const order = await OrderService.updateOrderStatus(req.params.id, req.body.status, {
       courierName: req.body.courierName,
       trackingCode: req.body.trackingCode,
@@ -255,6 +289,7 @@ const submitManualPayment = async (req: Request, res: Response) => {
 // POST approve payment (admin) — mark paid + grant access / start fulfillment
 const approveOrderPayment = async (req: Request, res: Response) => {
   try {
+    if (await refusedOutsideScope(req, res, [req.params.id])) return;
     const order = await OrderService.approveOrderPayment(req.params.id);
     res.status(200).json({ success: true, message: 'Payment approved', data: order });
   } catch (error: any) {
@@ -265,6 +300,7 @@ const approveOrderPayment = async (req: Request, res: Response) => {
 // POST reject payment (admin) — mark failed + cancel order
 const rejectOrderPayment = async (req: Request, res: Response) => {
   try {
+    if (await refusedOutsideScope(req, res, [req.params.id])) return;
     const order = await OrderService.rejectOrderPayment(req.params.id, req.body?.reason);
     res.status(200).json({ success: true, message: 'Payment rejected', data: order });
   } catch (error: any) {
@@ -275,6 +311,7 @@ const rejectOrderPayment = async (req: Request, res: Response) => {
 // PATCH edit payment details (admin)
 const updateOrderPayment = async (req: Request, res: Response) => {
   try {
+    if (await refusedOutsideScope(req, res, [req.params.id])) return;
     const order = await OrderService.updateOrderPayment(req.params.id, req.body);
     res.status(200).json({ success: true, message: 'Payment details updated', data: order });
   } catch (error: any) {
@@ -298,11 +335,15 @@ const downloadBook = async (req: Request, res: Response) => {
 const getStats = async (req: Request, res: Response) => {
   try {
     const { year, month, from, to } = req.query;
+    // A manager's dashboard is two days — yesterday and today — and that
+    // includes the figures that would otherwise read "all time".
+    const scope = isDayScoped((req as any).user) ? managerDashboardRange() : undefined;
     const data = await OrderService.getBookOrderStats({
       year: year !== undefined ? Number(year) : undefined,
       month: month !== undefined ? Number(month) : undefined,
       from: from as string | undefined,
       to: to as string | undefined,
+      scope,
     });
     res.status(200).json({ success: true, data });
   } catch (error: any) {

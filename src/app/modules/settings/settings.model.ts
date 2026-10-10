@@ -73,7 +73,22 @@ const settingsSchema = new Schema<ISiteSettings>(
         onlinePaymentEnabled: { type: Boolean, default: true },
 
         // Flat delivery charge for printed books, in taka — one rate everywhere.
-        deliveryCharge: { type: Number, default: 130 },
+        // This buys ONE book's parcel; see deliveryPerExtraBook.
+        deliveryCharge: { type: Number, default: 120 },
+
+        /**
+         * What each printed copy after the first adds to the delivery charge.
+         *
+         * A parcel with two books in it weighs more and the courier charges
+         * the shop more for it, so one book is the flat rate, two are the rate
+         * plus this, three are the rate plus twice this. It rides on a
+         * college's own rate as well — the weight does not care where the
+         * parcel is going — but never turns a free delivery into a paid one.
+         *
+         * 0 switches it off and every order pays the flat rate whatever its
+         * size, which is how the shop ran until October 2026.
+         */
+        deliveryPerExtraBook: { type: Number, default: 20 },
         // Retired inside/outside-Dhaka split, kept so old documents still load.
         deliveryChargeInsideDhaka: { type: Number, default: 130 },
         deliveryChargeOutsideDhaka: { type: Number, default: 130 },

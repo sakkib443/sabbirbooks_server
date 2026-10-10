@@ -66,11 +66,17 @@ router.get('/my', authMiddleware, OrderController.getMyOrders);
 // ─── Admin: list all orders (paginated + ?status filter) ─────
 // This is the "who is buying / how many sold" endpoint. `orders.read` is the
 // capability an admin switches off for a content-only manager.
-router.get('/', authMiddleware, authorize('admin'), requireCapability('orders.read'), OrderController.getAllOrders);
+//
+// `manager` is here too, and sees three days of it — yesterday, today and
+// tomorrow. The narrowing is done in the controller, not by trusting the
+// screen: see managerScope.ts.
+router.get('/', authMiddleware, authorize('admin', 'manager'), requireCapability('orders.read'), OrderController.getAllOrders);
 
 // Book-order dashboard numbers — counts and revenue. Same capability as the
-// list above. Declared before '/:id' so 'stats' is not read as an order id.
-router.get('/stats', authMiddleware, authorize('admin'), requireCapability('orders.read'), OrderController.getStats);
+// list above, and the same three-day narrowing for a manager (two, here: the
+// dashboard shows yesterday and today). Declared before '/:id' so 'stats' is
+// not read as an order id.
+router.get('/stats', authMiddleware, authorize('admin', 'manager'), requireCapability('orders.read'), OrderController.getStats);
 
 // ─── Payment (owner, or the order's access key) ──────────────
 // A guest has no token; they send the access key their order was created with
@@ -109,12 +115,12 @@ router.post(
 );
 
 // ─── Admin: verify manual payments ───────────────────────────
-router.post('/:id/approve', authMiddleware, authorize('admin'), requireCapability('orders.write'), OrderController.approveOrderPayment);
-router.post('/:id/reject', authMiddleware, authorize('admin'), requireCapability('orders.write'), OrderController.rejectOrderPayment);
+router.post('/:id/approve', authMiddleware, authorize('admin', 'manager'), requireCapability('orders.write'), OrderController.approveOrderPayment);
+router.post('/:id/reject', authMiddleware, authorize('admin', 'manager'), requireCapability('orders.write'), OrderController.rejectOrderPayment);
 router.patch(
   '/:id/payment',
   authMiddleware,
-  authorize('admin'),
+  authorize('admin', 'manager'),
   requireCapability('orders.write'),
   validateRequest(updateOrderPaymentValidationSchema),
   OrderController.updateOrderPayment
@@ -127,7 +133,7 @@ router.get('/:id/download/:bookId', authMiddleware, OrderController.downloadBook
 router.patch(
   '/:id/status',
   authMiddleware,
-  authorize('admin'),
+  authorize('admin', 'manager'),
   requireCapability('orders.write'),
   validateRequest(updateOrderStatusValidationSchema),
   OrderController.updateOrderStatus
@@ -139,7 +145,7 @@ router.patch(
 router.patch(
   '/:id/note',
   authMiddleware,
-  authorize('admin'),
+  authorize('admin', 'manager'),
   requireCapability('orders.write'),
   OrderController.setOrderNote
 );
@@ -151,7 +157,7 @@ router.patch(
 router.patch(
   '/bulk-status',
   authMiddleware,
-  authorize('admin'),
+  authorize('admin', 'manager'),
   requireCapability('orders.write'),
   OrderController.updateOrdersStatus
 );
@@ -163,7 +169,7 @@ router.patch(
 router.patch(
   '/bulk-dispatch-date',
   authMiddleware,
-  authorize('admin'),
+  authorize('admin', 'manager'),
   requireCapability('orders.write'),
   OrderController.setOrdersDispatchDate
 );
