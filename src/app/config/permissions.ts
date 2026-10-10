@@ -184,14 +184,26 @@ export const ROLE_DEFAULT_CAPABILITIES: Record<Role, Capability[]> = {
   // attendance/grading, their own batch analytics). authorize() still limits
   // them to the mentor routes.
   mentor: ['content.write', 'records.delete', 'training.manage', 'analytics.read'],
-  // The add-and-edit manager. Adds and updates content and training
-  // operations, and deliberately holds none of:
-  //   records.delete → cannot remove anything
-  //   orders.*       → cannot see who bought what, or how many orders came in
-  //   analytics.read → cannot see sales, revenue or any reporting
+  // The shop-floor manager: the person packing today's parcels.
+  //
+  // October 2026 — the shop redrew this role. It used to be the add-and-edit
+  // content and training manager; it is now books and orders:
+  //   content.write → adds and edits books and their QR content, notices,
+  //                   reviews and the site pages
+  //   orders.read   → the order list and the dashboard, BUT only three days
+  //                   of it (yesterday, today, tomorrow) and two days of the
+  //                   dashboard — enforced server-side in managerScope.ts
+  //   orders.write  → confirm, ship, deliver, annotate, move a delivery date,
+  //                   approve or reject a manual payment
+  //
+  // and deliberately none of:
+  //   records.delete → cannot remove anything, orders included
+  //   training.manage→ no course management at all; the shop asked for it to
+  //                    be gone from this role's screen
+  //   analytics.read → no lifetime sales or revenue reporting
   //   users.*        → cannot browse personal details
   //   settings.write → cannot change the site
-  manager: ['content.write', 'training.manage'],
+  manager: ['content.write', 'orders.read', 'orders.write'],
   student: [],
   // A coupon owner sees only their own earnings screen, which is gated on being
   // the coupon's owner — never on a capability. Deliberately empty.

@@ -51,9 +51,15 @@ async function main() {
   );
   const { createOrderValidationSchema } = await import('../app/modules/order/order.validation');
 
-  // The two zones must differ, or "which zone did it pick" is unfalsifiable —
-  // the shipped defaults are 120 both ways.
+  // One flat rate everywhere, and twenty taka for every copy after the first —
+  // the rates the shop actually runs on. Written out rather than left to the
+  // model's defaults, so a change to those defaults cannot quietly rewrite
+  // what this suite believes.
   await Settings.create({
+    deliveryCharge: 120,
+    deliveryPerExtraBook: 20,
+    // The retired inside/outside-Dhaka pair, kept here only to prove they no
+    // longer decide anything: both are far from 120 and neither is ever paid.
     deliveryChargeInsideDhaka: 60,
     deliveryChargeOutsideDhaka: 130,
     freeDeliveryAbove: 0,
@@ -174,14 +180,14 @@ async function main() {
 
   console.log('\n── the discount ───────────────────────────────');
 
-  // 1000tk at the default 25%, inside Dhaka (60tk).
+  // 1000tk at the default 25%, plus one book's delivery (120tk).
   check('25% off 1000tk → discount 250', preOrdered.discount === 250, { v: preOrdered.discount });
   check('subtotal is the undiscounted 1000', preOrdered.subtotal === 1000, { v: preOrdered.subtotal });
   check('total = 750 + delivery', preOrdered.total === 750 + preOrdered.deliveryCharge, {
     total: preOrdered.total,
     delivery: preOrdered.deliveryCharge,
   });
-  check('total is 810 inside Dhaka', preOrdered.total === 810, { v: preOrdered.total });
+  check('total is 870 — 750 and one bookʼs delivery', preOrdered.total === 870, { v: preOrdered.total });
 
   const custom: any = await place({
     items: [{ bookSlugOrId: 'pre-pharma', quantity: 1 }],
@@ -189,7 +195,7 @@ async function main() {
     paymentMethod: 'cod',
   });
   check('a custom preOrderDiscountPercent is honoured (40% → 400)', custom.discount === 400, { v: custom.discount });
-  check('custom-percent total = 600 + 60', custom.total === 660, { v: custom.total });
+  check('custom-percent total = 600 + 120', custom.total === 720, { v: custom.total });
 
   const qty: any = await place({
     items: [{ bookSlugOrId: 'pre-anatomy', quantity: 3 }],
@@ -197,6 +203,10 @@ async function main() {
     paymentMethod: 'cod',
   });
   check('discount scales with quantity (3 × 1000 → 750)', qty.discount === 750, { v: qty.discount });
+  // Three books travel in one parcel, and the parcel is heavier: 120 for the
+  // first, twenty for each of the other two.
+  check('three copies pay 120 + 20 + 20', qty.deliveryCharge === 160, { v: qty.deliveryCharge });
+  check('…and the total carries it (3000 − 750 + 160)', qty.total === 2410, { v: qty.total });
 
   const mixed: any = await place({
     items: [
@@ -208,7 +218,9 @@ async function main() {
   });
   check('mixed cart subtotal is 1400', mixed.subtotal === 1400, { v: mixed.subtotal });
   check('mixed cart discounts ONLY the pre-order line (250, not 350)', mixed.discount === 250, { v: mixed.discount });
-  check('mixed cart total = 1400 - 250 + 60', mixed.total === 1210, { v: mixed.total });
+  // Two books, two different titles — the weight is what counts, not the line.
+  check('mixed cart pays for two books: 120 + 20', mixed.deliveryCharge === 140, { v: mixed.deliveryCharge });
+  check('mixed cart total = 1400 − 250 + 140', mixed.total === 1290, { v: mixed.total });
   check('one pre-order line makes the whole order a pre-order', mixed.isPreOrder === true);
 
   const noPre: any = await place({
@@ -234,8 +246,8 @@ async function main() {
   });
   check('a client-sent discount is ignored', forged.discount === 250, { v: forged.discount });
   check('a client-sent subtotal is ignored', forged.subtotal === 1000, { v: forged.subtotal });
-  check('a client-sent total is ignored', forged.total === 810, { v: forged.total });
-  check('a client-sent deliveryCharge is ignored', forged.deliveryCharge === 60, { v: forged.deliveryCharge });
+  check('a client-sent total is ignored', forged.total === 870, { v: forged.total });
+  check('a client-sent deliveryCharge is ignored', forged.deliveryCharge === 120, { v: forged.deliveryCharge });
 
   // And the same body does not even get past validation as a "valid" shape that
   // some future refactor might spread wholesale.
@@ -246,42 +258,42 @@ async function main() {
   });
   check('district + division validate on the order body', orderZod.success, (orderZod as any).error?.issues?.[0]);
 
-  console.log('\n── courier zone from district ─────────────────');
+  console.log('\n── one rate, wherever the parcel goes ─────────────────');
 
-  check("district 'ঢাকা' → inside-dhaka charge", preOrdered.deliveryCharge === 60, { v: preOrdered.deliveryCharge });
-  check("district 'ঢাকা' → area inside-dhaka", preOrdered.shippingAddress?.area === 'inside-dhaka', { v: preOrdered.shippingAddress?.area });
-  check('district persisted alongside area', preOrdered.shippingAddress?.district === 'ঢাকা', { v: preOrdered.shippingAddress?.district });
+  // The inside/outside-Dhaka split is retired: a college's own rate is the
+  // only thing that moves the price now, and these addresses have none.
+  check("district 'ঢাকা' pays the flat rate", preOrdered.deliveryCharge === 120, { v: preOrdered.deliveryCharge });
+  check('district persisted on the address', preOrdered.shippingAddress?.district === 'ঢাকা', { v: preOrdered.shippingAddress?.district });
 
   const ctg: any = await place({
     items: [{ bookSlugOrId: 'pre-anatomy', quantity: 1 }],
     shippingAddress: addr({ district: 'চট্টগ্রাম', division: 'চট্টগ্রাম' }),
     paymentMethod: 'cod',
   });
-  check('another district → outside-dhaka charge', ctg.deliveryCharge === 130, { v: ctg.deliveryCharge });
-  check('another district → area outside-dhaka', ctg.shippingAddress?.area === 'outside-dhaka', { v: ctg.shippingAddress?.area });
+  check('a far district pays the same flat rate', ctg.deliveryCharge === 120, { v: ctg.deliveryCharge });
   check('division persisted', ctg.shippingAddress?.division === 'চট্টগ্রাম', { v: ctg.shippingAddress?.division });
 
-  // Deriving must never make the order cheaper than the server agreed to.
+  // Nothing the client says about where it is going can move the price.
   const liar: any = await place({
     items: [{ bookSlugOrId: 'pre-anatomy', quantity: 1 }],
     shippingAddress: addr({ district: 'চট্টগ্রাম', area: 'inside-dhaka' }),
     paymentMethod: 'cod',
   });
-  check('a far district beats a client-claimed inside-dhaka area', liar.deliveryCharge === 130, { v: liar.deliveryCharge });
+  check('a claimed inside-dhaka area buys nothing', liar.deliveryCharge === 120, { v: liar.deliveryCharge });
 
   const spaced: any = await place({
     items: [{ bookSlugOrId: 'pre-anatomy', quantity: 1 }],
     shippingAddress: addr({ district: '  ঢাকা  ' }),
     paymentMethod: 'cod',
   });
-  check('surrounding whitespace does not change the zone', spaced.deliveryCharge === 60, { v: spaced.deliveryCharge });
+  check('surrounding whitespace changes nothing', spaced.deliveryCharge === 120, { v: spaced.deliveryCharge });
 
   const romanised: any = await place({
     items: [{ bookSlugOrId: 'pre-anatomy', quantity: 1 }],
     shippingAddress: addr({ district: 'Dhaka' }),
     paymentMethod: 'cod',
   });
-  check('an unrecognised spelling falls to the DEARER zone', romanised.deliveryCharge === 130, { v: romanised.deliveryCharge });
+  check('a district spelt in English pays the same', romanised.deliveryCharge === 120, { v: romanised.deliveryCharge });
 
   console.log('\n── no district ────────────────────────────────');
 
@@ -290,16 +302,15 @@ async function main() {
     shippingAddress: addr(),
     paymentMethod: 'cod',
   });
-  check('no district defaults to the dearer zone', bare.deliveryCharge === 130, { v: bare.deliveryCharge });
-  check('no district → area outside-dhaka', bare.shippingAddress?.area === 'outside-dhaka', { v: bare.shippingAddress?.area });
+  check('no district, same rate', bare.deliveryCharge === 120, { v: bare.deliveryCharge });
 
-  // The pre-district behaviour, unchanged: an explicit area is still honoured.
+  // An area sent by the client is stored, and priced at the same flat rate.
   const explicitArea: any = await place({
     items: [{ bookSlugOrId: 'pre-anatomy', quantity: 1 }],
     shippingAddress: addr({ area: 'inside-dhaka' }),
     paymentMethod: 'cod',
   });
-  check('an explicit area still works when no district is sent', explicitArea.deliveryCharge === 60, { v: explicitArea.deliveryCharge });
+  check('an explicit area does not discount the parcel', explicitArea.deliveryCharge === 120, { v: explicitArea.deliveryCharge });
 
   console.log('\n── order of operations ────────────────────────');
 
@@ -312,8 +323,8 @@ async function main() {
     shippingAddress: addr({ district: 'ঢাকা' }),
     paymentMethod: 'cod',
   });
-  check('delivery is quoted on subtotal - discount, not subtotal', nearlyFree.deliveryCharge === 60, { v: nearlyFree.deliveryCharge });
-  check('…and the total reflects it', nearlyFree.total === 810, { v: nearlyFree.total });
+  check('delivery is quoted on subtotal - discount, not subtotal', nearlyFree.deliveryCharge === 120, { v: nearlyFree.deliveryCharge });
+  check('…and the total reflects it', nearlyFree.total === 870, { v: nearlyFree.total });
 
   const overThreshold: any = await place({
     items: [{ bookSlugOrId: 'stocked-biochem', quantity: 3 }], // 1200, no discount

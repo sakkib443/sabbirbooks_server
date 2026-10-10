@@ -72,6 +72,8 @@ export interface ISiteSettings {
     // Flat delivery charge, one rate everywhere (taka). The old inside/outside
     // Dhaka split is retired; these two are kept only so old documents type.
     deliveryCharge: number;
+    /** Added for every printed copy after the first. See the model. */
+    deliveryPerExtraBook: number;
     deliveryChargeInsideDhaka: number;
     deliveryChargeOutsideDhaka: number;
     // Free local delivery: a student of `freeDeliveryCollege` shipping within

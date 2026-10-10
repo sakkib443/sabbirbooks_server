@@ -20,6 +20,14 @@ import { User } from '../user/user.model';
 import { BkashService } from '../payment/bkash.service';
 import { SslcommerzService } from '../payment/sslcommerz.service';
 import { SettingsService } from '../settings/settings.services';
+import {
+  BD_OFFSET_MS,
+  SHOP_DAY_SHIFT_MS,
+  addDays,
+  bdDate,
+  dayWindow,
+  lastDateOfMonth,
+} from '../../utils/shopDay';
 import { MedicalCollege } from '../medicalCollege/medicalCollege.model';
 import { OrderAlertService } from '../notification/orderAlert.service';
 import { OrderEmailService } from '../notification/orderEmail.service';
@@ -95,6 +103,14 @@ export const collegeRateApplies = (
  *                                                    a rate of 0 is simply free)
  *   4. otherwise                                   → deliveryCharge (+ COD surcharge)
  *
+ * Then, on anything that is not already free: every copy after the first adds
+ * `deliveryPerExtraBook`. The quoted rate buys one parcel with one book in it,
+ * and a second book is weight the courier charges the shop for — so two books
+ * are 120 + 20, three are 120 + 40, and so on. It rides on the college rates
+ * too, for the same reason: the weight does not care where the parcel is
+ * going. A free rate stays free, both because free means free and because a
+ * campus hand-over costs the shop nothing to carry.
+ *
  * The two Khulna rules that used to be settings (a free college, a cheaper
  * district) are college rates now — see migrateLegacyDeliveryRates.
  */
@@ -102,6 +118,8 @@ const quoteDeliveryCharge = async (opts: {
   hasPrinted: boolean;
   subtotal: number;
   isCod: boolean;
+  /** Printed copies in the order; every one after the first adds to the rate. */
+  copies?: number;
   college?: CollegeRate | null;
   district?: string;
   upazila?: string;
@@ -114,12 +132,18 @@ const quoteDeliveryCharge = async (opts: {
   if (freeAbove > 0 && opts.subtotal >= freeAbove) return { charge: 0, rule: 'free-above' };
 
   const codExtra = opts.isCod ? Number(s?.codExtraCharge) || 0 : 0;
+  // What the copies after the first cost. Clamped at one copy so a caller that
+  // does not know the count (the public checkout-options quote) gets the
+  // one-book rate rather than a negative one.
+  const extras = Math.max(0, Math.round(Number(opts.copies) || 1) - 1);
+  const perExtra = Math.max(0, Number(s?.deliveryPerExtraBook) || 0);
+  const weight = extras * perExtra;
 
   if (collegeRateApplies(opts.college, opts.district, opts.upazila)) {
     const rate = Math.max(0, Math.round(Number(opts.college!.deliveryCharge)));
     // Free means free: a campus the shop delivers to for nothing does not
-    // start costing money because the buyer chose to pay in cash.
-    return { charge: rate === 0 ? 0 : rate + codExtra, rule: 'college' };
+    // start costing money because the buyer chose to pay in cash, or took two.
+    return { charge: rate === 0 ? 0 : rate + weight + codExtra, rule: 'college' };
   }
 
   // One flat rate everywhere else. deliveryCharge is the live field; the old
@@ -127,9 +151,9 @@ const quoteDeliveryCharge = async (opts: {
   // existed, then the documented default.
   const flat = Number(s?.deliveryCharge);
   const legacy = Number(s?.deliveryChargeInsideDhaka);
-  const charge = Number.isFinite(flat) ? flat : Number.isFinite(legacy) ? legacy : 130;
+  const charge = Number.isFinite(flat) ? flat : Number.isFinite(legacy) ? legacy : 120;
 
-  return { charge: Math.max(0, Math.round(charge + codExtra)), rule: 'standard' };
+  return { charge: Math.max(0, Math.round(charge + weight + codExtra)), rule: 'standard' };
 };
 
 /**
@@ -285,6 +309,8 @@ const createOrder = async (
   }
 ): Promise<IOrder> => {
   const items: IOrder['items'] = [];
+  // Printed copies, not lines: three of one title is three books in the parcel.
+  let printedCopies = 0;
   let hasPrinted = false;
   let hasDigital = false;
   let hasPreOrder = false;
@@ -312,6 +338,7 @@ const createOrder = async (
 
     if (book.format === 'printed') {
       hasPrinted = true;
+      printedCopies += qty;
       // A pre-order is sold before the print run exists, so there is no stock to
       // check — gating on it would reject every single pre-order, which is the
       // entire point of the feature. Ordinary titles keep the check.
@@ -519,6 +546,7 @@ const createOrder = async (
     hasPrinted,
     subtotal: subtotal - discount,
     isCod: method === 'cod',
+    copies: printedCopies,
     college,
     district: shipping?.district,
     upazila: shipping?.upazila,
@@ -656,7 +684,11 @@ const getCheckoutOptions = async (subtotal = 0) => {
   return {
     codEnabled: enabled.cod,
     onlinePaymentEnabled: enabled.online,
+    // The one-book rate. Every copy after the first adds the amount below —
+    // the browser prices that itself (checkout/deliveryCharge.ts) and the
+    // server re-prices it at order time either way.
     deliveryCharge,
+    deliveryPerExtraBook: Math.max(0, Number(s?.deliveryPerExtraBook) || 0),
     codExtraCharge: Number(s?.codExtraCharge) || 0,
     freeDeliveryAbove: Number(s?.freeDeliveryAbove) || 0,
     deliveryNote: s?.deliveryNote || '',
@@ -780,6 +812,28 @@ const getAllOrders = async (query?: {
     .limit(limit);
 
   return { orders, total, page, totalPages: Math.ceil(total / limit) };
+};
+
+/**
+ * Are every one of these orders inside the day window?
+ *
+ * The question a day-scoped manager's write has to answer before it happens:
+ * they can see three days, so they may only change three days. An id that
+ * does not exist counts as outside — the safe way round, and the service
+ * would refuse it a moment later anyway.
+ *
+ * "Which day an order is on" is the same rule the list uses: the delivery
+ * date the admin set, or the day it was placed when nobody has moved it.
+ */
+const ordersWithinWindow = async (ids: string[], window: { from: Date; to: Date }) => {
+  const unique = [...new Set(ids.map(String))];
+  if (unique.length === 0) return true;
+  const range = { $gte: window.from, $lt: window.to };
+  const inside = await Order.countDocuments({
+    _id: { $in: unique },
+    $or: [{ dispatchDate: range }, { dispatchDate: null, createdAt: range }],
+  });
+  return inside === unique.length;
 };
 
 // ─── PATCH status (admin fulfillment) ────────────────────────
@@ -1538,49 +1592,10 @@ const getDownloadUrl = async (
 // the day the order was placed (gross sales), which is the number the admin
 // dashboard headlines. A cancelled order is not income and is excluded.
 //
-// Days are counted in Bangladesh time (UTC+6, no DST), so "today" and "this
-// month" line up with the shop's own clock rather than the server's UTC.
-const BD_OFFSET_MS = 6 * 60 * 60 * 1000;
-
-/*
- * ── The shop's day ─────────────────────────────────────────────────────
- *
- * Noon to noon, Bangladesh time, and a date NAMES THE DAY THAT ENDS AT ITS
- * NOON: "16 Sep" is every order placed from 15 Sep 12:00 up to 16 Sep 12:00.
- * That is the day the Book Orders screen batches couriers by — the packing
- * list closes at noon because the courier comes in the afternoon — and the
- * client's own books are kept the same way.
- *
- * This dashboard used to count calendar days, midnight to midnight, so its
- * chart and the order screen disagreed about which day an afternoon order
- * belonged to. Same rule both sides now; the client version of it lives in
- * the web app at src/lib/shopDay.js and these two must stay in step.
- */
-const SHOP_DAY_SHIFT_MS = 12 * 60 * 60 * 1000;
-
-/** YYYY-MM-DD in Bangladesh for an instant. */
-const bdDate = (instant: Date) =>
-  new Date(instant.getTime() + BD_OFFSET_MS).toISOString().slice(0, 10);
-
-/** A YYYY-MM-DD moved by n days. */
-const addDays = (day: string, n: number) => {
-  const d = new Date(`${day}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + n);
-  return d.toISOString().slice(0, 10);
-};
-
-/** The instant a shop day closes: noon, Bangladesh time, on that date. */
-const cutoffOf = (day: string) => new Date(`${day}T12:00:00+06:00`);
-
-/** Orders placed in [from, to) for the shop days fromDay…toDay, both included. */
-const dayWindow = (fromDay: string, toDay: string) => ({
-  $gte: cutoffOf(addDays(fromDay, -1)),
-  $lt: cutoffOf(toDay),
-});
-
-/** The last date of a month, as a YYYY-MM-DD. */
-const lastDateOfMonth = (y: number, m: number) =>
-  new Date(Date.UTC(y, m + 1, 0)).toISOString().slice(0, 10);
+// Days are counted the way the shop counts them — noon to noon, Bangladesh
+// time, named by the day that ENDS at that noon — so "today" and "this month"
+// mean here exactly what they mean on the Book Orders screen. The rules live
+// in utils/shopDay, next to the browser's copy of them.
 
 /**
  * The money behind the book orders, for the dashboard and the analytics page.
@@ -1609,6 +1624,15 @@ const getBookOrderStats = async (opts?: {
   month?: number;
   from?: string;
   to?: string;
+  /**
+   * Narrow EVERYTHING to these shop days — for a manager, who may see two.
+   *
+   * Not just the chart: the all-time totals, the pending count and the coupon
+   * money are all business history, and a dashboard that hid the chart while
+   * printing the lifetime takings beside it would be a lock on the door of an
+   * open window.
+   */
+  scope?: { fromDay: string; toDay: string };
 }) => {
   const now = new Date();
   const bdNow = new Date(now.getTime() + BD_OFFSET_MS);
@@ -1635,6 +1659,12 @@ const getBookOrderStats = async (opts?: {
 
   let fromDay = asDay(opts?.from);
   let toDay = asDay(opts?.to);
+  if (opts?.scope) {
+    // Narrowed into what the caller may see — never widened.
+    fromDay = fromDay && fromDay > opts.scope.fromDay ? fromDay : opts.scope.fromDay;
+    toDay = toDay && toDay < opts.scope.toDay ? toDay : opts.scope.toDay;
+    if (toDay < fromDay) toDay = fromDay;
+  }
   if (!fromDay || !toDay || toDay < fromDay) {
     const y = Number.isFinite(opts?.year) ? (opts!.year as number) : bdNow.getUTCFullYear();
     const m = Number.isFinite(opts?.month) ? (opts!.month as number) : bdNow.getUTCMonth();
@@ -1644,6 +1674,8 @@ const getBookOrderStats = async (opts?: {
 
   const rangeWindow = dayWindow(fromDay, toDay);
   const todayWindow = dayWindow(todayDay, todayDay);
+  // A scoped caller's "all time" is their window; everyone else's is all time.
+  const lifetime = opts?.scope ? { createdAt: rangeWindow } : {};
 
   const live = { status: { $ne: 'cancelled' } };
   // Money in hand: delivered, or already paid (which is every successful
@@ -1673,13 +1705,13 @@ const getBookOrderStats = async (opts?: {
 
   const [totalsAgg, todayAgg, newOrders, dailyAgg, statusAgg, methodAgg, couponsAgg, bookAgg] =
     await Promise.all([
-      Order.aggregate([{ $match: live }, { $group: { _id: null, ...moneyGroup } }]),
+      Order.aggregate([{ $match: { ...live, ...lifetime } }, { $group: { _id: null, ...moneyGroup } }]),
       Order.aggregate([
         { $match: { ...live, createdAt: todayWindow } },
         { $group: { _id: null, ...moneyGroup } },
       ]),
       // "New" = still waiting for the admin to confirm it — the work queue.
-      Order.countDocuments({ status: 'pending' }),
+      Order.countDocuments({ status: 'pending', ...lifetime }),
       Order.aggregate([
         { $match: { ...live, createdAt: rangeWindow } },
         {
@@ -1725,7 +1757,7 @@ const getBookOrderStats = async (opts?: {
         },
       ]),
       Order.aggregate([
-        { $match: { ...live, couponCode: { $nin: [null, ''] } } },
+        { $match: { ...live, ...lifetime, couponCode: { $nin: [null, ''] } } },
         {
           $group: {
             _id: null,
@@ -1913,6 +1945,7 @@ export const OrderService = {
   getMyOrders,
   getOrderById,
   getAllOrders,
+  ordersWithinWindow,
   updateOrderStatus,
   payWithBkash,
   payWithSslcommerz,
