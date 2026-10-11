@@ -4,9 +4,12 @@ import { OrderService } from './order.service';
 import {
   clampWindow,
   isDayScoped,
+  isMoneyBlind,
   managerDashboardRange,
   managerDayRange,
   rangeInstants,
+  stripOrderMoney,
+  stripStatsMoney,
 } from './managerScope';
 
 /**
@@ -206,9 +209,14 @@ const getAllOrders = async (req: Request, res: Response) => {
       from: scoped ? scoped.from : (from as string | undefined),
       to: scoped ? scoped.to : (to as string | undefined),
     });
+    // Money is stripped out of the rows for an account that may not see it —
+    // here, not in the browser, so there is nothing to read in a network tab.
+    const orders = isMoneyBlind((req as any).user)
+      ? result.orders.map((o) => stripOrderMoney(o as any))
+      : result.orders;
     res.status(200).json({
       success: true,
-      data: result.orders,
+      data: orders,
       meta: { total: result.total, page: result.page, totalPages: result.totalPages },
     });
   } catch (error: any) {
@@ -345,7 +353,10 @@ const getStats = async (req: Request, res: Response) => {
       to: to as string | undefined,
       scope,
     });
-    res.status(200).json({ success: true, data });
+    res.status(200).json({
+      success: true,
+      data: isMoneyBlind((req as any).user) ? stripStatsMoney(data) : data,
+    });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
   }

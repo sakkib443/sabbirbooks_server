@@ -85,3 +85,73 @@ export const clampDays = (allowed: DayRange, fromDay?: string, toDay?: string): 
   fromDay: fromDay && fromDay > allowed.fromDay ? fromDay : allowed.fromDay,
   toDay: toDay && toDay < allowed.toDay ? toDay : allowed.toDay,
 });
+
+/**
+ * Accounts that may not see money — not one taka of it.
+ *
+ * The shop's manager packs parcels and moves orders along; what the shop
+ * takes is not their business. So every figure in taka is blanked before it
+ * leaves the server, rather than merely hidden by the screen: a number the
+ * API sends is a number anyone can read out of the network tab, and "they
+ * cannot see it" has to mean they cannot get at it.
+ *
+ * The one amount that survives is an order's TOTAL, and only because the
+ * courier sheet is built from it — the rider has to be told what to collect
+ * at the door. It is never drawn on any screen a manager looks at.
+ */
+export const isMoneyBlind = (user: { role?: unknown } | null | undefined): boolean =>
+  user?.role === 'manager';
+
+/** The money fields on an order document, blanked. */
+export const stripOrderMoney = <T extends Record<string, any>>(order: T): T => {
+  const o: any = typeof (order as any)?.toJSON === 'function' ? (order as any).toJSON() : { ...order };
+  o.subtotal = undefined;
+  o.discount = undefined;
+  o.deliveryCharge = undefined;
+  o.couponDiscount = undefined;
+  o.couponPayout = undefined;
+  if (Array.isArray(o.items)) {
+    o.items = o.items.map((it: any) => ({ ...it, price: undefined }));
+  }
+  if (o.payment && typeof o.payment === 'object') {
+    o.payment = { ...o.payment, amount: undefined };
+  }
+  return o;
+};
+
+/** Every taka in the dashboard payload, zeroed; the counts left alone. */
+export const stripStatsMoney = (stats: any) => {
+  const bucket = (b: any) =>
+    b && {
+      ...b,
+      value: 0,
+      earned: 0,
+      upcoming: 0,
+      delivery: { value: 0, earned: 0, upcoming: 0 },
+      books: { value: 0, earned: 0, upcoming: 0 },
+    };
+  const split = (rows: any) =>
+    Object.fromEntries(
+      Object.entries(rows || {}).map(([k, v]: [string, any]) => [k, { ...v, value: 0, delivery: 0 }])
+    );
+
+  return {
+    ...stats,
+    today: bucket(stats.today),
+    totals: bucket(stats.totals),
+    range: {
+      ...bucket(stats.range),
+      daily: (stats.range?.daily || []).map((d: any) => ({
+        ...d,
+        value: 0,
+        earned: 0,
+        delivery: 0,
+        earnedDelivery: 0,
+      })),
+    },
+    byStatus: split(stats.byStatus),
+    byMethod: split(stats.byMethod),
+    byBook: (stats.byBook || []).map((b: any) => ({ ...b, sales: 0 })),
+    coupons: { ...(stats.coupons || {}), discount: 0, payout: 0 },
+  };
+};

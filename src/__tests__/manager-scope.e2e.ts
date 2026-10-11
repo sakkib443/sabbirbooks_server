@@ -200,6 +200,42 @@ async function main() {
     orders: aStats?.totals?.orders,
   });
 
+  console.log('');
+  console.log('── not one taka ───────────────────────────────');
+
+  const row = (await list(managerToken)).body?.data?.[0];
+  check('an order sent to a manager carries no subtotal', row?.subtotal === undefined, { v: row?.subtotal });
+  check('nor a discount', row?.discount === undefined, { v: row?.discount });
+  check('nor the delivery charge', row?.deliveryCharge === undefined, { v: row?.deliveryCharge });
+  check('nor a price on its lines', row?.items?.[0]?.price === undefined, { v: row?.items?.[0]?.price });
+  // The one amount that survives, and only because the courier sheet is built
+  // from it — the rider has to be told what to collect. No screen draws it.
+  check('the total survives, for the courier sheet', typeof row?.total === 'number', { v: row?.total });
+  check('what it is NOT hiding: the buyer and the books', !!row?.shippingAddress?.name && !!row?.items?.[0]?.title, {
+    name: row?.shippingAddress?.name,
+    title: row?.items?.[0]?.title,
+  });
+
+  const blind = (await stats(managerToken)).body?.data;
+  check('the dashboard sends no money either', blind?.totals?.value === 0 && blind?.totals?.earned === 0, {
+    value: blind?.totals?.value,
+    earned: blind?.totals?.earned,
+  });
+  check('nor on any day of the chart', (blind?.range?.daily || []).every((d: any) => d.value === 0), {
+    daily: blind?.range?.daily,
+  });
+  check('nor in the coupon figures', blind?.coupons?.discount === 0 && blind?.coupons?.payout === 0, {
+    coupons: blind?.coupons,
+  });
+  check('but the counts are real — two orders over the two days', blind?.totals?.orders === 2, {
+    orders: blind?.totals?.orders,
+  });
+
+  const seeing = (await stats(adminToken)).body?.data;
+  check('an admin still sees the money', seeing?.totals?.value > 0, { value: seeing?.totals?.value });
+  const adminRow = (await list(adminToken)).body?.data?.[0];
+  check('and still gets it on the orders', typeof adminRow?.subtotal === 'number', { v: adminRow?.subtotal });
+
   await mongoose.disconnect();
   await mongod.stop();
 
