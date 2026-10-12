@@ -15,6 +15,7 @@ import {
 } from '../auth/google.controller';
 import { authMiddleware, authorize, requireCapability } from '../../middlewares/auth';
 import { fixDuplicateUserIds } from './user.migration';
+import { clientIpKey } from '../../utils/clientIp';
 
 const router = express.Router();
 
@@ -64,6 +65,7 @@ router.post('/google-login', (_req, res) => {
 const googleSignInLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 20,
+  keyGenerator: clientIpKey, // the visitor, not our own proxy — see utils/clientIp
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, message: 'Too many sign-in attempts, please wait a few minutes' },

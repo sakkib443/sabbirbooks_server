@@ -1,17 +1,34 @@
-import express from 'express';
+import express, { Request } from 'express';
 import rateLimit from 'express-rate-limit';
 import { BookContentController } from './bookContent.controller';
 import { authMiddleware, authorize, requireCapability, optionalAuth } from '../../middlewares/auth';
 import { uploadFileLocal, uploadProtectedLocal } from '../../config/localUpload';
+import { clientIpKey } from '../../utils/clientIp';
 
 const router = express.Router();
 
 // The scan endpoint is the one route an unauthenticated stranger can reach with
 // a guessed code. Codes are random 8-char (32^8), so a brute force is hopeless,
 // but the limiter keeps it from being worth trying.
+//
+// A signed-in reader is counted as themselves, by account: that is nearly every
+// scan, and a whole class scanning the same page at once must never share one
+// allowance. A stranger is counted by their own address (utils/clientIp) — not
+// by req.ip, which is our Next proxy and was the same for every visitor, so the
+// entire site used to get thirty scans a minute between all of its readers.
+// The stranger's allowance is the larger one because mobile networks here put
+// many phones behind one address. optionalAuth runs first so req.user is known;
+// it is set only for a token that verified, so a forged header buys nothing.
+const readerId = (req: Request): string | undefined =>
+  (req as Request & { user?: { _id?: string } }).user?._id;
+
 const scanLimiter = rateLimit({
   windowMs: 60 * 1000,
-  limit: 30,
+  limit: (req) => (readerId(req) ? 60 : 120),
+  keyGenerator: (req) => {
+    const userId = readerId(req);
+    return userId ? `user:${userId}` : `ip:${clientIpKey(req)}`;
+  },
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, message: 'Too many scans, please wait a moment' },
@@ -32,7 +49,7 @@ router.get('/outline/:bookIdOrSlug', BookContentController.getOutline);
 // optionalAuth, not authMiddleware: a chapter the shop has marked free opens
 // for anyone with the printed QR, so the stranger has to reach the handler for
 // it to decide. Every other chapter still refuses without a purchase.
-router.get('/scan/:qrCode', scanLimiter, optionalAuth, BookContentController.scan);
+router.get('/scan/:qrCode', optionalAuth, scanLimiter, BookContentController.scan);
 
 // "Next topic" navigation for the reader. Access is re-checked server side, so
 // a locked user cannot walk past a free chapter into paid content.
