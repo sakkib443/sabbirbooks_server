@@ -64,6 +64,14 @@ router.get('/next-topic/:topicId', authMiddleware, BookContentController.getNext
 // as well as a Bearer header. It refuses anonymous requests itself.
 router.get('/media/:fileName', BookContentController.serveProtectedMedia);
 
+// "Download all" for a topic: every PDF in its questions as one file. The
+// first call gets it ready (and builds it once, for everyone after); the link
+// it returns is fetched by the phone's download manager, which cannot send a
+// header — so, like /media, the file route takes the ?t= media token and does
+// its own access check, file by file.
+router.get('/topic-pdfs/:topicId', optionalAuth, BookContentController.prepareTopicPdfs);
+router.get('/topic-pdfs/:topicId/file', BookContentController.serveTopicPdfs);
+
 // ─── Admin ──────────────────────────────────────────────────
 //
 // contentManager belongs here: this is the book's actual content — parts,
