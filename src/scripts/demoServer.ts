@@ -301,6 +301,44 @@ async function main() {
     );
   }
 
+  // PDFs on the free sample's first two questions, so the per-file download
+  // and the topic's "download all" can be tried by hand. Written into the local
+  // protected folder under fixed demo names (overwritten each start).
+  if (freeSample) {
+    const { PDFDocument, StandardFonts } = await import('pdf-lib');
+    const { PROTECTED_MEDIA_DIR } = await import('../app/config/localUpload');
+    const fs = await import('fs');
+    const path = await import('path');
+    const webOrigin = process.env.DEMO_WEB_ORIGIN || 'http://localhost:3002';
+    const makeDemoPdf = async (label: string, pages: number) => {
+      const doc = await PDFDocument.create();
+      const font = await doc.embedFont(StandardFonts.Helvetica);
+      for (let i = 1; i <= pages; i++) {
+        const page = doc.addPage([595, 842]);
+        page.drawText(`${label} - page ${i} of ${pages}`, { x: 60, y: 760, size: 24, font });
+      }
+      return doc.save();
+    };
+    const demoPdfs = [
+      { file: 'demo-answer-q1.pdf', title: 'প্রশ্ন ১ — বিস্তারিত উত্তর', label: 'Demo answer Q1', pages: 3, q: '1' },
+      { file: 'demo-answer-q2.pdf', title: 'Question 2 notes', label: 'Demo answer Q2', pages: 2, q: '2' },
+    ];
+    fs.mkdirSync(PROTECTED_MEDIA_DIR, { recursive: true });
+    for (const d of demoPdfs) {
+      fs.writeFileSync(path.join(PROTECTED_MEDIA_DIR, d.file), await makeDemoPdf(d.label, d.pages));
+      await BookQuestion.updateOne(
+        { topicId: (freeSample as { _id: unknown })._id, questionNo: d.q },
+        {
+          $set: {
+            attachments: [
+              { title: d.title, fileUrl: `${webOrigin}/api/book-content/media/${d.file}`, fileType: 'pdf' },
+            ],
+          },
+        }
+      );
+    }
+  }
+
   const port = Number(process.env.DEMO_PORT || 5000);
   app.listen(port, () => {
     console.log(`\nDemo API on http://localhost:${port}`);
