@@ -136,6 +136,19 @@ const sendStoredFile = (
   res.setHeader('Accept-Ranges', 'bytes');
   if (opts.disposition) res.setHeader('Content-Disposition', opts.disposition);
 
+  // A PDF must not carry the site-wide policy helmet sets. That policy has
+  // object-src 'none', and Chrome's built-in PDF viewer IS an object: a topic
+  // PDF opened in a tab rendered as a blank grey page and stayed that way. The
+  // home-page sample never had this — express.static on /uploads/materials
+  // replaces the policy (app.ts) — which is why it "just worked" there. Same
+  // here, without that route's wildcard: only the shop itself may frame these.
+  // Everything else keeps the strict policy; an uploaded SVG opened on its own
+  // must not run script on this origin.
+  if (opts.type === 'application/pdf') {
+    res.setHeader('Content-Security-Policy', "frame-ancestors 'self'");
+    res.removeHeader('X-Frame-Options');
+  }
+
   const range = req.headers.range;
   if (range) {
     const m = /bytes=(\d*)-(\d*)/.exec(range);
