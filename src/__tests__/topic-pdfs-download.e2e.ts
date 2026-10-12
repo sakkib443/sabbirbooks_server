@@ -138,6 +138,15 @@ async function main() {
     check(cd.includes('filename="magic-viva.pdf"'), 'plain-ASCII fallback name for old browsers', cd);
     check(Buffer.compare(dl.body, fs.readFileSync(path.join(PROTECTED_MEDIA_DIR, A))) === 0, 'the bytes are the file');
 
+    // The grey page: helmet's object-src 'none' blocks Chrome's PDF viewer.
+    const csp = String(viewed.headers['content-security-policy'] || '');
+    check(!csp.includes('object-src') && csp.includes("frame-ancestors 'self'"), "a PDF opened in a tab is not blocked (no object-src 'none')", csp);
+    check(!viewed.headers['x-frame-options'], 'and carries no X-Frame-Options', viewed.headers['x-frame-options']);
+    const img = put(`${stamp}-tpd-fig.svg`, Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>'));
+    await BookQuestion.updateOne({ topicId: scalp._id, order: 2 }, { $push: { images: media(img) } });
+    const svg = await api().get(`/api/book-content/media/${img}?t=${t}`);
+    check(svg.status === 200 && String(svg.headers['content-security-policy']).includes("object-src 'none'"), 'any other file keeps the strict policy (an SVG must not run script)', [svg.status, svg.headers['content-security-policy']]);
+
     const plain = await api().get(`/api/book-content/media/${A}?t=${t}&download=1`);
     check(String(plain.headers['content-disposition']).includes('filename="tpd-a.pdf"'), 'no name given: the stored name without its upload prefix', plain.headers['content-disposition']);
 
