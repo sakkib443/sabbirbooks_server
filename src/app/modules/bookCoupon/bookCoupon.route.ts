@@ -2,6 +2,7 @@ import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { authMiddleware, authorize, requireCapability, optionalAuth } from '../../middlewares/auth';
 import * as C from './bookCoupon.controller';
+import { clientIpKey } from '../../utils/clientIp';
 
 const router = Router();
 
@@ -14,6 +15,7 @@ const router = Router();
 const couponPreviewLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
   limit: Number(process.env.COUPON_PREVIEW_LIMIT) || 40,
+  keyGenerator: clientIpKey, // the visitor, not our own proxy — see utils/clientIp
   skip: (req) => Boolean((req as any).user),
   standardHeaders: true,
   legacyHeaders: false,

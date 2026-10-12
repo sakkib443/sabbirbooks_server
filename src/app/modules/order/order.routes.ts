@@ -10,6 +10,7 @@ import {
   updateOrderPaymentValidationSchema,
 } from './order.validation';
 import { authMiddleware, authorize, requireCapability, optionalAuth } from '../../middlewares/auth';
+import { clientIpKey } from '../../utils/clientIp';
 
 const router = express.Router();
 
@@ -30,6 +31,9 @@ const router = express.Router();
 const orderCreateLimiter = rateLimit({
   windowMs: 10 * 60 * 1000,
   limit: Number(process.env.ORDER_CREATE_LIMIT) || 20,
+  // Keyed on the visitor, not req.ip — req.ip is our own Next proxy, the same
+  // for every guest in the country. See utils/clientIp.
+  keyGenerator: clientIpKey,
   skip: (req) => Boolean((req as any).user),
   standardHeaders: true,
   legacyHeaders: false,
