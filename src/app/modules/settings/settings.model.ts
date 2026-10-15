@@ -142,6 +142,27 @@ const settingsSchema = new Schema<ISiteSettings>(
         // quantityDiscount.ts for why the percent ceiling is 90 here too.
         quantityDiscounts: { type: [quantityDiscountSchema], default: [] },
 
+        // ── Handover photos ────────────────────────────────────────────────
+        // The book-in-hand photographs that slide at the top of the landing
+        // page, in the order shown. Empty = the photos built into the site,
+        // which is what every shop sees until the admin saves a list.
+        handoverPhotos: {
+            type: [
+                new Schema(
+                    {
+                        url: { type: String, required: true },
+                        bn: { type: String, default: '' },
+                        en: { type: String, default: '' },
+                        // CSS object-position, for a photo the 3:4 frame would
+                        // otherwise crop badly. Empty = centred.
+                        pos: { type: String, default: '' },
+                    },
+                    { _id: false }
+                ),
+            ],
+            default: [],
+        },
+
         // ── Landing page ───────────────────────────────────────────────────
         // The public site is one page about one book. This says which book —
         // by slug, so the admin can point the landing page at a different

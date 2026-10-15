@@ -215,6 +215,47 @@ export const evaluateBookCoupon = async (
   };
 };
 
+/** The pop-up shows one coupon: switching it on for one switches it off for the rest. */
+const onlyThisInPopup = (id: unknown) =>
+  BookCoupon.updateMany({ _id: { $ne: id }, showInPopup: true }, { $set: { showInPopup: false } });
+
+// ═══════════════ Landing page pop-up (anyone) ═══════════════
+// GET /popup → the coupon to advertise, or null. Only what a visitor needs to
+// see and use: never the owner, payout or usage numbers. A coupon that would
+// be refused at checkout right now — off, not started, expired, used up — is
+// not advertised, so the pop-up never offers a code that then fails.
+export const getPopupCoupon = async (_req: Request, res: Response) => {
+  try {
+    const c: any = await BookCoupon.findOne({ showInPopup: true, isActive: true }).lean();
+    const now = new Date();
+    const usable =
+      c &&
+      !(c.validFrom && now < new Date(c.validFrom)) &&
+      !(c.validUntil && now > new Date(c.validUntil)) &&
+      !(Number(c.maxUses) > 0 && Number(c.usedCount || 0) >= Number(c.maxUses));
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({
+      success: true,
+      data: usable
+        ? {
+            code: c.code,
+            name: c.name || '',
+            discountType: c.discountType,
+            discountValue: c.discountValue,
+            fixedPer: c.fixedPer || 'order',
+            maxDiscount: c.maxDiscount || 0,
+            freeDelivery: Boolean(c.freeDelivery),
+            minPurchase: c.minPurchase || 0,
+            appliesTo: c.appliesTo || 'all',
+            validUntil: c.validUntil || null,
+          }
+        : null,
+    });
+  } catch (e: any) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+};
+
 // ═══════════════ Checkout (any logged-in buyer) ═══════════════
 // POST /validate { code, amount } → the discount for a preview. The order service
 // re-evaluates on create, so this is display only and cannot be tampered into a
@@ -310,6 +351,7 @@ export const getCouponById = async (req: Request, res: Response) => {
     if (!isValidObjectId(req.params.id)) return res.status(404).json({ success: false, message: 'Coupon not found' });
     const coupon = await BookCoupon.findById(req.params.id).populate('ownerUser', OWNER_FIELDS);
     if (!coupon) return res.status(404).json({ success: false, message: 'Coupon not found' });
+    if (coupon.showInPopup) await onlyThisInPopup(coupon._id);
     res.json({ success: true, data: coupon });
   } catch (e: any) {
     res.status(500).json({ success: false, message: e.message });
@@ -343,6 +385,7 @@ const normalizeCouponLimits = (data: any) => {
     if (data[key] !== undefined) data[key] = Math.max(0, Number(data[key]) || 0);
   }
   if (data.freeDelivery !== undefined) data.freeDelivery = Boolean(data.freeDelivery);
+  if (data.showInPopup !== undefined) data.showInPopup = Boolean(data.showInPopup);
   if (data.fixedPer !== undefined) data.fixedPer = data.fixedPer === 'book' ? 'book' : 'order';
 
   // A window that closes before it opens accepts nothing, and would be found
@@ -372,6 +415,7 @@ export const createCoupon = async (req: Request, res: Response) => {
     const coupon = await BookCoupon.create(
       normalizeCouponLimits({ ...rest, code, ownerUser, createdBy: uid(req) })
     );
+    if (coupon.showInPopup) await onlyThisInPopup(coupon._id);
     res.status(201).json({ success: true, data: coupon });
   } catch (e: any) {
     res.status(500).json({ success: false, message: e.message });

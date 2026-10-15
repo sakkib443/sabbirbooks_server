@@ -37,6 +37,9 @@ const write = [authMiddleware, authorize('admin', 'manager'), requireCapability(
 // a guest's on the phone number the checkout sends along.
 router.post('/validate', optionalAuth, couponPreviewLimiter, C.validateCoupon);
 
+// ── Landing page pop-up: the one coupon the shop is advertising. Public. ──
+router.get('/popup', C.getPopupCoupon);
+
 // ── Coupon owner's own dashboard. Scoped to their coupons by ownerUser, so it
 // needs no role or capability — being the owner is the whole gate. Declared
 // before '/:id' so 'my' is not read as an id.
