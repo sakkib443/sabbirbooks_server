@@ -101,6 +101,8 @@ export interface ISiteSettings {
      * add up.
      */
     quantityDiscounts: IQuantityDiscountTier[];
+    /** Landing-page slide photos, in order. Empty = the site's built-in ones. */
+    handoverPhotos?: { url: string; bn?: string; en?: string; pos?: string }[];
 
     // Landing page (see the tier type above the interface)
     landingBookSlug: string;

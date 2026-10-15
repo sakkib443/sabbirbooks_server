@@ -105,6 +105,12 @@ const bookCouponSchema = new Schema(
     payoutPerSale: { type: Number, default: 0, min: 0 },
 
     isActive: { type: Boolean, default: true },
+    /**
+     * Shown to every visitor in the landing page's "আজকের কুপন" pop-up. At
+     * most one coupon at a time — turning it on for one turns it off for the
+     * rest (bookCoupon.controller). Off for every existing coupon.
+     */
+    showInPopup: { type: Boolean, default: false },
     // Bumped on every order that uses the code (the payout report is the accurate
     // count — it filters out cancelled orders — but this is a cheap live tally,
     // and it is what maxUses is measured against).
