@@ -24,9 +24,76 @@ export const MANAGER_DAYS_FORWARD = 1;
 
 export type DayRange = { fromDay: string; toDay: string };
 
+/**
+ * How far back an `admin` sees: the last 15 shop days (today and the 14 before
+ * it), plus tomorrow — after noon, new orders already count for tomorrow.
+ *
+ * The shop's decision (17 Oct 2026): an admin works the orders, the money,
+ * the coupons and the courier, but only for the recent past; the whole
+ * history is the superAdmin's. Everything below that narrows a manager to
+ * three days narrows an admin to this, through dayRangeFor().
+ */
+export const ADMIN_DAYS_BACK = 14;
+export const ADMIN_DAYS_FORWARD = 1;
+
 /** True when this user's view of the orders has to be narrowed. */
 export const isDayScoped = (user: { role?: unknown } | null | undefined): boolean =>
-  user?.role === 'manager';
+  user?.role === 'manager' || user?.role === 'admin';
+
+/**
+ * The shop days this user may see, or null for "everything" (superAdmin and
+ * any role that is not narrowed).
+ */
+export const dayRangeFor = (
+  user: { role?: unknown } | null | undefined,
+  now: Date = new Date()
+): DayRange | null => {
+  if (user?.role === 'manager') return managerDayRange(now);
+  if (user?.role === 'admin') {
+    const today = bdDate(now);
+    return { fromDay: addDays(today, -ADMIN_DAYS_BACK), toDay: addDays(today, ADMIN_DAYS_FORWARD) };
+  }
+  return null;
+};
+
+/**
+ * A Mongo filter on `createdAt` for this user's window — {} when they see
+ * everything. For the screens outside the order list that add up orders
+ * (coupon payouts, affiliate earnings).
+ */
+export const scopeCreatedAt = (user: { role?: unknown } | null | undefined): Record<string, unknown> => {
+  const range = dayRangeFor(user);
+  if (!range) return {};
+  const w = rangeInstants(range);
+  return { createdAt: { $gte: w.from, $lt: w.to } };
+};
+
+/** This user's window as ISO instants, or null for everything. */
+export const scopeIso = (user: { role?: unknown } | null | undefined): { from: string; to: string } | null => {
+  const range = dayRangeFor(user);
+  if (!range) return null;
+  const w = rangeInstants(range);
+  return { from: w.from.toISOString(), to: w.to.toISOString() };
+};
+
+/** The days this user's dashboard covers, or null for all time. */
+export const dashboardRangeFor = (
+  user: { role?: unknown } | null | undefined,
+  now: Date = new Date()
+): DayRange | null => (user?.role === 'manager' ? managerDashboardRange(now) : dayRangeFor(user, now));
+
+/**
+ * Narrow a requested { from, to } (ISO instants, either may be missing) to
+ * what this user may see. Unscoped users get their request back untouched.
+ */
+export const clampForUser = (
+  user: { role?: unknown } | null | undefined,
+  from?: string,
+  to?: string
+): { from?: string; to?: string } => {
+  const range = dayRangeFor(user);
+  return range ? clampWindow(range, from, to) : { from, to };
+};
 
 /** Yesterday, today and tomorrow, as shop-day names. */
 export const managerDayRange = (now: Date = new Date()): DayRange => {

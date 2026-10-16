@@ -42,7 +42,7 @@ export const createStaffValidationSchema = z.object({
     email: z.string().email({ message: 'Valid email is required' }),
     phoneNumber: z.string().optional(),
     password: z.string().min(6, { message: 'Password should be at least 6 characters' }),
-    role: z.enum(['admin', 'trainingManager', 'contentManager', 'manager']),
+    role: z.enum(['superAdmin', 'admin', 'trainingManager', 'contentManager', 'manager']),
     // Optional starting permission set for a manager. Omit it and the role's
     // defaults apply. 'staff.manage' is not in the grantable list, so it can
     // never be requested here.

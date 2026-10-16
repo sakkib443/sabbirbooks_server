@@ -113,6 +113,31 @@ async function startServer() {
     }
   }
 
+  // ─── The owner's super admin accounts, from the environment ─────
+  //
+  // SUPERADMIN_EMAILS (comma-separated) names the accounts that must be super
+  // admins. An admin now sees only the last fifteen days, and only a super
+  // admin can make another — so without this an owner whose account is an
+  // "admin" would be locked out of their own history with no way back in.
+  // Only someone who can change the server's environment can use it. It only
+  // ever promotes the named, existing accounts; it never demotes anyone.
+  if (dbReady && process.env.SUPERADMIN_EMAILS) {
+    try {
+      const { User } = await import('./app/modules/user/user.model');
+      const emails = String(process.env.SUPERADMIN_EMAILS)
+        .split(',')
+        .map((e) => e.trim().toLowerCase())
+        .filter(Boolean);
+      const res = await User.updateMany(
+        { email: { $in: emails }, role: { $ne: 'superAdmin' } },
+        { $set: { role: 'superAdmin' } }
+      );
+      if (res.modifiedCount) console.log(`👑 ${res.modifiedCount} account(s) made super admin from SUPERADMIN_EMAILS.`);
+    } catch (error) {
+      console.error('⚠️  SUPERADMIN_EMAILS step failed (server still starting):', error);
+    }
+  }
+
   // ─── Close checkouts that were abandoned at the gateway ────────
   //
   // An order is written before the buyer is sent to SSLCommerz, so a buyer who

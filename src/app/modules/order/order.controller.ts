@@ -3,10 +3,9 @@ import { Request, Response } from 'express';
 import { OrderService } from './order.service';
 import {
   clampWindow,
-  isDayScoped,
+  dashboardRangeFor,
+  dayRangeFor,
   isMoneyBlind,
-  managerDashboardRange,
-  managerDayRange,
   rangeInstants,
   stripOrderMoney,
   stripStatsMoney,
@@ -21,12 +20,16 @@ import {
  */
 const refusedOutsideScope = async (req: Request, res: Response, ids: string[]) => {
   const user = (req as any).user;
-  if (!isDayScoped(user)) return false;
-  const ok = await OrderService.ordersWithinWindow(ids, rangeInstants(managerDayRange()));
+  const range = dayRangeFor(user);
+  if (!range) return false;
+  const ok = await OrderService.ordersWithinWindow(ids, rangeInstants(range));
   if (ok) return false;
   res.status(403).json({
     success: false,
-    message: 'That order is outside the days you can work on (yesterday, today and tomorrow).',
+    message:
+      user?.role === 'admin'
+        ? 'That order is older than the last 15 days you can work on.'
+        : 'That order is outside the days you can work on (yesterday, today and tomorrow).',
   });
   return true;
 };
@@ -54,6 +57,7 @@ const orderKey = (req: Request): string | undefined => req.header('x-order-key')
 // order had taken back on the shelf. See OrderService.deleteOrder.
 const deleteOrder = async (req: Request, res: Response) => {
   try {
+    if (await refusedOutsideScope(req, res, [req.params.id])) return;
     await OrderService.deleteOrder(req.params.id);
     res.status(200).json({ success: true, message: 'Order deleted' });
   } catch (error: any) {
@@ -68,6 +72,7 @@ const deleteOrders = async (req: Request, res: Response) => {
     if (ids.length === 0) {
       return res.status(400).json({ success: false, message: 'No orders selected' });
     }
+    if (await refusedOutsideScope(req, res, ids)) return;
     const result = await OrderService.deleteOrders(ids);
     res.status(200).json({
       success: true,
@@ -186,6 +191,8 @@ const getMyOrders = async (req: Request, res: Response) => {
 const getOrderById = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
+    // Staff with a narrowed view cannot open an order outside it by its id.
+    if ((user?.role === 'admin' || user?.role === 'manager') && (await refusedOutsideScope(req, res, [req.params.id]))) return;
     const order = await OrderService.getOrderById(req.params.id, user, orderKey(req));
     res.status(200).json({ success: true, data: order });
   } catch (error: any) {
@@ -198,10 +205,10 @@ const getOrderById = async (req: Request, res: Response) => {
 const getAllOrders = async (req: Request, res: Response) => {
   try {
     const { status, page, limit, from, to } = req.query;
-    // A manager sees three days of orders, whatever the request asks for.
-    const scoped = isDayScoped((req as any).user)
-      ? clampWindow(managerDayRange(), from as string, to as string)
-      : null;
+    // A manager sees three days of orders and an admin fifteen, whatever the
+    // request asks for.
+    const range = dayRangeFor((req as any).user);
+    const scoped = range ? clampWindow(range, from as string, to as string) : null;
     const result = await OrderService.getAllOrders({
       status: status as string,
       page: page ? Number(page) : 1,
@@ -345,7 +352,8 @@ const getStats = async (req: Request, res: Response) => {
     const { year, month, from, to } = req.query;
     // A manager's dashboard is two days — yesterday and today — and that
     // includes the figures that would otherwise read "all time".
-    const scope = isDayScoped((req as any).user) ? managerDashboardRange() : undefined;
+    // An admin's covers the last fifteen days the same way.
+    const scope = dashboardRangeFor((req as any).user) || undefined;
     const data = await OrderService.getBookOrderStats({
       year: year !== undefined ? Number(year) : undefined,
       month: month !== undefined ? Number(month) : undefined,

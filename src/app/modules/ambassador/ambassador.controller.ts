@@ -7,6 +7,7 @@ import { AmbassadorApplication } from './ambassador.model';
 import { PROTECTED_MEDIA_DIR } from '../../config/localUpload';
 import { hasCapability } from '../../config/permissions';
 import { User } from '../user/user.model';
+import { scopeIso } from '../order/managerScope';
 
 const uid = (req: Request) => (req as any).user?._id || (req as any).user?.id;
 
@@ -122,10 +123,24 @@ const serveIdCard = async (req: Request, res: Response) => {
  * describe the whole roster, not the filtered slice, so narrowing the list
  * never empties the controls used to widen it again.
  */
+/**
+ * The list's earnings window, narrowed to an admin's last fifteen days. A
+ * superAdmin's request goes through as asked.
+ */
+const narrowed = (req: Request) => {
+  const q: any = { ...(req.query as any) };
+  const scope = scopeIso((req as any).user);
+  if (scope) {
+    q.from = q.from && new Date(q.from) > new Date(scope.from) ? q.from : scope.from;
+    q.to = q.to && new Date(q.to) < new Date(scope.to) ? q.to : scope.to;
+  }
+  return q;
+};
+
 const list = async (req: Request, res: Response) => {
   try {
     const [data, counts, facets] = await Promise.all([
-      AmbassadorService.list(req.query as any),
+      AmbassadorService.list(narrowed(req)),
       AmbassadorService.getCounts(),
       AmbassadorService.getFacets(),
     ]);
@@ -137,7 +152,7 @@ const list = async (req: Request, res: Response) => {
 
 const getById = async (req: Request, res: Response) => {
   try {
-    const data = await AmbassadorService.getById(req.params.id);
+    const data = await AmbassadorService.getById(req.params.id, scopeIso((req as any).user) || undefined);
     res.status(200).json({ success: true, data });
   } catch (error: any) {
     res.status(404).json({ success: false, message: error.message });
