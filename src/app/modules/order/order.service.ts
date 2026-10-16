@@ -619,6 +619,18 @@ const createOrder = async (
   // is how the pending queue filled up with orders that were never orders. For
   // those, the alerts go out from applyPaidSideEffects when the money lands.
   if (method === 'cod') {
+    // Confirmed the moment it is placed (shop's decision, 16 Oct 2026): buyers
+    // kept writing in because the email said "pending" and the tracker sat on
+    // "Placed" until someone pressed Confirm. Nothing waits on that click — a
+    // cash-on-delivery order owes nothing before it is packed, and confirming
+    // opens no book content (printed access needs the code inside the book).
+    // The same steps as the admin's Confirm: stock taken once, stamped,
+    // processing. The admin can still cancel it as before.
+    await applyStockOnce(order);
+    order.confirmedAt = new Date();
+    order.status = 'processing';
+    await order.save();
+
     void raiseNewOrderAlerts(order);
     // "We got your order" — the same reasoning as the alerts above decides who
     // gets it, so it rides in the same branch. A gateway order's first text
@@ -660,8 +672,12 @@ const raiseNewOrderAlerts = async (order: any): Promise<void> => {
   await OrderAlertService.dispatchNewOrderAlerts(order).catch((e) =>
     console.error('[order-alert] dispatch threw (order unaffected):', e)
   );
-  // No-op until SMTP credentials are set.
-  void OrderEmailService.sendOrderPlacedEmail(order);
+  // No-op until SMTP credentials are set. An order that is already confirmed
+  // (COD now, or a gateway order whose payment just landed) gets the
+  // "confirmed" receipt instead — "we got it, it is pending" would be wrong,
+  // and sending both is two emails for one order.
+  if (order.confirmedAt) void OrderEmailService.sendOrderConfirmedEmail(order);
+  else void OrderEmailService.sendOrderPlacedEmail(order);
 };
 
 /**
@@ -1180,7 +1196,9 @@ const applyPaidSideEffects = async (order: any): Promise<void> => {
   if (!order.confirmedAt) order.confirmedAt = new Date();
   // First confirmation (payment settled — gateway or manual approval) → the
   // "order confirmed" email. Fire-and-forget; the caller saves the order.
-  if (!wasConfirmed) void OrderEmailService.sendOrderConfirmedEmail(order);
+  // An order not yet announced gets it from raiseNewOrderAlerts just below, so
+  // only an already-announced one (manual approval) is emailed here.
+  if (!wasConfirmed && order.alertsSentAt) void OrderEmailService.sendOrderConfirmedEmail(order);
   // A gateway order held its "new order" alerts back until the money arrived —
   // this is that moment. Already-alerted orders (COD, manual) fall straight
   // through on the alertsSentAt stamp.
