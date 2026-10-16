@@ -90,7 +90,7 @@ const scanTopic = async (qrCode: string, userId?: string | null): Promise<ScanRe
     BookPart.findById(topic.partId).select('title titleBn').lean(),
     BookQuestion.find({ topicId: topic._id, isDeleted: false, isPublished: true })
       .sort({ order: 1 })
-      .select('questionNo questionText questionTextBn answerHtml videos attachments images videoNote order')
+      .select('questionNo questionText questionTextBn answerHtml videos attachments images videoNote hideVideoNote order')
       .lean(),
   ]);
 
@@ -412,6 +412,24 @@ const updateTopic = async (id: string, payload: Record<string, unknown>) => {
   const safe = onlyMutable('topic', payload);
   assertSomethingToWrite('topic', safe);
   return BookTopic.findByIdAndUpdate(id, safe, { new: true });
+};
+
+/**
+ * Show or hide the "video unavailable" notice on many questions at once.
+ *
+ * Either the questions picked (questionIds), or every question in the book
+ * that has no video (bookId, no ids) — a question with a video never shows
+ * the notice, so touching it would change nothing a reader sees.
+ */
+const setVideoNoteVisibility = async (input: { show: boolean; questionIds?: string[]; bookId?: string }) => {
+  const ids = (input.questionIds || []).filter((id) => Types.ObjectId.isValid(id));
+  let filter: Record<string, unknown>;
+  if (ids.length) filter = { _id: { $in: ids }, isDeleted: false };
+  else if (input.bookId && Types.ObjectId.isValid(input.bookId))
+    filter = { bookId: input.bookId, isDeleted: false, 'videos.0': { $exists: false } };
+  else throw new Error('Pick questions, or a book');
+  const res = await BookQuestion.updateMany(filter, { $set: { hideVideoNote: !input.show } });
+  return { matched: res.matchedCount || 0, changed: res.modifiedCount || 0 };
 };
 
 const updateQuestion = async (id: string, payload: Record<string, unknown>) =>
@@ -961,6 +979,7 @@ export const BookContentService = {
   updateChapter,
   updateTopic,
   updateQuestion,
+  setVideoNoteVisibility,
   deletePart,
   deleteChapter,
   deleteTopic,

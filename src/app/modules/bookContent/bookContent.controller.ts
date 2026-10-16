@@ -645,6 +645,22 @@ const makeUpdate = (level: Level) => async (req: Request, res: Response) => {
   }
 };
 
+/** PATCH /api/book-content/video-note-visibility { show, questionIds? | bookId? } */
+const setVideoNoteVisibility = async (req: Request, res: Response) => {
+  try {
+    const { show, questionIds, bookId } = req.body || {};
+    if (typeof show !== 'boolean') return res.status(400).json({ success: false, message: 'show must be true or false' });
+    const data = await BookContentService.setVideoNoteVisibility({
+      show,
+      questionIds: Array.isArray(questionIds) ? questionIds.map(String) : undefined,
+      bookId: bookId ? String(bookId) : undefined,
+    });
+    res.status(200).json({ success: true, data });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
 const makeDelete = (level: Level) => async (req: Request, res: Response) => {
   try {
     await SERVICE_BY_LEVEL[level].remove(req.params.id);
@@ -689,5 +705,6 @@ export const BookContentController = {
   restoreQuestion,
   makeCreate,
   makeUpdate,
+  setVideoNoteVisibility,
   makeDelete,
 };

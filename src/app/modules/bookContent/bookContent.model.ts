@@ -133,6 +133,9 @@ const bookQuestionSchema = new Schema<IBookQuestion>(
     // Shown in place of the built-in "video unavailable" line. See the
     // interface; empty means the default, and a video makes it moot.
     videoNote: { type: String, default: '', trim: true, maxlength: 500 },
+    // Off switch for that line: true = a question without a video shows no
+    // notice at all. Off (shown) for every existing question.
+    hideVideoNote: { type: Boolean, default: false },
 
     order: { type: Number, required: true, default: 1 },
     isPublished: { type: Boolean, default: true },
