@@ -128,9 +128,17 @@ async function startServer() {
         .split(',')
         .map((e) => e.trim().toLowerCase())
         .filter(Boolean);
+      // A deleted user is only hidden (isDeleted), and its email stays taken —
+      // so an owner who once deleted the account they now want as super admin
+      // could neither find it nor sign up with it again. A named account is
+      // brought back as well: undeleted, active, super admin. (Its password is
+      // whatever it was; "Forgot password" sets a new one.)
       const res = await User.updateMany(
-        { email: { $in: emails }, role: { $ne: 'superAdmin' } },
-        { $set: { role: 'superAdmin' } }
+        {
+          email: { $in: emails },
+          $or: [{ role: { $ne: 'superAdmin' } }, { isDeleted: true }, { status: { $ne: 'active' } }],
+        },
+        { $set: { role: 'superAdmin', isDeleted: false, status: 'active' } }
       );
       if (res.modifiedCount) console.log(`👑 ${res.modifiedCount} account(s) made super admin from SUPERADMIN_EMAILS.`);
     } catch (error) {
