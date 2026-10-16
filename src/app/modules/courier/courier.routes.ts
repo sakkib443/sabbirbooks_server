@@ -11,6 +11,9 @@ const router = express.Router();
 // The courier pages are the owner's: they move parcels and they show money.
 const read = [authMiddleware, authorize('admin'), requireCapability('orders.read')];
 const write = [authMiddleware, authorize('admin'), requireCapability('orders.write')];
+// The courier's money, all time — the Super Admin's alone (authorize() with a
+// role nobody else holds; superAdmin always passes).
+const owner = [authMiddleware, authorize('superAdmin')];
 
 const uid = (req: Request) => {
   const u: any = (req as any).user;
@@ -42,8 +45,8 @@ router.get('/status', ...read, wrap(() => CourierService.status()));
 router.get('/filters', ...read, wrap(() => CourierService.filterChoices()));
 router.get('/ready', ...read, wrap((req) => CourierService.listReady(scoped(req))));
 router.get('/consignments', ...read, wrap((req) => CourierService.listConsignments(scoped(req))));
-router.get('/summary', ...read, wrap((req) => CourierService.summary(scoped(req))));
-router.get('/payments', ...read, wrap((req) => CourierService.listPayments(scoped(req))));
+router.get('/summary', ...owner, wrap((req) => CourierService.summary(scoped(req))));
+router.get('/payments', ...owner, wrap((req) => CourierService.listPayments(scoped(req))));
 
 router.post(
   '/send',
@@ -71,7 +74,7 @@ router.post(
   )
 );
 
-router.post('/payments/sync', ...write, wrap(() => CourierService.syncPayments()));
+router.post('/payments/sync', ...owner, wrap(() => CourierService.syncPayments()));
 
 /**
  * Steadfast's webhook. Public, so it is guarded by the Bearer token set in the

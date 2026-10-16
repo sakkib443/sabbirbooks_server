@@ -97,7 +97,8 @@ async function main() {
     return res.body?.data?.accessToken as string;
   };
   const buyer = await registerLogin('buyer@test.com', 'b1');
-  const admin = await registerLogin('admin@test.com', 'a1', 'admin');
+  // The owner: the courier's money screens are Super Admin only.
+  const admin = await registerLogin('admin@test.com', 'a1', 'superAdmin');
   const AUTH = { Authorization: `Bearer ${admin}` };
 
   const place = async (phone: string) => {

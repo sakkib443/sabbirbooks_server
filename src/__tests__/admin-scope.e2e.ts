@@ -112,9 +112,12 @@ async function main() {
   check(rowA?.sales === 1 && rowS?.sales === 2, 'coupon sales: admin 1, superAdmin 2', { a: rowA?.sales, s: rowS?.sales });
 
   console.log('── Courier ──');
-  const ca = (await api().get('/api/courier/summary').set(A)).body?.data;
+  const caRes = await api().get('/api/courier/summary').set(A);
   const cs = (await api().get('/api/courier/summary').set(S)).body?.data;
-  check(ca?.parcels === 1 && cs?.parcels === 2, 'courier parcels: admin 1, superAdmin 2', { a: ca?.parcels, s: cs?.parcels });
+  check(caRes.status === 403, 'courier money summary is Super Admin only', caRes.status);
+  check((await api().get('/api/courier/payments').set(A)).status === 403, 'courier payouts list is Super Admin only');
+  check((await api().post('/api/courier/payments/sync').set(A)).status === 403, 'courier payout sync is Super Admin only');
+  check(cs?.parcels === 2, 'superAdmin courier summary: 2 parcels', cs?.parcels);
   const cla = (await api().get('/api/courier/consignments').set(A)).body?.data;
   check(cla?.total === 1, 'courier list: admin sees 1', cla?.total);
 
