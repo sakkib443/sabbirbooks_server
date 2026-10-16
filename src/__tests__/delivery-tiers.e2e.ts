@@ -19,6 +19,7 @@
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import mongoose from 'mongoose';
 import request from 'supertest';
+import { approveDevice } from './_approveDevice';
 
 let passed = 0;
 let failed = 0;
@@ -206,6 +207,7 @@ async function main() {
       firstName: 'A', lastName: 'B', email, password: 'pass1234', whatsappNumber: '01712345678',
     });
     await User.updateOne({ email }, { role, status: 'active' });
+    await approveDevice(email, `dev-${email}`);
     return (
       await api().post('/api/auth/login').set('x-device-id', `dev-${email}`).send({ email, password: 'pass1234' })
     ).body?.data?.accessToken;

@@ -146,6 +146,21 @@ async function startServer() {
     }
   }
 
+  // ─── Staff devices already signed in count as approved ─────────
+  //
+  // New staff devices now wait for the Super Admin (security.service). The
+  // devices staff are using today were never asked, so they are approved here,
+  // once — switching the check on signs nobody out. Insert-only.
+  if (dbReady) {
+    try {
+      const { SecurityService } = await import('./app/modules/security/security.service');
+      const n = await SecurityService.approveExistingSessions();
+      if (n) console.log(`🔐 ${n} staff device(s) already signed in — marked approved.`);
+    } catch (error) {
+      console.error('⚠️  Staff device sync failed (server still starting):', error);
+    }
+  }
+
   // ─── Close checkouts that were abandoned at the gateway ────────
   //
   // An order is written before the buyer is sent to SSLCommerz, so a buyer who
