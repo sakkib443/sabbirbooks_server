@@ -184,6 +184,22 @@ export interface IOrder {
   /** The courier's tracking page for this parcel — what the shipped SMS links to. */
   trackingUrl?: string;
   adminNote?: string;
+  /** The parcel at the courier, once handed over through its API. */
+  courier?: {
+    provider?: string;
+    consignmentId?: string;
+    trackingCode?: string;
+    status?: string;
+    statusUpdatedAt?: Date;
+    lastMessage?: string;
+    codAmount?: number;
+    collectedAmount?: number;
+    deliveryCharge?: number | null;
+    sentAt?: Date;
+    sentBy?: unknown;
+    paymentId?: string | null;
+    paidOutAt?: Date | null;
+  };
   /**
    * The day this order counts as going out, when that is not the day it was
    * placed. Null/absent means "the day it was placed" — see order.model.ts.

@@ -139,6 +139,29 @@ async function startServer() {
     setInterval(sweep, SWEEP_EVERY_MS).unref();
   }
 
+  // ─── Courier: keep parcel statuses and payouts in step ───────────
+  //
+  // Steadfast's webhook does this the moment something changes, when it is set
+  // up; this is the safety net for when it is not, or a call was missed. Every
+  // 30 minutes, only when the courier keys are present, and never fatal.
+  if (dbReady) {
+    const COURIER_EVERY_MS = 30 * 60_000;
+    const courierTick = async () => {
+      try {
+        const { steadfastConfigured } = await import('./app/modules/courier/steadfast.client');
+        if (!steadfastConfigured()) return;
+        const { CourierService } = await import('./app/modules/courier/courier.service');
+        const st = await CourierService.syncStatuses({ limit: 300 });
+        if (st.changed) console.log(`📦 Courier: ${st.changed} parcel status update(s).`);
+        await CourierService.syncPayments();
+      } catch (error) {
+        console.error('⚠️  Courier sync failed (server unaffected):', error);
+      }
+    };
+    setTimeout(courierTick, 60_000).unref();
+    setInterval(courierTick, COURIER_EVERY_MS).unref();
+  }
+
   app.listen(PORT, () => {
     console.log(`🚀 Sabbir Book Server is running on http://localhost:${PORT}`);
   });
