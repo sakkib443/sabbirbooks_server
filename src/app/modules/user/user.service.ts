@@ -137,16 +137,19 @@ const createStaffServices = async (
     email: string;
     phoneNumber?: string;
     password: string;
-    role: 'admin' | 'trainingManager' | 'contentManager' | 'manager';
+    role: 'superAdmin' | 'admin' | 'trainingManager' | 'contentManager' | 'manager';
     permissions?: unknown;
   },
   requesterRole: string,
 ): Promise<{ user: IUser; credentials: { email: string; password: string; role: string } }> => {
-  if (!['admin', 'trainingManager', 'contentManager', 'manager'].includes(payload.role)) {
-    throw new Error('Staff role must be admin, trainingManager, contentManager or manager');
+  if (!['superAdmin', 'admin', 'trainingManager', 'contentManager', 'manager'].includes(payload.role)) {
+    throw new Error('Staff role must be superAdmin, admin, trainingManager, contentManager or manager');
   }
-  if (payload.role === 'admin' && requesterRole !== 'superAdmin') {
-    const e: any = new Error('Only a Super Admin can create admin accounts');
+  // An admin sees fifteen days and a superAdmin everything, so only a
+  // superAdmin may hand out either — otherwise an admin could make an account
+  // that sees more than they do.
+  if ((payload.role === 'admin' || payload.role === 'superAdmin') && requesterRole !== 'superAdmin') {
+    const e: any = new Error('Only a Super Admin can create admin or super admin accounts');
     e.statusCode = 403;
     throw e;
   }

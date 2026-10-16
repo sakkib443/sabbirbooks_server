@@ -706,7 +706,7 @@ const earningsByCode = async (
  * purpose, and saying so is the difference between a total that looks wrong and
  * one that explains itself.
  */
-const getById = async (id: string) => {
+const getById = async (id: string, range?: { from: string; to: string }) => {
   if (!isValidObjectId(id)) throw new Error('Invalid application id');
   const app: any = await AmbassadorApplication.findById(id)
     .populate('coupon', 'code isActive discountType discountValue payoutPerSale usedCount')
@@ -717,7 +717,9 @@ const getById = async (id: string) => {
   if (!app) throw new Error('Application not found');
 
   const code = String(app.couponCode || '').toUpperCase();
-  const stats = await earningsByCode(code ? [code] : []);
+  const stats = await earningsByCode(code ? [code] : [], range || {});
+  // An admin sees the sales of their window only (see the controller).
+  const within = range ? { createdAt: { $gte: new Date(range.from), $lt: new Date(range.to) } } : {};
 
   const ORDER_FIELDS =
     'orderNumber createdAt total status payment couponCode couponDiscount couponPayout shippingAddress';
@@ -726,6 +728,7 @@ const getById = async (id: string) => {
     ? await Promise.all([
         Order.find({
           couponCode: code,
+          ...within,
           status: { $ne: 'cancelled' },
           $or: [{ status: 'delivered' }, { 'payment.status': 'paid' }],
         })
@@ -735,6 +738,7 @@ const getById = async (id: string) => {
           .lean(),
         Order.find({
           couponCode: code,
+          ...within,
           $nor: [
             { status: { $ne: 'cancelled' }, $or: [{ status: 'delivered' }, { 'payment.status': 'paid' }] },
           ],

@@ -5,6 +5,7 @@ import { BookCoupon } from './bookCoupon.model';
 import { Order } from '../order/order.model';
 import { User } from '../user/user.model';
 import { AmbassadorApplication } from '../ambassador/ambassador.model';
+import { scopeCreatedAt } from '../order/managerScope';
 
 const uid = (req: Request) => (req as any).user?._id || (req as any).user?.id;
 
@@ -485,14 +486,15 @@ export const deleteCoupon = async (req: Request, res: Response) => {
 // much is owed to the owner. Counts every non-cancelled order that used the code
 // and sums the payout SNAPSHOT stored on each order, so a later change to
 // payoutPerSale does not silently restate what past sales already earned.
-export const getPayouts = async (_req: Request, res: Response) => {
+export const getPayouts = async (req: Request, res: Response) => {
   try {
     const coupons: any[] = await BookCoupon.find()
       .populate('ownerUser', OWNER_FIELDS)
       .sort({ createdAt: -1 })
       .lean();
     const agg: any[] = await Order.aggregate([
-      { $match: { couponCode: { $nin: [null, ''] }, status: { $ne: 'cancelled' } } },
+      // An admin's figures cover their last fifteen days; a superAdmin's, all time.
+      { $match: { couponCode: { $nin: [null, ''] }, status: { $ne: 'cancelled' }, ...scopeCreatedAt((req as any).user) } },
       {
         $group: {
           _id: '$couponCode',

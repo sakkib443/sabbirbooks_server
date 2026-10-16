@@ -1717,7 +1717,9 @@ const getBookOrderStats = async (opts?: {
   const rangeWindow = dayWindow(fromDay, toDay);
   const todayWindow = dayWindow(todayDay, todayDay);
   // A scoped caller's "all time" is their window; everyone else's is all time.
-  const lifetime = opts?.scope ? { createdAt: rangeWindow } : {};
+  // The whole scope, not just the days asked for: an admin's "all time" panel
+  // is their fifteen days whatever the chart beside it is showing.
+  const lifetime = opts?.scope ? { createdAt: dayWindow(opts.scope.fromDay, opts.scope.toDay) } : {};
 
   const live = { status: { $ne: 'cancelled' } };
   // Money in hand: delivered, or already paid (which is every successful
