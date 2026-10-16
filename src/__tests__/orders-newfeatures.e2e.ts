@@ -204,12 +204,15 @@ async function main() {
   const oid = placed.body?.data?._id as string;
 
   let cur = (await getOrder(student, oid)).body.data;
-  check(cur.status === 'pending' && !cur.confirmedAt, 'fresh COD order: pending, no confirmedAt');
-  check(printedIndex(cur) === 0, 'BEFORE admin confirms → step 1 "Order placed" (this is the client\'s complaint fixed)');
+  // A COD order is confirmed the moment it is placed (shop's decision,
+  // 16 Oct 2026) — no admin click needed to reach "Order confirmed".
+  check(cur.status === 'processing' && !!cur.confirmedAt, 'fresh COD order: confirmed at once (processing + confirmedAt)');
+  check(printedIndex(cur) === 1, 'straight after ordering → step 2 "Order confirmed"');
 
+  // An admin pressing Confirm anyway changes nothing.
   await setStatus(admin, oid, 'processing');
   cur = (await getOrder(student, oid)).body.data;
-  check(!!cur.confirmedAt && printedIndex(cur) === 1, 'AFTER admin confirms → step 2 "Order confirmed"');
+  check(!!cur.confirmedAt && printedIndex(cur) === 1, 'admin Confirm on it again → still step 2, no harm');
 
   await setStatus(admin, oid, 'shipped');
   cur = (await getOrder(student, oid)).body.data;
