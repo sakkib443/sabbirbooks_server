@@ -198,10 +198,11 @@ router.patch(
 router.post(
   '/bulk-delete',
   authMiddleware,
-  authorize('superAdmin', 'admin'),
+  // Super Admin only (17 Oct 2026): an order is the shop's record of a sale.
+  authorize('superAdmin'),
   OrderController.deleteOrders
 );
-router.delete('/:id', authMiddleware, authorize('superAdmin', 'admin'), OrderController.deleteOrder);
+router.delete('/:id', authMiddleware, authorize('superAdmin'), OrderController.deleteOrder);
 
 // ─── Single order (owner, admin, or access key) — keep last so
 // specific paths above win over the ':id' wildcard ───────────

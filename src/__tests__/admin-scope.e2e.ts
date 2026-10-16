@@ -96,6 +96,8 @@ async function main() {
   check((await api().get(`/api/orders/${old._id}`).set(S)).status === 200, 'superAdmin can open the old one');
   check((await api().patch(`/api/orders/${old._id}/status`).set(A).send({ status: 'cancelled' })).status === 403, 'admin cannot change the old order');
   check((await api().delete(`/api/orders/${old._id}`).set(A)).status === 403, 'admin cannot delete the old order');
+  check((await api().delete(`/api/orders/${recent._id}`).set(A)).status === 403, 'admin cannot delete even a recent order (Super Admin only)');
+  check((await api().post('/api/orders/bulk-delete').set(A).send({ ids: [recent._id] })).status === 403, 'admin cannot bulk-delete either');
 
   console.log('── Dashboard ──');
   const sa = (await api().get('/api/orders/stats').set(A)).body?.data;
