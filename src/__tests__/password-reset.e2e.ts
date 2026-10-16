@@ -12,6 +12,7 @@
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import mongoose from 'mongoose';
 import request from 'supertest';
+import { approveDevice } from './_approveDevice';
 
 let passed = 0;
 let failed = 0;
@@ -58,8 +59,10 @@ async function main() {
     });
     await User.updateOne({ email }, { status: 'active' });
   };
-  const login = (identifier: string, password: string, device = 'dev-1') =>
-    api().post('/api/auth/login').set('x-device-id', device).send({ email: identifier, password });
+  const login = async (identifier: string, password: string, device = 'dev-1') => {
+    await approveDevice(identifier, device);
+    return api().post('/api/auth/login').set('x-device-id', device).send({ email: identifier, password });
+  };
 
   await register('rahim@test.com', '01711000001', 'oldpass1');
 

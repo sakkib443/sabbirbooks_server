@@ -60,7 +60,10 @@ export const getMeController = async (req: Request, res: Response) => {
       data: {
         _id: tokenUser._id,
         email: account?.email ?? tokenUser.email,
-        role: account?.role ?? tokenUser.role,
+        // While the Super Admin views a panel as admin/manager, the panel is
+        // told that role (and realRole, so it can offer the way back).
+        role: tokenUser.viewAs || (account?.role ?? tokenUser.role),
+        ...(tokenUser.viewAs ? { realRole: tokenUser.realRole, viewAs: tokenUser.viewAs } : {}),
         firstName: account?.firstName ?? tokenUser.firstName,
         lastName: account?.lastName ?? tokenUser.lastName,
         name: tokenUser.name,
@@ -89,7 +92,9 @@ export const getMeController = async (req: Request, res: Response) => {
           account?.role !== 'student' ||
           (Boolean(account?.whatsappNumber) && Boolean(account?.medicalCollegeName)),
         permissions: account?.permissions,
-        capabilities: account
+        capabilities: tokenUser.viewAs
+          ? resolveCapabilities(tokenUser.viewAs)
+          : account
           ? UserService.capabilitiesFor(account as any)
           : resolveCapabilities(tokenUser.role),
       },
@@ -108,9 +113,12 @@ export const loginController = async (req: Request, res: Response) => {
       data: result,
     });
   } catch (error: any) {
-    res.status(401).json({
+    // 403 + code when a staff device is waiting for the Super Admin's approval;
+    // every other failure stays a plain 401.
+    res.status(error?.code === 'DEVICE_APPROVAL_REQUIRED' ? 403 : 401).json({
       success: false,
       message: error.message || 'Login failed',
+      ...(error?.code === 'DEVICE_APPROVAL_REQUIRED' ? { code: error.code } : {}),
     });
   }
 };

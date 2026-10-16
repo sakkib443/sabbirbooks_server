@@ -410,7 +410,7 @@ const baseFilter = (q: CourierListQuery, dateField: string) => {
 };
 
 const LIST_FIELDS =
-  'orderNumber status total deliveryCharge payment.method payment.status shippingAddress college items.title items.quantity courier createdAt dispatchDate';
+  'orderNumber orderSeq status total deliveryCharge payment.method payment.status shippingAddress college items.title items.quantity courier createdAt dispatchDate';
 
 const listConsignments = async (q: CourierListQuery) => {
   const limit = Math.min(Math.max(Number(q.limit) || 50, 1), 500);

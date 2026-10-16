@@ -5,13 +5,49 @@ import jwt from 'jsonwebtoken';
 import config from '../config';
 import { User } from '../modules/user/user.model';
 import { Capability, resolveCapabilities } from '../config/permissions';
+import { Session } from '../modules/session/session.model';
+import { CHECKED_ROLES } from '../modules/security/security.service';
+
+/** Panels a Super Admin may look at as if they were that role. */
+const VIEW_AS_ROLES = ['admin', 'manager'];
+
+/**
+ * A staff token is good only while its device still has a session — that is
+ * what makes "remove device" on the Security screen sign it out at once. A
+ * staff token from before device ids were put in tokens is refused too; the
+ * browser refreshes it on the 401 and gets one that names its device.
+ * Students and affiliates are not checked (one lookup saved per request).
+ */
+const staffSessionAlive = async (decoded: any): Promise<boolean> => {
+  if (!CHECKED_ROLES.includes(String(decoded?.role || ''))) return true;
+  if (!decoded?.did) return false;
+  try {
+    return Boolean(await Session.exists({ userId: decoded._id, deviceId: decoded.did }));
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * "View as": the Super Admin's own token plus x-view-as: admin | manager makes
+ * the request run exactly as that role — same menus, same date limits, same
+ * refusals. It can only narrow: the header is ignored on anyone else's token.
+ */
+const applyViewAs = (req: Request, decoded: any) => {
+  const raw = req.headers['x-view-as'];
+  const viewAs = String(Array.isArray(raw) ? raw[0] : raw || '').trim();
+  if (decoded?.role === 'superAdmin' && VIEW_AS_ROLES.includes(viewAs)) {
+    return { ...decoded, role: viewAs, viewAs, realRole: 'superAdmin' };
+  }
+  return decoded;
+};
 
 /**
  * JWT Authentication middleware.
  * Verifies the Bearer ACCESS token and attaches the decoded payload
  * ({ _id, role, email }) to req.user.
  */
-export const authMiddleware = (req: Request, res: Response, next: NextFunction) => {
+export const authMiddleware = async (req: Request, res: Response, next: NextFunction) => {
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -20,13 +56,17 @@ export const authMiddleware = (req: Request, res: Response, next: NextFunction) 
 
   const token = authHeader.split(' ')[1];
 
+  let decoded: any;
   try {
-    const decoded = jwt.verify(token, config.jwt.access_secret);
-    (req as any).user = decoded;
-    next();
+    decoded = jwt.verify(token, config.jwt.access_secret);
   } catch (err) {
     return res.status(401).json({ success: false, message: 'Invalid or expired token' });
   }
+  if (!(await staffSessionAlive(decoded))) {
+    return res.status(401).json({ success: false, message: 'This device was signed out. Please log in again.' });
+  }
+  (req as any).user = applyViewAs(req, decoded);
+  next();
 };
 
 /**
@@ -46,12 +86,14 @@ export const authMiddleware = (req: Request, res: Response, next: NextFunction) 
  * A bad or expired token is treated as "not signed in" rather than an error:
  * the visitor gets the anonymous answer, which is the safe direction.
  */
-export const optionalAuth = (req: Request, _res: Response, next: NextFunction) => {
+export const optionalAuth = async (req: Request, _res: Response, next: NextFunction) => {
   const header = req.headers.authorization;
   const token = header?.startsWith('Bearer ') ? header.slice(7) : null;
   if (token) {
     try {
-      (req as any).user = jwt.verify(token, config.jwt.access_secret as string);
+      const decoded: any = jwt.verify(token, config.jwt.access_secret as string);
+      // A removed staff device counts as signed out here too.
+      if (await staffSessionAlive(decoded)) (req as any).user = applyViewAs(req, decoded);
     } catch {
       // Ignored on purpose — see the note above.
     }
@@ -112,6 +154,17 @@ export const requireCapability = (...required: Capability[]) => {
 
     // superAdmin keeps its unconditional bypass — unchanged from authorize().
     if (tokenUser.role === 'superAdmin') return next();
+
+    // A Super Admin viewing as admin/manager gets that role's standard set.
+    if (tokenUser.viewAs) {
+      const owned = resolveCapabilities(tokenUser.viewAs);
+      const missing = required.filter((cap) => !owned.includes(cap));
+      if (missing.length > 0) {
+        return res.status(403).json({ success: false, message: `Access denied: missing permission '${missing[0]}'`, missing });
+      }
+      (req as any).capabilities = owned;
+      return next();
+    }
 
     let account: { role?: string; permissions?: unknown; status?: string; isDeleted?: boolean } | null;
     try {

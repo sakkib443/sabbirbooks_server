@@ -11,6 +11,7 @@ import { generateUserId } from '../user/user.service';
 import { verifyGoogleIdToken, GoogleAuthError } from './google.verify';
 import { decideGoogleAccount } from './google.account';
 import { PasswordEmailService } from '../notification/passwordEmail.service';
+import { SecurityService } from '../security/security.service';
 
 /**
  * The account that used to be a backdoor.
@@ -46,8 +47,10 @@ interface DeviceContext {
   ip?: string;
 }
 
-// Helper: Generate tokens
-const generateTokens = (payload: { _id: string; role: string; email: string }) => {
+// Helper: Generate tokens. `did` is the device the access token was issued
+// to: for staff, authMiddleware checks that device still has a session, so a
+// device the Super Admin removes is signed out at once rather than in 12 hours.
+const generateTokens = (payload: { _id: string; role: string; email: string; did: string }) => {
   const accessToken = jwt.sign(payload, config.jwt.access_secret, {
     expiresIn: config.jwt.access_expires_in as any,
   });
@@ -85,10 +88,17 @@ const loginUser = async (
     throw new Error('Incorrect password');
   }
 
+  // Staff on a device the Super Admin has not approved stop here — see
+  // security.service. The device id is fixed first so the request, the
+  // session and the token all name the same device.
+  device = { ...device, deviceId: SessionService.resolveDeviceId(device.deviceId) };
+  await SecurityService.gateStaffSignIn(user, device as { deviceId: string });
+
   const { accessToken, refreshToken } = generateTokens({
     _id: String(user._id),
     role: user.role,
     email: user.email,
+    did: device.deviceId as string,
   });
 
   // Device-limit: register/replace this device's session (evicts oldest if over limit).
@@ -184,10 +194,15 @@ const googleSignIn = async (idToken: unknown, device: DeviceContext = {}) => {
     throw new Error('Google sign-in failed');
   }
 
+  // Same device approval as a password login.
+  device = { ...device, deviceId: SessionService.resolveDeviceId(device.deviceId) };
+  await SecurityService.gateStaffSignIn(user, device as { deviceId: string });
+
   const { accessToken, refreshToken } = generateTokens({
     _id: String(user._id),
     role: user.role,
     email: user.email,
+    did: device.deviceId as string,
   });
 
   const { deviceId } = await SessionService.createSession({
@@ -251,7 +266,7 @@ const refreshAccessToken = async (refreshToken: string, deviceId: string) => {
   }
 
   const accessToken = jwt.sign(
-    { _id: String(user._id), role: user.role, email: user.email },
+    { _id: String(user._id), role: user.role, email: user.email, did: deviceId },
     config.jwt.access_secret,
     { expiresIn: config.jwt.access_expires_in as any }
   );

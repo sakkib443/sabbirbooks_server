@@ -34,6 +34,7 @@ import { CertificateRoutes } from './app/modules/certificate/certificate.routes'
 import { QrResourceRoutes } from './app/modules/qrResource/qrResource.routes';
 import { OrderRoutes } from './app/modules/order/order.routes';
 import { CourierRoutes } from './app/modules/courier/courier.routes';
+import { SecurityRoutes } from './app/modules/security/security.routes';
 import { AttendanceRoutes } from './app/modules/attendance/attendance.routes';
 import { ExamRoutes } from './app/modules/exam/exam.routes';
 import { AssignmentRoutes } from './app/modules/assignment/assignment.routes';
@@ -133,6 +134,7 @@ app.use('/api/medical-colleges', MedicalCollegeRoutes);
 app.use('/api/ambassador', AmbassadorRoutes);
 app.use('/api/orders', OrderRoutes);
 app.use('/api/courier', CourierRoutes);
+app.use('/api/security', SecurityRoutes);
 app.use('/api/attendance', AttendanceRoutes);
 app.use('/api/exams', ExamRoutes);
 app.use('/api/assignments', AssignmentRoutes);
