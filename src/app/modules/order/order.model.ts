@@ -77,6 +77,37 @@ const orderCollegeSchema = new Schema(
   { _id: false }
 );
 
+/**
+ * The parcel at the courier (Steadfast), once the order has been handed over
+ * through the API. Absent on every order sent by hand or not sent at all.
+ *
+ * `status` is the courier's own word (in_review, pending, delivered,
+ * partial_delivered, cancelled, hold, …), kept verbatim so nothing is lost in
+ * translation; the courier pages group it. The money fields are what the
+ * courier reports: `codAmount` asked of the buyer, `deliveryCharge` the courier
+ * keeps, and `paymentId` once the courier has paid it out to the shop.
+ */
+const orderCourierSchema = new Schema(
+  {
+    provider: { type: String, default: 'steadfast' },
+    consignmentId: { type: String, trim: true },
+    trackingCode: { type: String, trim: true },
+    status: { type: String, trim: true, default: 'in_review' },
+    statusUpdatedAt: { type: Date },
+    lastMessage: { type: String, trim: true, default: '' },
+    codAmount: { type: Number, default: 0 },
+    // What the courier actually took from the buyer — the COD amount on a
+    // full delivery, the reported figure on a partial one, 0 on a return.
+    collectedAmount: { type: Number, default: 0 },
+    deliveryCharge: { type: Number, default: null },
+    sentAt: { type: Date },
+    sentBy: { type: Schema.Types.ObjectId, ref: 'User' },
+    paymentId: { type: String, default: null },
+    paidOutAt: { type: Date, default: null },
+  },
+  { _id: false }
+);
+
 const orderSchema = new Schema<IOrder>(
   {
     // Auto human-readable reference, e.g. ORD-1720598400000-A1B2C3.
@@ -192,9 +223,15 @@ const orderSchema = new Schema<IOrder>(
     // on every read. The API stores the chosen day's window start, and the
     // list filter compares it exactly as it compares createdAt.
     dispatchDate: { type: Date, default: null },
+
+    // The parcel at the courier — see orderCourierSchema.
+    courier: { type: orderCourierSchema, default: undefined },
   },
   { timestamps: true }
 );
+
+orderSchema.index({ 'courier.consignmentId': 1 }, { sparse: true });
+orderSchema.index({ 'courier.sentAt': -1 }, { sparse: true });
 
 orderSchema.index({ user: 1, createdAt: -1 });
 orderSchema.index({ status: 1 });
