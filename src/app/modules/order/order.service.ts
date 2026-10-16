@@ -890,6 +890,30 @@ const updateOrderStatus = async (
   if (extra?.adminNote !== undefined) order.adminNote = extra.adminNote;
 
   switch (status) {
+    case 'pending': {
+      // Back to "not confirmed yet" — the admin's choice for an order they want
+      // to hold (16 Oct 2026: COD orders now confirm themselves, and the shop
+      // still wants to park the odd one). Undoes what confirming did: the
+      // copies go back on the shelf until it is confirmed again, and the
+      // tracker steps back to "Placed". A delivered order has changed hands
+      // (and a COD one has been marked paid), so it does not go back.
+      if (order.status === 'delivered') {
+        throw new Error('A delivered order cannot be moved back to pending');
+      }
+      await restoreStockIfTaken(order);
+      order.stockAdjusted = false;
+      order.confirmedAt = undefined;
+      order.shippedAt = undefined;
+      order.cancelledAt = undefined;
+      order.status = 'pending';
+      // A cancellation marked unpaid money "failed"; waiting again, it is owed.
+      if (order.payment?.status === 'failed') {
+        order.payment.status = 'pending';
+        order.markModified('payment');
+      }
+      break;
+    }
+
     case 'processing': {
       // Confirming the order — this is the gate that lets a COD buyer read the
       // book's QR content, so it is deliberately a human decision.

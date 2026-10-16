@@ -54,7 +54,7 @@ export const createOrderValidationSchema = z.object({
 // ─── Admin fulfillment status update ─────────────────────────
 export const updateOrderStatusValidationSchema = z.object({
   body: z.object({
-    status: z.enum(['processing', 'shipped', 'delivered', 'cancelled']),
+    status: z.enum(['pending', 'processing', 'shipped', 'delivered', 'cancelled']),
     // Optional courier details captured at the same time as "shipped".
     courierName: z.string().optional(),
     trackingCode: z.string().optional(),

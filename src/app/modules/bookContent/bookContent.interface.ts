@@ -101,6 +101,8 @@ export interface IBookQuestion {
    * Ignored entirely once a video is attached.
    */
   videoNote?: string;
+  /** true = no "video unavailable" notice on this question at all. */
+  hideVideoNote?: boolean;
 
   order: number;
   isPublished: boolean;

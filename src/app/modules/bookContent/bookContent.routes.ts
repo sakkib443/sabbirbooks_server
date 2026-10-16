@@ -95,6 +95,9 @@ router.get('/video-notes/:bookId', ...admin, BookContentController.getVideoNotes
 
 router.patch('/reorder/:level', ...admin, BookContentController.reorder);
 
+// The "video unavailable" notice, on or off for many questions at once.
+router.patch('/video-note-visibility', ...admin, BookContentController.setVideoNoteVisibility);
+
 // PDFs, images and short answer videos → the protected directory on the mounted
 // volume (NOT uploads/, which is served publicly by express.static).
 router.post(
