@@ -115,6 +115,17 @@ async function main() {
   check(back.status === 200, 'switched back on, the manager signs in again', back.status);
   check((await api().post(`/api/security/users/${manager.id}/access`).set(A).send({ enabled: false })).status === 403, 'an admin cannot switch anyone off');
 
+  console.log('── Deleting books and orders ──');
+  check((await api().delete(`/api/books/${book._id}`).set(A)).status === 403, 'an admin cannot delete a book');
+  check((await api().delete(`/api/books/${book._id}`).set(M)).status === 403, 'nor can a manager');
+  const sdel = await api().delete(`/api/books/${book._id}`).set(S);
+  check(sdel.status === 200, 'the Super Admin can', sdel.status);
+  check((await api().delete('/api/orders/000000000000000000000000').set(A)).status === 403, 'an admin cannot delete an order');
+
+  console.log('── Dashboard ──');
+  const ds = (await api().get('/api/orders/stats').set(A)).body?.data;
+  check(ds && Object.keys(ds).join() === 'newOrders', 'an admin dashboard carries only the new-order count', ds);
+
   console.log('── Messages ──');
   check(OrderSmsService.shouldSend('delivered', { status: 'delivered', payment: { method: 'cod' } }) === false, 'no SMS when an order is delivered');
 

@@ -9,7 +9,6 @@ import {
   isTotalsBlind,
   rangeInstants,
   stripOrderMoney,
-  stripStatsMoney,
 } from './managerScope';
 
 /**
@@ -364,8 +363,10 @@ const getStats = async (req: Request, res: Response) => {
     });
     res.status(200).json({
       success: true,
-      // Sums of money: the Super Admin only (an admin sees each order, not totals).
-      data: isTotalsBlind((req as any).user) ? stripStatsMoney(data) : data,
+      // Totals of any kind — money and order counts alike — are the Super
+      // Admin's (18 Oct 2026). Anyone else gets only the work waiting: how many
+      // new orders need confirming.
+      data: isTotalsBlind((req as any).user) ? { newOrders: (data as any)?.newOrders ?? 0 } : data,
     });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });

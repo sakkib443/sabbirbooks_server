@@ -12,7 +12,6 @@ const router = express.Router();
 const contentWrite = [authorize('admin', 'contentManager', 'manager'), requireCapability('content.write')];
 // Deleting additionally needs records.delete, which the add-and-edit
 // `manager` role deliberately does not have.
-const contentWriteDelete = [...contentWrite, requireCapability('records.delete')];
 
 // Public routes
 router.get('/', BookController.getAllBooksController);
@@ -35,10 +34,12 @@ router.patch(
   BookController.updateBookController
 );
 
+// Deleting a book takes its orders' titles, its QR content and its codes with
+// it — the Super Admin's alone (18 Oct 2026), whatever an admin or manager holds.
 router.delete(
   '/:id',
   authMiddleware,
-  ...contentWriteDelete,
+  authorize('superAdmin'),
   BookController.deleteBookController
 );
 
