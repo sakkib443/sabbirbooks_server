@@ -116,6 +116,10 @@ const shouldSend = (event: OrderSmsEvent, order: any): boolean => {
   // trigger and here, stay quiet.
   if (order?.status === 'cancelled') return false;
 
+  // No text once the book is delivered — whether the admin marks it or the
+  // courier reports it (the shop's decision, 18 Oct 2026).
+  if (event === 'delivered') return false;
+
   // The two paths are exclusive on purpose: a prepaid buyer's 'paid' text
   // already says "your order is confirmed", so sending them 'placed' as well
   // would be two texts saying one thing.

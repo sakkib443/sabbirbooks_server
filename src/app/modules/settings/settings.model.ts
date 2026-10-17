@@ -70,6 +70,10 @@ const settingsSchema = new Schema<ISiteSettings>(
         // Which payment methods the checkout offers. Turning both off would
         // leave nothing to click, so the order service falls back to COD.
         codEnabled: { type: Boolean, default: true },
+
+        // The hour (0–23, Bangladesh time) a shop day closes — noon by
+        // default; 0 = midnight. Set from the Book Orders screen. See utils/shopDay.
+        shopDayCutoffHour: { type: Number, default: 12, min: 0, max: 23 },
         onlinePaymentEnabled: { type: Boolean, default: true },
 
         // Flat delivery charge for printed books, in taka — one rate everywhere.

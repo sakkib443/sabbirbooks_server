@@ -30,9 +30,9 @@ const couponPreviewLimiter = rateLimit({
 // owe" territory as the order screens, so it rides on orders.read; changing a
 // coupon (which moves real money at checkout) needs orders.write.
 const read = [authMiddleware, authorize('admin', 'manager'), requireCapability('orders.read')];
-// Creating, editing or deleting a coupon is the admin's: a manager only looks
-// (18 Oct 2026).
-const write = [authMiddleware, authorize('admin'), requireCapability('orders.write')];
+// Creating, editing or deleting a coupon needs coupons.write (18 Oct 2026):
+// an admin has it by default, a manager only if the Super Admin gives it.
+const write = [authMiddleware, authorize('admin', 'manager'), requireCapability('coupons.write')];
 
 // ── Checkout (any buyer, signed in or not) ──
 // optionalAuth: a signed-in buyer's per-buyer limit is checked on their account,

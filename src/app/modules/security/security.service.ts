@@ -219,7 +219,23 @@ const approveExistingSessions = async () => {
   return added;
 };
 
+/**
+ * Switch a staff account's access off or on (18 Oct 2026). Off = blocked: it
+ * cannot sign in, and every device it is on is signed out at once. On = active
+ * again (its devices still need approval as usual). Never the Super Admin.
+ */
+const setAccess = async (userId: string, enabled: boolean) => {
+  if (!Types.ObjectId.isValid(userId)) throw new Error('User not found');
+  const u: any = await User.findById(userId).select('role isDeleted').lean();
+  if (!u || u.isDeleted) throw new Error('User not found');
+  if (!APPROVAL_ROLES.includes(String(u.role))) throw new Error('Only staff access can be switched here');
+  await User.updateOne({ _id: userId }, { $set: { status: enabled ? 'active' : 'blocked' } });
+  if (!enabled) await Session.deleteMany({ userId: new Types.ObjectId(userId) });
+  return { status: enabled ? 'active' : 'blocked' };
+};
+
 export const SecurityService = {
+  setAccess,
   gateStaffSignIn,
   overview,
   decide,

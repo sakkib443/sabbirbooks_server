@@ -22,7 +22,7 @@ import { SslcommerzService } from '../payment/sslcommerz.service';
 import { SettingsService } from '../settings/settings.services';
 import {
   BD_OFFSET_MS,
-  SHOP_DAY_SHIFT_MS,
+  shopDayShiftMs,
   addDays,
   bdDate,
   dayWindow,
@@ -1767,7 +1767,7 @@ const getBookOrderStats = async (opts?: {
             _id: {
               $dateToString: {
                 format: '%Y-%m-%d',
-                date: { $add: ['$createdAt', SHOP_DAY_SHIFT_MS] },
+                date: { $add: ['$createdAt', shopDayShiftMs()] },
                 timezone: 'Asia/Dhaka',
               },
             },
