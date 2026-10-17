@@ -1,10 +1,10 @@
 /* eslint-disable no-console */
 /**
- * Admin = the last 15 days; superAdmin = everything.
+ * Admin = every order, but no money (17 Oct 2026); superAdmin = everything.
  *
  * One recent order and one placed 20 days ago. Every screen that counts orders
- * or money is asked by both roles: the admin must see only the recent one, the
- * superAdmin both — and the admin must not reach the old one by its id either.
+ * or money is asked by both roles: both see both orders; only the superAdmin
+ * sees a taka of them.
  * Plus: only a superAdmin hands out admin or superAdmin accounts.
  */
 import { MongoMemoryServer } from 'mongodb-memory-server';
@@ -87,33 +87,37 @@ async function main() {
   console.log('── Order list ──');
   const la = await api().get('/api/orders?limit=50').set(A);
   const ls = await api().get('/api/orders?limit=50').set(S);
-  check(la.body?.data?.length === 1 && la.body.data[0]._id === recent._id, 'admin lists only the recent order', la.body?.data?.length);
+  check(la.body?.data?.length === 2, 'admin lists every order (no date limit)', la.body?.data?.length);
   check(ls.body?.data?.length === 2, 'superAdmin lists both', ls.body?.data?.length);
-  const askOld = await api().get(`/api/orders?from=${new Date(Date.now() - 30 * 86400_000).toISOString()}&to=${new Date(Date.now() - 18 * 86400_000).toISOString()}`).set(A);
-  check((askOld.body?.data?.length ?? 0) === 0, 'admin asking for 30–18 days ago gets nothing', askOld.body?.data?.length);
+  const rowA = la.body?.data?.[0] || {};
+  const rowS = ls.body?.data?.[0] || {};
+  check(rowA.total === undefined && rowA.subtotal === undefined && rowA.deliveryCharge === undefined, 'admin rows carry no money', rowA);
+  check(rowA.courier && rowA.courier.codAmount === undefined && rowA.courier.collectedAmount === undefined, 'admin rows: no courier money either', rowA.courier);
+  check(typeof rowS.total === 'number' && typeof rowS.subtotal === 'number', 'superAdmin rows carry the money');
 
   console.log('── One order by id ──');
-  check((await api().get(`/api/orders/${old._id}`).set(A)).status === 403, 'admin cannot open the old order by id');
-  check((await api().get(`/api/orders/${recent._id}`).set(A)).status === 200, 'admin can open the recent one');
-  check((await api().get(`/api/orders/${old._id}`).set(S)).status === 200, 'superAdmin can open the old one');
-  check((await api().patch(`/api/orders/${old._id}/status`).set(A).send({ status: 'cancelled' })).status === 403, 'admin cannot change the old order');
-  check((await api().delete(`/api/orders/${old._id}`).set(A)).status === 403, 'admin cannot delete the old order');
-  check((await api().delete(`/api/orders/${recent._id}`).set(A)).status === 403, 'admin cannot delete even a recent order (Super Admin only)');
+  const oneA = await api().get(`/api/orders/${old._id}`).set(A);
+  check(oneA.status === 200, 'admin can open the old order');
+  check(oneA.body?.data?.total === undefined, 'admin: no money on one order either', oneA.body?.data?.total);
+  check(typeof (await api().get(`/api/orders/${old._id}`).set(S)).body?.data?.total === 'number', 'superAdmin sees its money');
+  check((await api().delete(`/api/orders/${recent._id}`).set(A)).status === 403, 'admin cannot delete an order (Super Admin only)');
   check((await api().post('/api/orders/bulk-delete').set(A).send({ ids: [recent._id] })).status === 403, 'admin cannot bulk-delete either');
+  const changed = await api().patch(`/api/orders/${recent._id}/status`).set(A).send({ status: 'processing' });
+  check(changed.status === 200 && changed.body?.data?.total === undefined, 'admin can work an order; the reply carries no money', changed.body?.data?.total);
 
   console.log('── Dashboard ──');
   const sa = (await api().get('/api/orders/stats').set(A)).body?.data;
   const ss = (await api().get('/api/orders/stats').set(S)).body?.data;
-  check(sa?.totals?.orders === 1, 'admin dashboard totals: 1 order', sa?.totals);
+  check(sa?.totals?.orders === 2, 'admin dashboard counts every order', sa?.totals);
   check(ss?.totals?.orders === 2, 'superAdmin dashboard totals: 2 orders', ss?.totals);
-  check(sa?.totals?.value > 0, 'admin still sees money (not money-blind)', sa?.totals?.value);
+  check(sa?.totals?.value === 0 && sa?.coupons?.payout === 0, 'admin dashboard: no money', sa?.totals?.value);
+  check(ss?.totals?.value > 0, 'superAdmin dashboard: the money', ss?.totals?.value);
 
   console.log('── Coupon payouts ──');
-  const pa = (await api().get('/api/book-coupons/payouts').set(A)).body?.data;
+  check((await api().get('/api/book-coupons/payouts').set(A)).status === 403, 'coupon payouts are Super Admin only');
   const ps = (await api().get('/api/book-coupons/payouts').set(S)).body?.data;
-  const rowA = (pa?.rows || pa || []).find?.((r: any) => r.code === 'SAVE');
-  const rowS = (ps?.rows || ps || []).find?.((r: any) => r.code === 'SAVE');
-  check(rowA?.sales === 1 && rowS?.sales === 2, 'coupon sales: admin 1, superAdmin 2', { a: rowA?.sales, s: rowS?.sales });
+  const payS = (ps?.rows || ps || []).find?.((r: any) => r.code === 'SAVE');
+  check(payS?.sales === 2, 'superAdmin coupon sales: 2', payS?.sales);
 
   console.log('── Courier ──');
   const caRes = await api().get('/api/courier/summary').set(A);
@@ -123,7 +127,9 @@ async function main() {
   check((await api().post('/api/courier/payments/sync').set(A)).status === 403, 'courier payout sync is Super Admin only');
   check(cs?.parcels === 2, 'superAdmin courier summary: 2 parcels', cs?.parcels);
   const cla = (await api().get('/api/courier/consignments').set(A)).body?.data;
-  check(cla?.total === 1, 'courier list: admin sees 1', cla?.total);
+  check(cla?.total === 2, 'courier list: admin sees both parcels', cla?.total);
+  const parcelA = cla?.rows?.[0] || {};
+  check(parcelA.courier && parcelA.courier.codAmount === undefined && parcelA.total === undefined, 'courier list: no money for admin', parcelA.courier);
 
   console.log('── Who may create whom ──');
   const staff = (role: string) => ({ firstName: 'N', email: `${role}-${Date.now()}@test.com`, password: 'pass1234', role });

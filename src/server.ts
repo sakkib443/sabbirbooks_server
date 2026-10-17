@@ -206,6 +206,21 @@ async function startServer() {
         console.error('⚠️  Courier sync failed (server unaffected):', error);
       }
     };
+    // Once: tracking links stored as Steadfast's /t/ page (which no longer
+    // opens for these codes) now point at the shop's own tracking page.
+    void (async () => {
+      try {
+        const { Order } = await import('./app/modules/order/order.model');
+        const { publicSiteUrl } = await import('./app/modules/courier/steadfast.client');
+        const r = await Order.updateMany(
+          { trackingUrl: /^https:\/\/steadfast\.com\.bd\/t\//, 'courier.trackingCode': { $nin: [null, ''] } },
+          [{ $set: { trackingUrl: { $concat: [`${publicSiteUrl()}/t/`, '$courier.trackingCode'] } } }]
+        );
+        if (r.modifiedCount) console.log(`🔗 ${r.modifiedCount} tracking link(s) moved to the shop's tracking page.`);
+      } catch (error) {
+        console.error('⚠️  Tracking-link update failed (server unaffected):', error);
+      }
+    })();
     setTimeout(courierTick, 60_000).unref();
     setInterval(courierTick, COURIER_EVERY_MS).unref();
   }

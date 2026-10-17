@@ -78,6 +78,7 @@ async function main() {
   process.env.STEADFAST_BASE_URL = `http://127.0.0.1:${port}/api/v1`;
   process.env.STEADFAST_API_KEY = 'test-key';
   process.env.STEADFAST_SECRET_KEY = 'test-secret';
+  process.env.STEADFAST_PUBLIC_TIMELINE = 'off';
   process.env.STEADFAST_WEBHOOK_TOKEN = 'hook-token-123';
 
   const { default: app } = await import('../app');
@@ -146,7 +147,14 @@ async function main() {
 
   const d1: any = await Order.findById(o1._id).lean();
   check(d1.status === 'shipped' && !!d1.shippedAt, 'sent order moved to shipped');
-  check(d1.courier?.consignmentId && d1.trackingUrl === `https://steadfast.com.bd/t/${d1.courier.trackingCode}`, 'consignment + tracking link stored');
+  check(d1.courier?.consignmentId && d1.trackingUrl === `https://magicviva.com/t/${d1.courier.trackingCode}`, 'consignment + tracking link stored');
+
+  // The buyer's tracking page (/t/CODE): public, by code, nothing personal.
+  const tr = await api().get(`/api/courier/track/${d1.courier.trackingCode}`);
+  check(tr.status === 200 && tr.body?.data?.courier?.trackingCode === d1.courier.trackingCode, 'public tracking finds the parcel', tr.body);
+  const trText = JSON.stringify(tr.body?.data || {});
+  check(!trText.includes(String(d1.shippingAddress?.phone)) && !trText.includes(String(d1.shippingAddress?.name)) && tr.body?.data?.total === undefined, 'public tracking shows no name, phone or money');
+  check((await api().get('/api/courier/track/NOPE12345')).status === 404, 'unknown tracking code → 404');
   const again = await api().post('/api/courier/send').set(AUTH).send({ orderIds: [o1._id] });
   check(/Already sent/.test(again.body?.data?.[0]?.error || ''), 'cannot send the same order twice');
   const ready2 = await api().get('/api/courier/ready').set(AUTH);

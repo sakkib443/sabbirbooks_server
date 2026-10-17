@@ -97,6 +97,7 @@ async function main() {
 
   const managerToken = await signIn('manager@t.com', 'manager', 'dev-manager');
   const adminToken = await signIn('admin@t.com', 'admin', 'dev-admin');
+  const ownerToken = await signIn('owner@t.com', 'superAdmin', 'dev-owner');
 
   const list = async (token: string, query = '') =>
     api().get(`/api/orders?limit=100${query}`).set('Authorization', `Bearer ${token}`);
@@ -178,11 +179,11 @@ async function main() {
   const mStats = (await stats(managerToken)).body?.data;
   check('a manager reaches the dashboard numbers', !!mStats, { mStats });
   check(
-    'over two days: yesterday and today',
-    mStats?.range?.from === addDays(today, -1) && mStats?.range?.to === today,
+    'over seven days: the six before today, and today',
+    mStats?.range?.from === addDays(today, -6) && mStats?.range?.to === today,
     { from: mStats?.range?.from, to: mStats?.range?.to }
   );
-  check('two rows in the chart', (mStats?.range?.daily || []).length === 2, {
+  check('seven rows in the chart', (mStats?.range?.daily || []).length === 7, {
     rows: (mStats?.range?.daily || []).length,
   });
   // The figure that reads "all time" on the page is the window's, not the
@@ -193,7 +194,7 @@ async function main() {
   });
 
   const wide = (await stats(managerToken, `?from=${addDays(today, -60)}&to=${today}`)).body?.data;
-  check('asking the dashboard for sixty days still answers with two', wide?.range?.from === addDays(today, -1), {
+  check('asking the dashboard for sixty days still answers with seven', wide?.range?.from === addDays(today, -6), {
     from: wide?.range?.from,
   });
 
@@ -210,9 +211,8 @@ async function main() {
   check('nor a discount', row?.discount === undefined, { v: row?.discount });
   check('nor the delivery charge', row?.deliveryCharge === undefined, { v: row?.deliveryCharge });
   check('nor a price on its lines', row?.items?.[0]?.price === undefined, { v: row?.items?.[0]?.price });
-  // The one amount that survives, and only because the courier sheet is built
-  // from it — the rider has to be told what to collect. No screen draws it.
-  check('the total survives, for the courier sheet', typeof row?.total === 'number', { v: row?.total });
+  // 17 Oct 2026: not even the total (it used to stay for the courier sheet).
+  check('the total is gone too', row && row.total === undefined, { v: row?.total });
   check('what it is NOT hiding: the buyer and the books', !!row?.shippingAddress?.name && !!row?.items?.[0]?.title, {
     name: row?.shippingAddress?.name,
     title: row?.items?.[0]?.title,
@@ -233,10 +233,20 @@ async function main() {
     orders: blind?.totals?.orders,
   });
 
-  const seeing = (await stats(adminToken)).body?.data;
-  check('an admin still sees the money', seeing?.totals?.value > 0, { value: seeing?.totals?.value });
+  // 17 Oct 2026: an admin sees every order but no money; only the Super Admin does.
+  const adminSees = (await stats(adminToken)).body?.data;
+  check('an admin sees no money on the dashboard', adminSees?.totals?.value === 0, { value: adminSees?.totals?.value });
+  check('…but every order is counted', adminSees?.totals?.orders === 4, { orders: adminSees?.totals?.orders });
   const adminRow = (await list(adminToken)).body?.data?.[0];
-  check('and still gets it on the orders', typeof adminRow?.subtotal === 'number', { v: adminRow?.subtotal });
+  check('nor on the orders — not even the total', adminRow && adminRow.subtotal === undefined && adminRow.total === undefined, {
+    subtotal: adminRow?.subtotal, total: adminRow?.total,
+  });
+  const managerRow = (await list(managerToken)).body?.data?.[0];
+  check('nor does a manager get the total', managerRow && managerRow.total === undefined, { total: managerRow?.total });
+  const seeing = (await stats(ownerToken)).body?.data;
+  check('the Super Admin sees the money', seeing?.totals?.value > 0, { value: seeing?.totals?.value });
+  const ownerRow = (await list(ownerToken)).body?.data?.[0];
+  check('and gets it on the orders', typeof ownerRow?.subtotal === 'number', { v: ownerRow?.subtotal });
 
   await mongoose.disconnect();
   await mongod.stop();

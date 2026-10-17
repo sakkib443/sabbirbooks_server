@@ -11,8 +11,11 @@ import {
 } from './order.validation';
 import { authMiddleware, authorize, requireCapability, optionalAuth } from '../../middlewares/auth';
 import { clientIpKey } from '../../utils/clientIp';
+import { moneyBlindResponses } from './managerScope';
 
 const router = express.Router();
+// Money blanked for accounts not shown money (admin, manager) — managerScope.
+router.use(moneyBlindResponses());
 
 // Placing an order no longer needs an account, so this is the one public route
 // that writes a document AND sends an SMS and an admin alert every time it is

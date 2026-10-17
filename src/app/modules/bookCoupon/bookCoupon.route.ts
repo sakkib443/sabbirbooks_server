@@ -46,13 +46,15 @@ router.get('/popup', C.getPopupCoupon);
 router.get('/my', authMiddleware, C.getMyCouponStats);
 
 // ── Admin: report + list. `/payouts` before `/:id` so it is not read as an id. ──
-router.get('/payouts', ...read, C.getPayouts);
+// What is owed to coupon owners is money — the Super Admin's alone.
+router.get('/payouts', authMiddleware, authorize('superAdmin'), C.getPayouts);
 router.get('/', ...read, C.getAllCoupons);
 router.get('/:id', ...read, C.getCouponById);
 
 // ── Admin: create / edit / delete ──
 router.post('/', ...write, C.createCoupon);
 router.patch('/:id', ...write, C.updateCoupon);
-router.delete('/:id', ...write, C.deleteCoupon);
+// Deleting is never a manager's (records.delete), as everywhere else.
+router.delete('/:id', ...write, requireCapability('records.delete'), C.deleteCoupon);
 
 export const BookCouponRoutes = router;

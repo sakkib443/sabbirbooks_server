@@ -18,8 +18,12 @@
  */
 import { addDays, bdDate, cutoffOf } from '../../utils/shopDay';
 
-/** How far either side of today a manager may look. */
-export const MANAGER_DAYS_BACK = 1;
+/**
+ * How far either side of today a manager may look: the last seven shop days
+ * (today and the six before it) plus tomorrow. The shop's decision, 17 Oct
+ * 2026 (it was yesterday–tomorrow before).
+ */
+export const MANAGER_DAYS_BACK = 6;
 export const MANAGER_DAYS_FORWARD = 1;
 
 export type DayRange = { fromDay: string; toDay: string };
@@ -36,9 +40,13 @@ export type DayRange = { fromDay: string; toDay: string };
 export const ADMIN_DAYS_BACK = 14;
 export const ADMIN_DAYS_FORWARD = 1;
 
-/** True when this user's view of the orders has to be narrowed. */
+/**
+ * True when this user's view of the orders has to be narrowed. Only the
+ * manager now: from 17 Oct 2026 an admin sees every order (but no money —
+ * see isMoneyBlind). ADMIN_DAYS_* stay for the day this is wanted back.
+ */
 export const isDayScoped = (user: { role?: unknown } | null | undefined): boolean =>
-  user?.role === 'manager' || user?.role === 'admin';
+  user?.role === 'manager';
 
 /**
  * The shop days this user may see, or null for "everything" (superAdmin and
@@ -49,10 +57,6 @@ export const dayRangeFor = (
   now: Date = new Date()
 ): DayRange | null => {
   if (user?.role === 'manager') return managerDayRange(now);
-  if (user?.role === 'admin') {
-    const today = bdDate(now);
-    return { fromDay: addDays(today, -ADMIN_DAYS_BACK), toDay: addDays(today, ADMIN_DAYS_FORWARD) };
-  }
   return null;
 };
 
@@ -162,12 +166,14 @@ export const clampDays = (allowed: DayRange, fromDay?: string, toDay?: string): 
  * API sends is a number anyone can read out of the network tab, and "they
  * cannot see it" has to mean they cannot get at it.
  *
- * The one amount that survives is an order's TOTAL, and only because the
- * courier sheet is built from it — the rider has to be told what to collect
- * at the door. It is never drawn on any screen a manager looks at.
+ * Not even an order's total any more (see moneyBlindResponses, which every
+ * order, courier, book-access and affiliate route runs through).
  */
 export const isMoneyBlind = (user: { role?: unknown } | null | undefined): boolean =>
-  user?.role === 'manager';
+  // 17 Oct 2026: the admin too — "sees every order, but no taka anywhere".
+  // The Super Admin (and a Super Admin viewing as admin is role 'admin' here,
+  // so they see what an admin sees) is the only one who sees money.
+  user?.role === 'manager' || user?.role === 'admin';
 
 /** The money fields on an order document, blanked. */
 export const stripOrderMoney = <T extends Record<string, any>>(order: T): T => {
@@ -177,6 +183,11 @@ export const stripOrderMoney = <T extends Record<string, any>>(order: T): T => {
   o.deliveryCharge = undefined;
   o.couponDiscount = undefined;
   o.couponPayout = undefined;
+  o.quantityDiscount = undefined;
+  o.deliveryWaived = undefined;
+  if (o.courier && typeof o.courier === 'object') {
+    o.courier = { ...o.courier, collectedAmount: undefined, deliveryCharge: undefined };
+  }
   if (Array.isArray(o.items)) {
     o.items = o.items.map((it: any) => ({ ...it, price: undefined }));
   }
@@ -222,3 +233,56 @@ export const stripStatsMoney = (stats: any) => {
     coupons: { ...(stats.coupons || {}), discount: 0, payout: 0 },
   };
 };
+
+type BlindOpts = { total: boolean; keys: string[] };
+
+/**
+ * Every order-shaped object (anything carrying an orderNumber) in a response,
+ * money blanked — for an account that may not see money. Walks a few levels
+ * so { data: [...] }, { data: { rows: [...] } } and a single order all work.
+ * `keys` blanks extra money fields wherever they appear (a screen's own
+ * totals, e.g. an affiliate's sales and commission); `total` also blanks the
+ * order total.
+ */
+export const stripMoneyDeep = (value: any, opts: BlindOpts, depth = 0): any => {
+  if (depth > 6 || value == null || typeof value !== 'object') return value;
+  if (value instanceof Date) return value;
+  if (Array.isArray(value)) return value.map((v) => stripMoneyDeep(v, opts, depth + 1));
+  const plain: any = typeof value.toJSON === 'function' ? value.toJSON() : value;
+  if (!plain || typeof plain !== 'object' || plain instanceof Date) return plain;
+  let out: any;
+  if ('orderNumber' in plain) {
+    out = stripOrderMoney(plain);
+    if ('codAmount' in out) out.codAmount = undefined;
+    if (out.courier && typeof out.courier === 'object') out.courier = { ...out.courier, codAmount: undefined };
+    if (opts.total) out.total = undefined;
+  } else {
+    out = {};
+    for (const [k, v] of Object.entries(plain)) out[k] = stripMoneyDeep(v, opts, depth + 1);
+  }
+  for (const k of opts.keys) if (k in out) out[k] = undefined;
+  return out;
+};
+
+/**
+ * Router middleware: when the signed-in account may not see money, every
+ * order in the JSON it is sent has its money blanked. Checked when the reply
+ * is written, so it works whichever auth middleware ran on the route — and a
+ * buyer looking at their own order (not money-blind) is untouched.
+ *
+ * The order total goes too, for both (17 Oct 2026: "no taka anywhere"). The
+ * manager used to keep it for the packing sheet's "Collect Tk"; Steadfast now
+ * gets the COD amount from the server, and the sheet simply leaves the line
+ * out.
+ */
+export const moneyBlindResponses =
+  (extraKeys: string[] = []) =>
+  (req: any, res: any, next: any) => {
+    const json = res.json.bind(res);
+    res.json = (body: any) => {
+      const user = req.user;
+      if (!isMoneyBlind(user) || !body || typeof body !== 'object') return json(body);
+      return json(stripMoneyDeep(body, { total: true, keys: extraKeys }));
+    };
+    next();
+  };

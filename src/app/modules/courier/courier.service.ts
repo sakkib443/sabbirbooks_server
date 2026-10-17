@@ -23,6 +23,7 @@ import {
   steadfastConfigured,
   SteadfastParcel,
   trackingPage,
+  publicTimeline,
 } from './steadfast.client';
 
 // ─── Status groups ──────────────────────────────────────────
@@ -520,10 +521,13 @@ const listPaymentsLocal = async (q: { from?: string; to?: string }) => {
 };
 
 /** Is the courier set up, and what is the merchant balance right now? */
-const status = async () => {
+// The balance is money, so only the Super Admin is told it; everyone else
+// still learns whether the connection works.
+const status = async (withBalance = false) => {
   if (!steadfastConfigured()) return { configured: false, balance: null, error: null };
   try {
-    return { configured: true, balance: await getBalance(), error: null };
+    const balance = await getBalance();
+    return { configured: true, balance: withBalance ? balance : null, error: null };
   } catch (e: any) {
     return { configured: true, balance: null, error: e.message };
   }
@@ -539,7 +543,67 @@ const filterChoices = async () => {
   return { colleges: clean(colleges), districts: clean(districts) };
 };
 
+/**
+ * The buyer's tracking page (/t/CODE on the site), by the courier's tracking
+ * code. Public, so it answers only "where is my parcel": order serial, books,
+ * status and the courier's timeline — no name, phone, address or money. The
+ * status is refreshed from Steadfast at most every five minutes per parcel,
+ * so reloading the page cannot hammer the courier's API.
+ */
+const timelineCache = new Map<string, { at: number; rows: { text: string; at: string | null }[] }>();
+const publicTrack = async (code: string) => {
+  const trackingCode = String(code || '').trim();
+  if (!/^[A-Za-z0-9_-]{4,64}$/.test(trackingCode)) return null;
+  const find = () =>
+    Order.findOne({ 'courier.trackingCode': trackingCode })
+      .select('orderSeq orderNumber status items.title items.quantity courier.status courier.statusUpdatedAt courier.lastMessage courier.sentAt courier.consignmentId courier.trackingCode createdAt')
+      .lean();
+  let order: any = await find();
+  if (!order) return null;
+
+  const c = order.courier || {};
+  const stale = !c.statusUpdatedAt || Date.now() - new Date(c.statusUpdatedAt).getTime() > 5 * 60_000;
+  if (stale && !FINAL.has(String(c.status)) && c.consignmentId && steadfastConfigured()) {
+    try {
+      const s = await statusByConsignment(String(c.consignmentId));
+      if (s) await applyStatus(String(order._id), s);
+      else await Order.updateOne({ _id: order._id }, { $set: { 'courier.statusUpdatedAt': new Date() } });
+      order = (await find()) || order;
+    } catch (e) {
+      console.error('[courier] tracking refresh failed:', (e as Error)?.message);
+    }
+  }
+
+  const cached = timelineCache.get(trackingCode);
+  let timeline = cached && Date.now() - cached.at < 2 * 60_000 ? cached.rows : null;
+  if (!timeline) {
+    timeline = await publicTimeline(trackingCode);
+    timelineCache.set(trackingCode, { at: Date.now(), rows: timeline });
+    if (timelineCache.size > 500) timelineCache.delete(timelineCache.keys().next().value as string);
+  }
+
+  const oc = order.courier || {};
+  return {
+    orderSeq: order.orderSeq ?? null,
+    orderNumber: order.orderNumber,
+    orderStatus: order.status,
+    items: (order.items || []).map((i: any) => ({ title: i.title, quantity: i.quantity })),
+    orderedAt: order.createdAt,
+    courier: {
+      status: oc.status || 'in_review',
+      group: groupOf(oc.status),
+      updatedAt: oc.statusUpdatedAt || null,
+      message: oc.lastMessage || '',
+      sentAt: oc.sentAt || null,
+      consignmentId: oc.consignmentId || '',
+      trackingCode: oc.trackingCode || trackingCode,
+    },
+    timeline,
+  };
+};
+
 export const CourierService = {
+  publicTrack,
   sendOrders,
   syncStatuses,
   handleWebhook,
