@@ -30,7 +30,9 @@ const couponPreviewLimiter = rateLimit({
 // owe" territory as the order screens, so it rides on orders.read; changing a
 // coupon (which moves real money at checkout) needs orders.write.
 const read = [authMiddleware, authorize('admin', 'manager'), requireCapability('orders.read')];
-const write = [authMiddleware, authorize('admin', 'manager'), requireCapability('orders.write')];
+// Creating, editing or deleting a coupon is the admin's: a manager only looks
+// (18 Oct 2026).
+const write = [authMiddleware, authorize('admin'), requireCapability('orders.write')];
 
 // ── Checkout (any buyer, signed in or not) ──
 // optionalAuth: a signed-in buyer's per-buyer limit is checked on their account,
@@ -46,8 +48,9 @@ router.get('/popup', C.getPopupCoupon);
 router.get('/my', authMiddleware, C.getMyCouponStats);
 
 // ── Admin: report + list. `/payouts` before `/:id` so it is not read as an id. ──
-// What is owed to coupon owners is money — the Super Admin's alone.
-router.get('/payouts', authMiddleware, authorize('superAdmin'), C.getPayouts);
+// What is owed to each coupon owner: the admin sees it per coupon, the grand
+// totals are blanked for them (moneyTotals below); a manager never sees it.
+router.get('/payouts', authMiddleware, authorize('admin'), requireCapability('orders.read'), C.getPayouts);
 router.get('/', ...read, C.getAllCoupons);
 router.get('/:id', ...read, C.getCouponById);
 

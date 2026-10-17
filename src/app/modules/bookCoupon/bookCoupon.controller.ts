@@ -5,7 +5,7 @@ import { BookCoupon } from './bookCoupon.model';
 import { Order } from '../order/order.model';
 import { User } from '../user/user.model';
 import { AmbassadorApplication } from '../ambassador/ambassador.model';
-import { scopeCreatedAt } from '../order/managerScope';
+import { isTotalsBlind, scopeCreatedAt } from '../order/managerScope';
 
 const uid = (req: Request) => (req as any).user?._id || (req as any).user?.id;
 
@@ -541,6 +541,11 @@ export const getPayouts = async (req: Request, res: Response) => {
       { sales: 0, discount: 0, payout: 0 }
     );
 
+    // The admin sees what each coupon owner is owed, never the grand totals
+    // or the sales value behind them (isTotalsBlind — 18 Oct 2026).
+    if (isTotalsBlind((req as any).user)) {
+      return res.json({ success: true, data: { rows: rows.map((r: any) => ({ ...r, revenue: undefined })), totals: null } });
+    }
     res.json({ success: true, data: { rows, totals } });
   } catch (e: any) {
     res.status(500).json({ success: false, message: e.message });

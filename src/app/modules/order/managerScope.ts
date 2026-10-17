@@ -170,10 +170,21 @@ export const clampDays = (allowed: DayRange, fromDay?: string, toDay?: string): 
  * order, courier, book-access and affiliate route runs through).
  */
 export const isMoneyBlind = (user: { role?: unknown } | null | undefined): boolean =>
-  // 17 Oct 2026: the admin too — "sees every order, but no taka anywhere".
-  // The Super Admin (and a Super Admin viewing as admin is role 'admin' here,
-  // so they see what an admin sees) is the only one who sees money.
-  user?.role === 'manager' || user?.role === 'admin';
+  // The manager only. (17 Oct 2026 the admin was added; 18 Oct the shop
+  // settled it: the admin sees each order's own money — see isTotalsBlind.)
+  user?.role === 'manager';
+
+/**
+ * Accounts that may not see money ADDED UP — no revenue, no "earned", no
+ * totals across orders, coupons or parcels. The shop's rule (18 Oct 2026):
+ * "anyone but the Super Admin may see an amount where the work needs it,
+ * one order at a time, but never a sum." So the admin sees an order's price,
+ * a parcel's COD and charge, an affiliate's commission — and no dashboard
+ * money, no analytics, no grand totals. The manager sees no money at all
+ * (isMoneyBlind). A Super Admin viewing as admin is role 'admin' here.
+ */
+export const isTotalsBlind = (user: { role?: unknown } | null | undefined): boolean =>
+  user?.role === 'admin' || user?.role === 'manager';
 
 /** The money fields on an order document, blanked. */
 export const stripOrderMoney = <T extends Record<string, any>>(order: T): T => {

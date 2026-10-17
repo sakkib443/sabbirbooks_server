@@ -233,20 +233,36 @@ async function main() {
     orders: blind?.totals?.orders,
   });
 
-  // 17 Oct 2026: an admin sees every order but no money; only the Super Admin does.
+  // An admin sees every order and each one's money, but no sums (18 Oct 2026).
   const adminSees = (await stats(adminToken)).body?.data;
-  check('an admin sees no money on the dashboard', adminSees?.totals?.value === 0, { value: adminSees?.totals?.value });
+  check('an admin sees no money totals on the dashboard', adminSees?.totals?.value === 0, { value: adminSees?.totals?.value });
   check('…but every order is counted', adminSees?.totals?.orders === 4, { orders: adminSees?.totals?.orders });
   const adminRow = (await list(adminToken)).body?.data?.[0];
-  check('nor on the orders — not even the total', adminRow && adminRow.subtotal === undefined && adminRow.total === undefined, {
-    subtotal: adminRow?.subtotal, total: adminRow?.total,
-  });
+  check('on the orders, each order keeps its own money (18 Oct 2026)', typeof adminRow?.total === 'number', { total: adminRow?.total });
   const managerRow = (await list(managerToken)).body?.data?.[0];
   check('nor does a manager get the total', managerRow && managerRow.total === undefined, { total: managerRow?.total });
   const seeing = (await stats(ownerToken)).body?.data;
   check('the Super Admin sees the money', seeing?.totals?.value > 0, { value: seeing?.totals?.value });
   const ownerRow = (await list(ownerToken)).body?.data?.[0];
   check('and gets it on the orders', typeof ownerRow?.subtotal === 'number', { v: ownerRow?.subtotal });
+
+  console.log('\n── coupons and staff (18 Oct 2026) ─────────────');
+  const M = { Authorization: `Bearer ${managerToken}` };
+  const AD = { Authorization: `Bearer ${adminToken}` };
+  const newCoupon = { code: 'MGR10', discountType: 'fixed', discountValue: 10 };
+  check('a manager can look at coupons', (await api().get('/api/book-coupons').set(M)).status === 200, {});
+  const mCreate = await api().post('/api/book-coupons').set(M).send(newCoupon);
+  check('…but cannot create one', mCreate.status === 403, { status: mCreate.status });
+  check('…nor see coupon payouts', (await api().get('/api/book-coupons/payouts').set(M)).status === 403, {});
+  const mgr: any = await User.findOne({ email: 'manager@t.com' }).lean();
+  const edit = await api().patch(`/api/user/${mgr._id}`).set(AD).send({ firstName: 'Changed' });
+  check('an admin cannot edit a staff account', edit.status === 403, { status: edit.status });
+  const perms = await api().patch(`/api/user/${mgr._id}/permissions`).set(AD).send({ permissions: ['orders.read'] });
+  check('nor change its permissions', perms.status === 403, { status: perms.status });
+  const pw = await api().patch(`/api/user/${mgr._id}/password`).set(AD).send({ newPassword: 'newpass123' });
+  check('nor set its password', pw.status === 403, { status: pw.status });
+  const ownerEdit = await api().patch(`/api/user/${mgr._id}`).set({ Authorization: `Bearer ${ownerToken}` }).send({ firstName: 'Changed' });
+  check('the Super Admin can', ownerEdit.status === 200, { status: ownerEdit.status });
 
   await mongoose.disconnect();
   await mongod.stop();

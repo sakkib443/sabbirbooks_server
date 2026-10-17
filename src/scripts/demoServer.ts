@@ -165,6 +165,18 @@ async function main() {
     status: 'active',
   });
 
+  // The owner. Staff devices now wait for a Super Admin's approval, so the
+  // demo needs one to sign in at all — and from it, "view as" admin/manager.
+  await User.create({
+    id: 'OWN-demo',
+    email: 'owner@demo.local',
+    firstName: 'Demo',
+    lastName: 'Owner',
+    password: 'demo1234',
+    role: 'superAdmin',
+    status: 'active',
+  });
+
   // The shop-floor manager, so the three-day order window and the trimmed
   // menu can be looked at without borrowing a real account.
   await User.create({
