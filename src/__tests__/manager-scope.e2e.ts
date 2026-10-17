@@ -176,32 +176,12 @@ async function main() {
   const stats = async (token: string, query = '') =>
     api().get(`/api/orders/stats${query}`).set('Authorization', `Bearer ${token}`);
 
+  // 18 Oct 2026: no totals for anyone but the Super Admin — a manager and an
+  // admin get only the count of new orders waiting.
   const mStats = (await stats(managerToken)).body?.data;
-  check('a manager reaches the dashboard numbers', !!mStats, { mStats });
-  check(
-    'over seven days: the six before today, and today',
-    mStats?.range?.from === addDays(today, -6) && mStats?.range?.to === today,
-    { from: mStats?.range?.from, to: mStats?.range?.to }
-  );
-  check('seven rows in the chart', (mStats?.range?.daily || []).length === 7, {
-    rows: (mStats?.range?.daily || []).length,
-  });
-  // The figure that reads "all time" on the page is the window's, not the
-  // shop's lifetime — otherwise hiding the chart would be a lock on an open
-  // window.
-  check('"all time" is the window too — two orders, not four', mStats?.totals?.orders === 2, {
-    orders: mStats?.totals?.orders,
-  });
-
-  const wide = (await stats(managerToken, `?from=${addDays(today, -60)}&to=${today}`)).body?.data;
-  check('asking the dashboard for sixty days still answers with seven', wide?.range?.from === addDays(today, -6), {
-    from: wide?.range?.from,
-  });
-
+  check('a manager gets only the new-order count', mStats && Object.keys(mStats).join() === 'newOrders', { mStats });
   const aStats = (await stats(adminToken)).body?.data;
-  check('an admin still sees every order in the lifetime figure', aStats?.totals?.orders === 4, {
-    orders: aStats?.totals?.orders,
-  });
+  check('so does an admin', aStats && Object.keys(aStats).join() === 'newOrders', { aStats });
 
   console.log('');
   console.log('── not one taka ───────────────────────────────');
@@ -218,25 +198,7 @@ async function main() {
     title: row?.items?.[0]?.title,
   });
 
-  const blind = (await stats(managerToken)).body?.data;
-  check('the dashboard sends no money either', blind?.totals?.value === 0 && blind?.totals?.earned === 0, {
-    value: blind?.totals?.value,
-    earned: blind?.totals?.earned,
-  });
-  check('nor on any day of the chart', (blind?.range?.daily || []).every((d: any) => d.value === 0), {
-    daily: blind?.range?.daily,
-  });
-  check('nor in the coupon figures', blind?.coupons?.discount === 0 && blind?.coupons?.payout === 0, {
-    coupons: blind?.coupons,
-  });
-  check('but the counts are real — two orders over the two days', blind?.totals?.orders === 2, {
-    orders: blind?.totals?.orders,
-  });
-
   // An admin sees every order and each one's money, but no sums (18 Oct 2026).
-  const adminSees = (await stats(adminToken)).body?.data;
-  check('an admin sees no money totals on the dashboard', adminSees?.totals?.value === 0, { value: adminSees?.totals?.value });
-  check('…but every order is counted', adminSees?.totals?.orders === 4, { orders: adminSees?.totals?.orders });
   const adminRow = (await list(adminToken)).body?.data?.[0];
   check('on the orders, each order keeps its own money (18 Oct 2026)', typeof adminRow?.total === 'number', { total: adminRow?.total });
   const managerRow = (await list(managerToken)).body?.data?.[0];

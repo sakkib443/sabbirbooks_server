@@ -109,9 +109,8 @@ async function main() {
   console.log('── Dashboard ──');
   const sa = (await api().get('/api/orders/stats').set(A)).body?.data;
   const ss = (await api().get('/api/orders/stats').set(S)).body?.data;
-  check(sa?.totals?.orders === 2, 'admin dashboard counts every order', sa?.totals);
+  check(sa && Object.keys(sa).join() === 'newOrders', 'admin dashboard: only the new-order count, no totals', sa);
   check(ss?.totals?.orders === 2, 'superAdmin dashboard totals: 2 orders', ss?.totals);
-  check(sa?.totals?.value === 0 && sa?.coupons?.payout === 0, 'admin dashboard: no money totals', sa?.totals?.value);
   check(ss?.totals?.value > 0, 'superAdmin dashboard: the money', ss?.totals?.value);
 
   console.log('── Coupon payouts ──');
