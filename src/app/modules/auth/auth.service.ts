@@ -458,6 +458,12 @@ const adminSetPassword = async (
     e.status = 403;
     throw e;
   }
+  // Staff accounts are the Super Admin's (18 Oct 2026).
+  if (actor.role === 'admin' && ['admin', 'trainingManager', 'contentManager', 'manager', 'mentor'].includes(user.role)) {
+    const e: any = new Error("Only a super admin can change a staff member's password.");
+    e.status = 403;
+    throw e;
+  }
   if ((MANAGER_ROLES as string[]).includes(actor.role) && !['student', 'user'].includes(user.role)) {
     const e: any = new Error('Managers can only change student passwords.');
     e.status = 403;

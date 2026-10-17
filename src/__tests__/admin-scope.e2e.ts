@@ -1,6 +1,7 @@
 /* eslint-disable no-console */
 /**
- * Admin = every order, but no money (17 Oct 2026); superAdmin = everything.
+ * Admin = every order, each order's own money, but never a sum (18 Oct 2026);
+ * superAdmin = everything.
  *
  * One recent order and one placed 20 days ago. Every screen that counts orders
  * or money is asked by both roles: both see both orders; only the superAdmin
@@ -91,30 +92,33 @@ async function main() {
   check(ls.body?.data?.length === 2, 'superAdmin lists both', ls.body?.data?.length);
   const rowA = la.body?.data?.[0] || {};
   const rowS = ls.body?.data?.[0] || {};
-  check(rowA.total === undefined && rowA.subtotal === undefined && rowA.deliveryCharge === undefined, 'admin rows carry no money', rowA);
-  check(rowA.courier && rowA.courier.codAmount === undefined && rowA.courier.collectedAmount === undefined, 'admin rows: no courier money either', rowA.courier);
+  check(typeof rowA.total === 'number' && typeof rowA.subtotal === 'number', 'admin sees the money of each order', rowA);
+  check(typeof rowA.courier?.codAmount === 'number', 'admin sees the COD of a parcel', rowA.courier);
   check(typeof rowS.total === 'number' && typeof rowS.subtotal === 'number', 'superAdmin rows carry the money');
 
   console.log('── One order by id ──');
   const oneA = await api().get(`/api/orders/${old._id}`).set(A);
   check(oneA.status === 200, 'admin can open the old order');
-  check(oneA.body?.data?.total === undefined, 'admin: no money on one order either', oneA.body?.data?.total);
+  check(typeof oneA.body?.data?.total === 'number', 'admin: one order shows its money', oneA.body?.data?.total);
   check(typeof (await api().get(`/api/orders/${old._id}`).set(S)).body?.data?.total === 'number', 'superAdmin sees its money');
   check((await api().delete(`/api/orders/${recent._id}`).set(A)).status === 403, 'admin cannot delete an order (Super Admin only)');
   check((await api().post('/api/orders/bulk-delete').set(A).send({ ids: [recent._id] })).status === 403, 'admin cannot bulk-delete either');
   const changed = await api().patch(`/api/orders/${recent._id}/status`).set(A).send({ status: 'processing' });
-  check(changed.status === 200 && changed.body?.data?.total === undefined, 'admin can work an order; the reply carries no money', changed.body?.data?.total);
+  check(changed.status === 200, 'admin can work an order', changed.status);
 
   console.log('── Dashboard ──');
   const sa = (await api().get('/api/orders/stats').set(A)).body?.data;
   const ss = (await api().get('/api/orders/stats').set(S)).body?.data;
   check(sa?.totals?.orders === 2, 'admin dashboard counts every order', sa?.totals);
   check(ss?.totals?.orders === 2, 'superAdmin dashboard totals: 2 orders', ss?.totals);
-  check(sa?.totals?.value === 0 && sa?.coupons?.payout === 0, 'admin dashboard: no money', sa?.totals?.value);
+  check(sa?.totals?.value === 0 && sa?.coupons?.payout === 0, 'admin dashboard: no money totals', sa?.totals?.value);
   check(ss?.totals?.value > 0, 'superAdmin dashboard: the money', ss?.totals?.value);
 
   console.log('── Coupon payouts ──');
-  check((await api().get('/api/book-coupons/payouts').set(A)).status === 403, 'coupon payouts are Super Admin only');
+  const pa = await api().get('/api/book-coupons/payouts').set(A);
+  const payA = (pa.body?.data?.rows || []).find((r: any) => r.code === 'SAVE');
+  check(pa.status === 200 && payA?.totalPayout > 0, 'admin sees what each coupon owner is owed', payA);
+  check(pa.body?.data?.totals === null && payA?.revenue === undefined, '…but no grand totals or sales value', pa.body?.data?.totals);
   const ps = (await api().get('/api/book-coupons/payouts').set(S)).body?.data;
   const payS = (ps?.rows || ps || []).find?.((r: any) => r.code === 'SAVE');
   check(payS?.sales === 2, 'superAdmin coupon sales: 2', payS?.sales);
@@ -129,10 +133,12 @@ async function main() {
   const cla = (await api().get('/api/courier/consignments').set(A)).body?.data;
   check(cla?.total === 2, 'courier list: admin sees both parcels', cla?.total);
   const parcelA = cla?.rows?.[0] || {};
-  check(parcelA.courier && parcelA.courier.codAmount === undefined && parcelA.total === undefined, 'courier list: no money for admin', parcelA.courier);
+  check(typeof parcelA.courier?.codAmount === 'number', 'courier list: admin sees the COD of each parcel', parcelA.courier);
+  check((await api().get('/api/courier/status').set(A)).body?.data?.balance == null, 'courier balance (a total) is not sent to the admin');
 
   console.log('── Who may create whom ──');
   const staff = (role: string) => ({ firstName: 'N', email: `${role}-${Date.now()}@test.com`, password: 'pass1234', role });
+  check((await api().post('/api/user/create-staff').set(A).send(staff('manager'))).status === 403, 'admin cannot create even a manager (Super Admin only)');
   check((await api().post('/api/user/create-staff').set(A).send(staff('admin'))).status === 403, 'admin cannot create an admin');
   check((await api().post('/api/user/create-staff').set(A).send(staff('superAdmin'))).status === 403, 'admin cannot create a superAdmin');
   check((await api().post('/api/user/create-staff').set(S).send(staff('admin'))).status === 201, 'superAdmin creates an admin');

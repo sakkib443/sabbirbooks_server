@@ -80,7 +80,8 @@ router.post(
 );
 
 // ── Admin-only: create staff (admin/trainingManager/contentManager) — admin role enforced superAdmin-only in the service ──
-router.post('/create-staff', authMiddleware, authorize('admin', 'superAdmin'), requireCapability('staff.manage'), validateRequest(createStaffValidationSchema), UserController.createStaffController);
+// Staff accounts and their permissions are the Super Admin's alone (18 Oct 2026).
+router.post('/create-staff', authMiddleware, authorize('superAdmin'), validateRequest(createStaffValidationSchema), UserController.createStaffController);
 
 // ── The capability vocabulary for the admin permission matrix ──
 // MUST be before '/:id' so the wildcard does not swallow it.
@@ -113,8 +114,7 @@ router.patch('/profile', authMiddleware, UserController.updateOwnProfileControll
 router.patch(
   '/:id/permissions',
   authMiddleware,
-  authorize('admin', 'superAdmin'),
-  requireCapability('staff.manage'),
+  authorize('superAdmin'),
   validateRequest(setPermissionsValidationSchema),
   UserController.updateUserPermissionsController,
 );
