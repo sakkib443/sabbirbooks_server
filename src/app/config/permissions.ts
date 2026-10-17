@@ -190,9 +190,9 @@ export const ROLE_DEFAULT_CAPABILITIES: Record<Role, Capability[]> = {
   // content and training manager; it is now books and orders:
   //   content.write → adds and edits books and their QR content, notices,
   //                   reviews and the site pages
-  //   orders.read   → the order list and the dashboard, BUT only three days
-  //                   of it (yesterday, today, tomorrow) and two days of the
-  //                   dashboard — enforced server-side in managerScope.ts
+  //   orders.read   → the order list and the dashboard, BUT only the last
+  //                   seven days (plus tomorrow), and never a taka of money —
+  //                   enforced server-side in managerScope.ts
   //   orders.write  → confirm, ship, deliver, annotate, move a delivery date,
   //                   approve or reject a manual payment
   //

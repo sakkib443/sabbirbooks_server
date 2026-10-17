@@ -84,7 +84,8 @@ async function main() {
   await api().post('/api/auth/register').send({
     firstName: 'A', lastName: 'B', email: 'admin@t.com', password: 'pass1234', whatsappNumber: '01712345678',
   });
-  await User.updateOne({ email: 'admin@t.com' }, { status: 'active', role: 'admin' });
+  // Super Admin: this test reads the money, which only they are shown.
+  await User.updateOne({ email: 'admin@t.com' }, { status: 'active', role: 'superAdmin' });
   await approveDevice('admin@t.com', 'dev-admin');
   const token = (
     await api().post('/api/auth/login').set('x-device-id', 'dev-admin').send({ email: 'admin@t.com', password: 'pass1234' })

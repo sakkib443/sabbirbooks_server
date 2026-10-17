@@ -8,8 +8,11 @@ import {
 } from './ambassador.validation';
 import { authMiddleware, authorize, requireCapability } from '../../middlewares/auth';
 import { uploadProtectedLocal } from '../../config/localUpload';
+import { moneyBlindResponses } from '../order/managerScope';
 
 const router = express.Router();
+// Money blanked for accounts not shown money (admin, manager) — managerScope.
+router.use(moneyBlindResponses(['sales', 'commission', 'revenue']));
 
 // ─── Public ─────────────────────────────────────────────────
 // The application form is filled in by a student who has no account yet — that

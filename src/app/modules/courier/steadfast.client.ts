@@ -135,4 +135,45 @@ export const getPayment = async (id: string): Promise<SteadfastPayment> => {
 };
 
 /** The parcel's public tracking page — what the buyer's "shipped" SMS links to. */
-export const trackingPage = (trackingCode: string) => `https://steadfast.com.bd/t/${encodeURIComponent(trackingCode)}`;
+/**
+ * The link the buyer is sent: the shop's own tracking page (frontend /t/CODE),
+ * not Steadfast's. Steadfast's public /t/ links now take a long token that the
+ * API does not hand out, so a link built from the API's tracking code opened
+ * "This link is not available". Our page looks the parcel up by that code and
+ * asks Steadfast itself. PUBLIC_SITE_URL overrides the site address.
+ */
+export const publicSiteUrl = (): string => {
+  const env = String(process.env.PUBLIC_SITE_URL || '').trim().replace(/\/+$/, '');
+  if (env) return env;
+  const client = String(process.env.CLIENT_URL || '').trim().replace(/\/+$/, '');
+  return /^https:\/\//.test(client) && !/sslip\.io|localhost/.test(client) ? client : 'https://magicviva.com';
+};
+export const trackingPage = (trackingCode: string) => `${publicSiteUrl()}/t/${encodeURIComponent(trackingCode)}`;
+
+/**
+ * Steadfast's public timeline for a tracking code (the JSON their own tracking
+ * page reads). Unofficial, so best-effort: [] on any failure.
+ */
+export const publicTimeline = async (trackingCode: string): Promise<{ text: string; at: string | null }[]> => {
+  if (process.env.STEADFAST_PUBLIC_TIMELINE === 'off') return [];
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 6000);
+    const res = await fetch(`https://steadfast.com.bd/track/consignment/${encodeURIComponent(trackingCode)}`, {
+      headers: { Accept: 'application/json', 'User-Agent': 'Mozilla/5.0 (MagicViva tracking)' },
+      signal: ctrl.signal,
+    }).finally(() => clearTimeout(t));
+    if (!res.ok) return [];
+    const json: any = await res.json().catch(() => null);
+    const rows: any[] = Array.isArray(json?.trackings) ? json.trackings : [];
+    return rows
+      .map((r) => ({
+        text: String(r?.text ?? r?.message ?? r?.tracking_message ?? r?.status ?? '').trim(),
+        at: r?.created_at || r?.updated_at || r?.date || null,
+      }))
+      .filter((r) => r.text)
+      .slice(0, 30);
+  } catch {
+    return [];
+  }
+};

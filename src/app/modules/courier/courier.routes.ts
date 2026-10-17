@@ -5,8 +5,11 @@ import { CourierService } from './courier.service';
 import { steadfastWebhookToken } from './steadfast.client';
 import { clampForUser, dayRangeFor, rangeInstants } from '../order/managerScope';
 import { OrderService } from '../order/order.service';
+import { moneyBlindResponses } from '../order/managerScope';
 
 const router = express.Router();
+// Money blanked for accounts not shown money (admin, manager) — managerScope.
+router.use(moneyBlindResponses());
 
 // The courier pages are the owner's: they move parcels and they show money.
 const read = [authMiddleware, authorize('admin'), requireCapability('orders.read')];
@@ -41,7 +44,19 @@ const scoped = (req: Request) => {
   return q;
 };
 
-router.get('/status', ...read, wrap(() => CourierService.status()));
+// The buyer's tracking page — public, by tracking code, nothing personal.
+router.get('/track/:code', async (req: Request, res: Response) => {
+  try {
+    const data = await CourierService.publicTrack(String(req.params.code));
+    if (!data) return res.status(404).json({ success: false, message: 'Parcel not found' });
+    res.set('Cache-Control', 'no-store');
+    return res.status(200).json({ success: true, data });
+  } catch (error: any) {
+    return res.status(500).json({ success: false, message: 'Could not load tracking' });
+  }
+});
+
+router.get('/status', ...read, wrap((req) => CourierService.status((req as any).user?.role === 'superAdmin')));
 router.get('/filters', ...read, wrap(() => CourierService.filterChoices()));
 router.get('/ready', ...read, wrap((req) => CourierService.listReady(scoped(req))));
 router.get('/consignments', ...read, wrap((req) => CourierService.listConsignments(scoped(req))));

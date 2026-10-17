@@ -1,8 +1,11 @@
 import express from 'express';
 import { BookAccessController } from './bookAccess.controller';
 import { authMiddleware, authorize, requireCapability } from '../../middlewares/auth';
+import { moneyBlindResponses } from '../order/managerScope';
 
 const router = express.Router();
+// Money blanked for accounts not shown money (admin, manager) — managerScope.
+router.use(moneyBlindResponses());
 
 // ─── Reader ─────────────────────────────────────────────────
 router.get('/check/:bookId', authMiddleware, BookAccessController.checkAccess);
