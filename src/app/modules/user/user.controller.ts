@@ -205,6 +205,18 @@ export const updateUserController = async (req: Request, res: Response) => {
       return res.status(403).json({ success: false, message: 'Only a Super Admin can assign the admin role' });
     }
 
+    // Staff accounts are the Super Admin's (18 Oct 2026): an admin may no
+    // longer edit a staff member or make anyone staff.
+    const STAFF = ['admin', 'superAdmin', 'trainingManager', 'contentManager', 'manager', 'mentor'];
+    if (requesterRole === 'admin') {
+      if (STAFF.includes((target as any).role)) {
+        return res.status(403).json({ success: false, message: 'Only a Super Admin can manage staff accounts' });
+      }
+      if (newRole && STAFF.includes(newRole)) {
+        return res.status(403).json({ success: false, message: 'Only a Super Admin can make someone staff' });
+      }
+    }
+
     // A manager may ONLY manage student accounts — never staff, never role changes.
     if (MANAGER_ROLES.includes(requesterRole)) {
       if (!['student', 'user'].includes((target as any).role)) {
@@ -280,6 +292,10 @@ export const deleteUserController = async (req: Request, res: Response) => {
     // A superAdmin (master) account can never be deleted
     if ((target as any).role === 'superAdmin') {
       return res.status(403).json({ success: false, message: 'A Super Admin account cannot be deleted' });
+    }
+    // Staff accounts are the Super Admin's (18 Oct 2026).
+    if (requesterRole === 'admin' && ['admin', 'trainingManager', 'contentManager', 'manager', 'mentor'].includes((target as any).role)) {
+      return res.status(403).json({ success: false, message: 'Only a Super Admin can remove staff accounts' });
     }
     // A manager may only delete student accounts.
     if (MANAGER_ROLES.includes(requesterRole) && !['student', 'user'].includes((target as any).role)) {

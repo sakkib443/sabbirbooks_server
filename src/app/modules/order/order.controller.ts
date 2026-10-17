@@ -6,6 +6,7 @@ import {
   dashboardRangeFor,
   dayRangeFor,
   isMoneyBlind,
+  isTotalsBlind,
   rangeInstants,
   stripOrderMoney,
   stripStatsMoney,
@@ -363,7 +364,8 @@ const getStats = async (req: Request, res: Response) => {
     });
     res.status(200).json({
       success: true,
-      data: isMoneyBlind((req as any).user) ? stripStatsMoney(data) : data,
+      // Sums of money: the Super Admin only (an admin sees each order, not totals).
+      data: isTotalsBlind((req as any).user) ? stripStatsMoney(data) : data,
     });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });
