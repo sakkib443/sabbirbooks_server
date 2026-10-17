@@ -12,8 +12,11 @@ const router = express.Router();
 router.use(moneyBlindResponses());
 
 // The courier pages are the owner's: they move parcels and they show money.
-const read = [authMiddleware, authorize('admin'), requireCapability('orders.read')];
-const write = [authMiddleware, authorize('admin'), requireCapability('orders.write')];
+// courier.manage (18 Oct 2026): the Super Admin decides who runs the courier —
+// an admin by default, a manager only if given it. Money stays blanked for a
+// manager (moneyBlindResponses) and the totals are the Super Admin's.
+const read = [authMiddleware, authorize('admin', 'manager'), requireCapability('courier.manage')];
+const write = [authMiddleware, authorize('admin', 'manager'), requireCapability('courier.manage')];
 // The courier's money, all time — the Super Admin's alone (authorize() with a
 // role nobody else holds; superAdmin always passes).
 const owner = [authMiddleware, authorize('superAdmin')];

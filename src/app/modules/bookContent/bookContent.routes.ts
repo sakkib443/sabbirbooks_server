@@ -98,6 +98,11 @@ router.patch('/reorder/:level', ...admin, BookContentController.reorder);
 // The "video unavailable" notice, on or off for many questions at once.
 router.patch('/video-note-visibility', ...admin, BookContentController.setVideoNoteVisibility);
 
+// Saved messages for where a video is missing — written once, put anywhere.
+router.get('/video-note-presets', ...admin, BookContentController.listVideoNotePresets);
+router.post('/video-note-presets', ...admin, BookContentController.addVideoNotePreset);
+router.delete('/video-note-presets/:id', ...admin, BookContentController.removeVideoNotePreset);
+
 // PDFs, images and short answer videos → the protected directory on the mounted
 // volume (NOT uploads/, which is served publicly by express.static).
 router.post(

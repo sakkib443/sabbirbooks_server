@@ -172,16 +172,10 @@ const dispatchNewOrderAlerts = async (order: any): Promise<OrderAlertOutcome> =>
     // own errors, so a thrown model call cannot take the others with it.
     const tasks: Promise<void>[] = [];
 
-    // 1. In-app for the admins (no credentials needed — this one always runs).
-    tasks.push(
-      (async () => {
-        const r = await NotificationService.triggerNewBookOrderForAdmins(
-          orderNumber,
-          OrderAlertMessage.buildAdminInAppMessage(input)
-        );
-        outcome.inAppAdmin = (r?.created || 0) > 0;
-      })().catch((e) => console.error('[order-alert] admin in-app failed:', e))
-    );
+    // 1. In-app for the admins: switched off (18 Oct 2026). The shop asked
+    //    for the staff bell to carry only what matters — sign-ins, device
+    //    requests — not one line per book order; the orders have their own
+    //    screen. triggerNewBookOrderForAdmins is kept for the day it is wanted.
 
     // 2. In-app for the buyer.
     if (order?.user) {

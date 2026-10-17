@@ -7,6 +7,7 @@ import { hasCapability } from '../../config/permissions';
 import { withMediaTokens } from './mediaToken';
 import { fileOwnerCache, readerAccessCache } from './mediaAccessCache';
 import { sanitizeQuestionPayload } from './sanitizeAnswer';
+import { VideoNotePreset } from './videoNotePreset.model';
 
 // ─── Scan ───────────────────────────────────────────────────
 
@@ -421,15 +422,45 @@ const updateTopic = async (id: string, payload: Record<string, unknown>) => {
  * that has no video (bookId, no ids) — a question with a video never shows
  * the notice, so touching it would change nothing a reader sees.
  */
-const setVideoNoteVisibility = async (input: { show: boolean; questionIds?: string[]; bookId?: string }) => {
+const setVideoNoteVisibility = async (input: { show: boolean; questionIds?: string[]; bookId?: string; note?: string }) => {
   const ids = (input.questionIds || []).filter((id) => Types.ObjectId.isValid(id));
   let filter: Record<string, unknown>;
   if (ids.length) filter = { _id: { $in: ids }, isDeleted: false };
   else if (input.bookId && Types.ObjectId.isValid(input.bookId))
     filter = { bookId: input.bookId, isDeleted: false, 'videos.0': { $exists: false } };
   else throw new Error('Pick questions, or a book');
-  const res = await BookQuestion.updateMany(filter, { $set: { hideVideoNote: !input.show } });
+  // With a note: put that message on all of them at once (18 Oct 2026) — or,
+  // with an empty one, take the message off. Without: just show / hide.
+  const set: Record<string, unknown> = { hideVideoNote: !input.show };
+  if (typeof input.note === 'string') {
+    const note = input.note.trim().slice(0, 500);
+    set.videoNote = note;
+    set.hideVideoNote = !note || !input.show;
+  }
+  const res = await BookQuestion.updateMany(filter, { $set: set });
   return { matched: res.matchedCount || 0, changed: res.modifiedCount || 0 };
+};
+
+/** The saved messages, oldest first (the order they were added in). */
+const listVideoNotePresets = async () =>
+  VideoNotePreset.find().sort({ createdAt: 1 }).select('text').lean();
+
+const addVideoNotePreset = async (text: unknown, userId?: string | null) => {
+  const clean = String(text || '').trim().slice(0, 500);
+  if (!clean) throw new Error('Write the message first');
+  const doc = await VideoNotePreset.findOneAndUpdate(
+    { text: clean },
+    { $setOnInsert: { text: clean, createdBy: userId && Types.ObjectId.isValid(userId) ? userId : null } },
+    { upsert: true, new: true }
+  ).lean();
+  return doc;
+};
+
+/** Forget a saved message. Questions already using it keep their copy. */
+const removeVideoNotePreset = async (id: string) => {
+  if (!Types.ObjectId.isValid(id)) throw new Error('Message not found');
+  await VideoNotePreset.deleteOne({ _id: id });
+  return { removed: true };
 };
 
 const updateQuestion = async (id: string, payload: Record<string, unknown>) =>
@@ -481,15 +512,19 @@ const getTopicById = async (id: string) => BookTopic.findById(id).lean();
  * questions is a worse surprise than retyping one.
  */
 const getVideoNotes = async (bookId: string) => {
+  // The saved messages first, then whatever this book's questions already say.
+  const presets = ((await VideoNotePreset.find().sort({ createdAt: 1 }).select('text').lean()) as any[]).map((p) => String(p.text));
   const notes = await BookQuestion.distinct('videoNote', {
     bookId: new Types.ObjectId(bookId),
     isDeleted: false,
     videoNote: { $nin: ['', null] },
   });
-  return (notes as string[])
+  const used = (notes as string[])
     .map(n => String(n || '').trim())
     .filter(Boolean)
-    .sort((a, b) => a.localeCompare(b, 'bn'))
+    .filter(n => !presets.includes(n))
+    .sort((a, b) => a.localeCompare(b, 'bn'));
+  return [...presets, ...used]
     // A ceiling so a book that somehow collected hundreds cannot turn the
     // dropdown into a scroll of its own.
     .slice(0, 50);
@@ -980,6 +1015,9 @@ export const BookContentService = {
   updateTopic,
   updateQuestion,
   setVideoNoteVisibility,
+  listVideoNotePresets,
+  addVideoNotePreset,
+  removeVideoNotePreset,
   deletePart,
   deleteChapter,
   deleteTopic,

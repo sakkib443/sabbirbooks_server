@@ -125,6 +125,26 @@ export const CAPABILITIES = [
     group: 'People',
     description: 'Create student accounts, edit user details, reset passwords, delete accounts.',
   },
+  // Three finer switches (18 Oct 2026) so the Super Admin can give or take
+  // exactly these on an admin or a manager.
+  {
+    key: 'courier.manage',
+    label: 'Courier — send & follow parcels',
+    group: 'Business data',
+    description: 'Send orders to Steadfast and follow the parcels. The courier money stays with the Super Admin.',
+  },
+  {
+    key: 'coupons.write',
+    label: 'Coupons — create & edit',
+    group: 'Business data',
+    description: 'Create, edit, switch on or off and (with Delete) remove coupons. Without it coupons can only be looked at.',
+  },
+  {
+    key: 'orders.pdf',
+    label: 'Orders — download PDF',
+    group: 'Business data',
+    description: 'Download order lists as PDF (all, by date or by medical college).',
+  },
   {
     key: 'settings.write',
     label: 'Site settings',
@@ -227,9 +247,17 @@ const isRole = (value: unknown): value is Role =>
 export const resolveCapabilities = (role: unknown, permissions?: unknown): Capability[] => {
   if (!isRole(role)) return [];
 
-  // Owner accounts are fixed at full access — a stored array can never shrink
+  // The Super Admin is fixed at full access — a stored array can never shrink
   // them, so a bad write to the permissions field cannot brick the panel.
-  if (role === 'superAdmin' || role === 'admin') return [...CAPABILITY_KEYS];
+  if (role === 'superAdmin') return [...CAPABILITY_KEYS];
+
+  // An admin is full access until the Super Admin narrows them (18 Oct 2026);
+  // then exactly what was ticked — staff.manage included, which only an
+  // admin may hold.
+  if (role === 'admin') {
+    if (!Array.isArray(permissions)) return [...CAPABILITY_KEYS];
+    return permissions.filter((p): p is Capability => (CAPABILITY_KEYS as string[]).includes(p as string));
+  }
 
   if (Array.isArray(permissions)) {
     const stored = permissions.filter((p): p is Capability =>
@@ -257,13 +285,15 @@ export const hasCapability = (
  * grantable capabilities and drop duplicates. Anything else — typos, injected
  * strings, `staff.manage` — is silently discarded rather than trusted.
  */
-export const sanitizePermissions = (input: unknown): Capability[] => {
+export const sanitizePermissions = (input: unknown, forAdmin = false): Capability[] => {
   if (!Array.isArray(input)) return [];
+  // An admin's list may carry staff.manage; nobody else's ever does.
+  const allowed = (forAdmin ? CAPABILITY_KEYS : GRANTABLE_CAPABILITIES) as string[];
   const seen = new Set<string>();
   const out: Capability[] = [];
   for (const raw of input) {
     if (typeof raw !== 'string') continue;
-    if (!(GRANTABLE_CAPABILITIES as string[]).includes(raw)) continue;
+    if (!allowed.includes(raw)) continue;
     if (seen.has(raw)) continue;
     seen.add(raw);
     out.push(raw as Capability);

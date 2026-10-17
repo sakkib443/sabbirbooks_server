@@ -22,6 +22,21 @@ async function startServer() {
     );
   }
 
+  // ─── The shop's day cutoff, from Settings ───────────────────────
+  //
+  // Every order screen splits days at this hour (utils/shopDay). Before the
+  // first request, so no list is ever cut at the wrong hour. Noon if unset.
+  if (dbReady) {
+    try {
+      const { Settings } = await import('./app/modules/settings/settings.model');
+      const { setShopDayCutoffHour } = await import('./app/utils/shopDay');
+      const s: any = await Settings.findOne({}).select('shopDayCutoffHour').lean();
+      if (s?.shopDayCutoffHour !== undefined) setShopDayCutoffHour(s.shopDayCutoffHour);
+    } catch (error) {
+      console.error('⚠️  Could not read the day cutoff (using noon):', error);
+    }
+  }
+
   // ─── One-time media migration, run on boot ─────────────────────
   //
   // Answer figures used to sit in the publicly-served uploads/materials. They
@@ -158,6 +173,24 @@ async function startServer() {
       if (n) console.log(`🔐 ${n} staff device(s) already signed in — marked approved.`);
     } catch (error) {
       console.error('⚠️  Staff device sync failed (server still starting):', error);
+    }
+  }
+
+  // ─── Book-order lines out of the staff bell ─────────────────────
+  //
+  // New orders no longer notify staff (orderAlert.service). The ones already
+  // in the bell are hidden too — soft (isDeleted), so nothing is lost. A no-op
+  // once done.
+  if (dbReady) {
+    try {
+      const { Notification } = await import('./app/modules/notification/notification.model');
+      const r = await Notification.updateMany(
+        { title: /^🛒 নতুন বই অর্ডার/, isDeleted: false },
+        { $set: { isDeleted: true } }
+      );
+      if (r.modifiedCount) console.log(`🔕 ${r.modifiedCount} old book-order notification(s) hidden from the staff bell.`);
+    } catch (error) {
+      console.error('⚠️  Notification cleanup failed (server still starting):', error);
     }
   }
 

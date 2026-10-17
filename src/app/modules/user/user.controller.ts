@@ -115,6 +115,8 @@ export const getPermissionCatalogController = async (_req: Request, res: Respons
       capabilities: CAPABILITIES,
       grantable: GRANTABLE_CAPABILITIES,
       managerRoles: MANAGER_ROLES,
+      // Whose permissions the Super Admin edits on the matrix.
+      editableRoles: ['admin', ...MANAGER_ROLES],
       roleDefaults: ROLE_DEFAULT_CAPABILITIES,
     },
   });
@@ -142,10 +144,11 @@ export const updateUserPermissionsController = async (req: Request, res: Respons
     // 2. Only the two manager roles have editable permissions. Admin and
     //    superAdmin are fixed at full access; students and mentors are governed
     //    by their own routes.
-    if (!isManagerRole((target as any).role)) {
+    // Admins too, since 18 Oct 2026 — the route is the Super Admin's alone.
+    if (!isManagerRole((target as any).role) && (target as any).role !== 'admin') {
       return res.status(400).json({
         success: false,
-        message: 'Permissions can only be set on a Training Manager or Content Manager account',
+        message: 'Permissions can only be set on an Admin or a Manager account',
       });
     }
 
@@ -160,6 +163,7 @@ export const updateUserPermissionsController = async (req: Request, res: Respons
     const updated = await UserService.setUserPermissionsServices(
       req.params.id,
       req.body?.permissions,
+      (target as any).role === 'admin',
     );
     if (!updated) return res.status(404).json({ success: false, message: 'User not found' });
 

@@ -194,13 +194,14 @@ const createStaffServices = async (
 const setUserPermissionsServices = async (
   id: string,
   permissions: unknown,
+  forAdmin = false,
 ): Promise<IUser | null> => {
   const isValidObjectId = /^[a-f\d]{24}$/i.test(id);
   const query = isValidObjectId
     ? { $or: [{ _id: id }, { id: id }], isDeleted: false }
     : { id: id, isDeleted: false };
 
-  const clean: Capability[] = sanitizePermissions(permissions);
+  const clean: Capability[] = sanitizePermissions(permissions, forAdmin);
 
   const updated = await User.findOneAndUpdate(
     query,

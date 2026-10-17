@@ -57,4 +57,14 @@ router.post(
   })
 );
 
+// Switch a staff account's access off (blocked, signed out everywhere) or on.
+router.post(
+  '/users/:userId/access',
+  ...owner,
+  send(async (req) => {
+    if (typeof req.body?.enabled !== 'boolean') throw Object.assign(new Error('enabled must be true or false'), { status: 400 });
+    return SecurityService.setAccess(String(req.params.userId), req.body.enabled);
+  })
+);
+
 export const SecurityRoutes = router;

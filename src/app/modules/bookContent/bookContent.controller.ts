@@ -648,14 +648,39 @@ const makeUpdate = (level: Level) => async (req: Request, res: Response) => {
 /** PATCH /api/book-content/video-note-visibility { show, questionIds? | bookId? } */
 const setVideoNoteVisibility = async (req: Request, res: Response) => {
   try {
-    const { show, questionIds, bookId } = req.body || {};
+    const { show, questionIds, bookId, note } = req.body || {};
     if (typeof show !== 'boolean') return res.status(400).json({ success: false, message: 'show must be true or false' });
     const data = await BookContentService.setVideoNoteVisibility({
       show,
       questionIds: Array.isArray(questionIds) ? questionIds.map(String) : undefined,
       bookId: bookId ? String(bookId) : undefined,
+      note: typeof note === 'string' ? note : undefined,
     });
     res.status(200).json({ success: true, data });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
+// The saved "where the video would be" messages (videoNotePreset.model).
+const listVideoNotePresets = async (_req: Request, res: Response) => {
+  try {
+    res.status(200).json({ success: true, data: await BookContentService.listVideoNotePresets() });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+const addVideoNotePreset = async (req: Request, res: Response) => {
+  try {
+    const data = await BookContentService.addVideoNotePreset(req.body?.text, (req as any).user?._id);
+    res.status(200).json({ success: true, data });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+const removeVideoNotePreset = async (req: Request, res: Response) => {
+  try {
+    res.status(200).json({ success: true, data: await BookContentService.removeVideoNotePreset(String(req.params.id)) });
   } catch (error: any) {
     res.status(400).json({ success: false, message: error.message });
   }
@@ -699,6 +724,9 @@ export const BookContentController = {
   getQrSheet,
   getQuestionsByTopic,
   getVideoNotes,
+  listVideoNotePresets,
+  addVideoNotePreset,
+  removeVideoNotePreset,
   getNextUnanswered,
   getNextTopicForReader,
   reorder,
