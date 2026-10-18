@@ -260,6 +260,23 @@ async function main() {
   const p8b: any = await Order.findById(p8._id).lean();
   check(p8b.status === 'shipped' && rec.shipped >= 1, 'a sent order left on Confirmed is moved to Shipped', { status: p8b.status, rec });
 
+  console.log('── Tracking timeline (our own, from the courier updates) ──');
+  const p9 = await sendOne('01788888888');
+  const tu = { notification_type: 'tracking_update', consignment_id: Number(p9.courier.consignmentId), invoice: p9.orderNumber, tracking_message: 'Consignment sent to GAIBANDHA. Dispatch ID: 18380748', updated_at: '2026-10-18 16:54:00' };
+  check((await api().post('/api/courier/webhook/steadfast').set('Authorization', 'Bearer hook-token-123').send(tu)).status === 200, 'tracking update accepted');
+  fake.status.set(p9.courier.consignmentId, 'pending');
+  await api().post('/api/courier/sync').set(AUTH).send({ orderIds: [String(p9._id)] });
+  const tr9 = (await api().get(`/api/courier/track/${p9.courier.trackingCode}`)).body?.data;
+  const texts = (tr9?.timeline || []).map((t: any) => t.text || t.status);
+  check(texts.some((t: string) => /GAIBANDHA/.test(t)), 'the courier message is on the buyer\'s tracking page', texts);
+  check(texts.some((t: string) => /Steadfast কুরিয়ারে দেওয়া/.test(t)), 'so is the hand-over', texts);
+  check((tr9?.timeline || []).some((t: any) => t.status === 'pending'), 'and the status change', tr9?.timeline);
+
+  console.log('── Courier dashboard ──');
+  const dash = await api().get('/api/courier/dashboard').set(AUTH);
+  check(dash.status === 200 && dash.body?.data?.daily?.length === 30, 'dashboard: 30 days of bars', dash.body?.data?.daily?.length);
+  check(typeof dash.body?.data?.receivable === 'number' && Array.isArray(dash.body?.data?.latest), 'dashboard: money owed and latest parcels', dash.body?.data?.receivable);
+
   console.log(`\n${passed} passed, ${failed} failed\n`);
   fakeServer.close();
   process.exit(failed === 0 ? 0 : 1);

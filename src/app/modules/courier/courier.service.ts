@@ -14,6 +14,7 @@ import { Types } from 'mongoose';
 import { Order } from '../order/order.model';
 import { OrderService } from '../order/order.service';
 import { CourierPayment } from './courierPayment.model';
+import { addDays, bdDate } from '../../utils/shopDay';
 import {
   createBulk,
   getBalance,
@@ -23,7 +24,6 @@ import {
   steadfastConfigured,
   SteadfastParcel,
   trackingPage,
-  publicTimeline,
 } from './steadfast.client';
 
 // ─── Status groups ──────────────────────────────────────────
@@ -185,6 +185,7 @@ const sendOrders = async (ids: string[], userId?: string | null): Promise<SendRe
               sentBy: userId && Types.ObjectId.isValid(userId) ? userId : undefined,
               paymentId: null,
               paidOutAt: null,
+              history: [{ status: 'in_review', message: 'পার্সেল Steadfast কুরিয়ারে দেওয়া হয়েছে', at: now }],
             },
             courierName: 'Steadfast',
             trackingCode,
@@ -231,7 +232,16 @@ const applyStatus = async (
   if (g === 'delivered') set['courier.collectedAmount'] = typeof extra.collected === 'number' ? extra.collected : order.courier.codAmount || 0;
   if (g === 'partial' && typeof extra.collected === 'number') set['courier.collectedAmount'] = extra.collected;
   if (g === 'returned') set['courier.collectedAmount'] = 0;
-  await Order.updateOne({ _id: order._id }, { $set: set });
+  // Each change of status — and each message the courier attaches — is kept,
+  // newest last, so the buyer's tracking page can show the whole journey.
+  const changed = s !== String(order.courier.status || '');
+  const line = changed || extra.message
+    ? { status: s, message: extra.message ? clip(extra.message, 300) : '', at: new Date() }
+    : null;
+  await Order.updateOne(
+    { _id: order._id },
+    line ? { $set: set, $push: { 'courier.history': { $each: [line], $slice: -80 } } } : { $set: set }
+  );
 
   // Delivered on the courier's side is delivered on ours — including
   // "delivered_approval_pending" (the rider has handed it over; Steadfast's
@@ -347,9 +357,15 @@ const handleWebhook = async (payload: any) => {
   if (!order) return { found: false };
   const type = String(payload?.notification_type || '');
   if (type === 'tracking_update') {
+    const message = clip(String(payload.tracking_message || ''), 300);
+    const when = payload?.updated_at ? new Date(String(payload.updated_at).replace(' ', 'T') + '+06:00') : new Date();
+    const at = Number.isNaN(when.getTime()) ? new Date() : when;
     await Order.updateOne(
       { _id: order._id },
-      { $set: { 'courier.lastMessage': clip(String(payload.tracking_message || ''), 300), 'courier.statusUpdatedAt': new Date() } }
+      {
+        $set: { 'courier.lastMessage': message, 'courier.statusUpdatedAt': new Date() },
+        ...(message ? { $push: { 'courier.history': { $each: [{ status: '', message, at }], $slice: -80 } } } : {}),
+      }
     );
     return { found: true };
   }
@@ -566,6 +582,108 @@ const summary = async (q: CourierListQuery) => {
   };
 };
 
+/**
+ * The courier money page as one dashboard (18 Oct 2026, modelled on
+ * Steadfast's own merchant dashboard): what is with the courier right now,
+ * the last 30 days, parcels booked each day by how they ended up, the latest
+ * parcels, the last payout and what the courier still owes. Calendar days in
+ * Bangladesh time. Super Admin only (the route).
+ */
+const dashboard = async () => {
+  const today = bdDate();
+  const firstDay = addDays(today, -29);
+  const rows: any[] = await Order.find({ 'courier.consignmentId': { $exists: true, $nin: [null, ''] } })
+    .select('orderSeq orderNumber shippingAddress.name courier.status courier.sentAt courier.codAmount courier.collectedAmount courier.deliveryCharge courier.paymentId courier.consignmentId')
+    .lean();
+
+  const days = Array.from({ length: 30 }, (_, i) => addDays(firstDay, i));
+  const daily = new Map(days.map((d) => [d, { day: d, delivered: 0, transit: 0, partial: 0, returned: 0 }]));
+  const s = {
+    inReview: 0,
+    processing: 0,
+    codProcessing: 0,
+    codProcessingAmount: 0,
+    returns30: 0,
+    bookedToday: 0,
+    bookedYesterday: 0,
+    booked30: 0,
+    finished30: 0,
+    delivered30: 0,
+    receivable: 0,
+    receivableParcels: 0,
+    ended: { delivered: 0, transit: 0, partial: 0, returned: 0 },
+  };
+  const yesterday = addDays(today, -1);
+
+  for (const r of rows) {
+    const c = r.courier || {};
+    const g = groupOf(c.status);
+    const day = c.sentAt ? bdDate(new Date(c.sentAt)) : '';
+    if (c.status === 'in_review') s.inReview++;
+    else if (g === 'transit') s.processing++;
+    const net = (Number(c.collectedAmount) || 0) - (Number(c.deliveryCharge) || 0);
+    if ((g === 'delivered' || g === 'partial') && !c.paymentId) {
+      s.receivable += net;
+      s.receivableParcels++;
+      s.codProcessing++;
+      s.codProcessingAmount += Number(c.collectedAmount) || 0;
+    }
+    if (day === today) s.bookedToday++;
+    if (day === yesterday) s.bookedYesterday++;
+    const bucket = daily.get(day);
+    if (bucket) {
+      bucket[g]++;
+      s.booked30++;
+      s.ended[g]++;
+      if (g !== 'transit') s.finished30++;
+      if (g === 'delivered' || g === 'partial') s.delivered30++;
+      if (g === 'returned') s.returns30++;
+    }
+  }
+
+  const latest = [...rows]
+    .filter((r) => r.courier?.sentAt)
+    .sort((a, b) => new Date(b.courier.sentAt).getTime() - new Date(a.courier.sentAt).getTime())
+    .slice(0, 8)
+    .map((r) => ({
+      _id: String(r._id),
+      orderSeq: r.orderSeq ?? null,
+      orderNumber: r.orderNumber,
+      name: r.shippingAddress?.name || '',
+      consignmentId: r.courier.consignmentId,
+      sentAt: r.courier.sentAt,
+      cod: Number(r.courier.codAmount) || 0,
+      status: r.courier.status,
+      group: groupOf(r.courier.status),
+    }));
+
+  const payments: any[] = await CourierPayment.find().sort({ paidAt: -1 }).limit(8).lean();
+  const paidAgg = await CourierPayment.aggregate([{ $group: { _id: null, amount: { $sum: '$amount' }, count: { $sum: 1 } } }]);
+
+  let balance: number | null = null;
+  if (steadfastConfigured()) {
+    try {
+      balance = await getBalance();
+    } catch {
+      balance = null;
+    }
+  }
+
+  return {
+    ...s,
+    successRate: s.finished30 ? Math.round((s.delivered30 / s.finished30) * 1000) / 10 : null,
+    daily: [...daily.values()],
+    latest,
+    lastPayment: payments[0]
+      ? { paymentId: payments[0].paymentId, amount: payments[0].amount, paidAt: payments[0].paidAt, status: payments[0].status, parcels: payments[0].consignments?.length || 0 }
+      : null,
+    payments: payments.map((p) => ({ paymentId: p.paymentId, amount: p.amount, paidAt: p.paidAt, status: p.status, parcels: p.consignments?.length || 0 })),
+    paidOutAllTime: paidAgg[0]?.amount || 0,
+    payoutCount: paidAgg[0]?.count || 0,
+    balance,
+  };
+};
+
 const listPaymentsLocal = async (q: { from?: string; to?: string }) => {
   const f: Record<string, unknown> = {};
   const range: Record<string, Date> = {};
@@ -605,13 +723,12 @@ const filterChoices = async () => {
  * status is refreshed from Steadfast at most every five minutes per parcel,
  * so reloading the page cannot hammer the courier's API.
  */
-const timelineCache = new Map<string, { at: number; rows: { text: string; at: string | null }[] }>();
 const publicTrack = async (code: string) => {
   const trackingCode = String(code || '').trim();
   if (!/^[A-Za-z0-9_-]{4,64}$/.test(trackingCode)) return null;
   const find = () =>
     Order.findOne({ 'courier.trackingCode': trackingCode })
-      .select('orderSeq orderNumber status items.title items.quantity courier.status courier.statusUpdatedAt courier.lastMessage courier.sentAt courier.consignmentId courier.trackingCode createdAt')
+      .select('orderSeq orderNumber status items.title items.quantity courier.status courier.statusUpdatedAt courier.lastMessage courier.sentAt courier.consignmentId courier.trackingCode courier.history createdAt')
       .lean();
   let order: any = await find();
   if (!order) return null;
@@ -629,15 +746,14 @@ const publicTrack = async (code: string) => {
     }
   }
 
-  const cached = timelineCache.get(trackingCode);
-  let timeline = cached && Date.now() - cached.at < 2 * 60_000 ? cached.rows : null;
-  if (!timeline) {
-    timeline = await publicTimeline(trackingCode);
-    timelineCache.set(trackingCode, { at: Date.now(), rows: timeline });
-    if (timelineCache.size > 500) timelineCache.delete(timelineCache.keys().next().value as string);
-  }
-
   const oc = order.courier || {};
+  // The journey, newest first: every update the courier sent us (send, status
+  // changes, its own tracking messages). Steadfast's public page cannot be
+  // linked to — it needs a token the API does not give — so this is the page.
+  const timeline = [...(oc.history || [])]
+    .filter((h: any) => h && (h.message || h.status))
+    .sort((a: any, b: any) => new Date(b.at).getTime() - new Date(a.at).getTime())
+    .map((h: any) => ({ text: String(h.message || ''), status: String(h.status || ''), at: h.at || null }));
   return {
     orderSeq: order.orderSeq ?? null,
     orderNumber: order.orderNumber,
@@ -658,6 +774,7 @@ const publicTrack = async (code: string) => {
 };
 
 export const CourierService = {
+  dashboard,
   reconcileOrders,
   publicTrack,
   sendOrders,

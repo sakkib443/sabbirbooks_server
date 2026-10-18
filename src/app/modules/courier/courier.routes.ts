@@ -64,6 +64,8 @@ router.get('/filters', ...read, wrap(() => CourierService.filterChoices()));
 router.get('/ready', ...read, wrap((req) => CourierService.listReady(scoped(req))));
 router.get('/consignments', ...read, wrap((req) => CourierService.listConsignments(scoped(req))));
 router.get('/summary', ...owner, wrap((req) => CourierService.summary(scoped(req))));
+// The courier money dashboard — Super Admin only (owner).
+router.get('/dashboard', ...owner, wrap(() => CourierService.dashboard()));
 router.get('/payments', ...owner, wrap((req) => CourierService.listPayments(scoped(req))));
 
 router.post(
