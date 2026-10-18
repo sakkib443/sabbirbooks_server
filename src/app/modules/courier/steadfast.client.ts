@@ -150,30 +150,3 @@ export const publicSiteUrl = (): string => {
 };
 export const trackingPage = (trackingCode: string) => `${publicSiteUrl()}/t/${encodeURIComponent(trackingCode)}`;
 
-/**
- * Steadfast's public timeline for a tracking code (the JSON their own tracking
- * page reads). Unofficial, so best-effort: [] on any failure.
- */
-export const publicTimeline = async (trackingCode: string): Promise<{ text: string; at: string | null }[]> => {
-  if (process.env.STEADFAST_PUBLIC_TIMELINE === 'off') return [];
-  try {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 6000);
-    const res = await fetch(`https://steadfast.com.bd/track/consignment/${encodeURIComponent(trackingCode)}`, {
-      headers: { Accept: 'application/json', 'User-Agent': 'Mozilla/5.0 (MagicViva tracking)' },
-      signal: ctrl.signal,
-    }).finally(() => clearTimeout(t));
-    if (!res.ok) return [];
-    const json: any = await res.json().catch(() => null);
-    const rows: any[] = Array.isArray(json?.trackings) ? json.trackings : [];
-    return rows
-      .map((r) => ({
-        text: String(r?.text ?? r?.message ?? r?.tracking_message ?? r?.status ?? '').trim(),
-        at: r?.created_at || r?.updated_at || r?.date || null,
-      }))
-      .filter((r) => r.text)
-      .slice(0, 30);
-  } catch {
-    return [];
-  }
-};

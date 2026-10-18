@@ -199,6 +199,7 @@ export interface IOrder {
     sentBy?: unknown;
     paymentId?: string | null;
     paidOutAt?: Date | null;
+    history?: { status?: string; message?: string; at?: Date }[];
   };
   /**
    * The day this order counts as going out, when that is not the day it was

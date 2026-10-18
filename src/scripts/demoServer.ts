@@ -285,6 +285,51 @@ async function main() {
   await Order.insertMany(orders, { timestamps: false } as never);
   if (bulk) console.log(`  ${orders.length} orders seeded (${bulk} bulk)`);
 
+  // Some of them handed to the courier across the month, in every state, with
+  // a payout — so the courier dashboard (Payouts & Accounts) has something to
+  // draw. Statuses by age: old ones delivered (a few returned), recent ones on
+  // the way. Demo only; nothing here talks to Steadfast.
+  {
+    const { CourierPayment } = await import('../app/modules/courier/courierPayment.model');
+    const sendable: any[] = await Order.find({ status: { $ne: 'cancelled' } }).sort({ createdAt: 1 }).lean();
+    const paid: { consignmentId: string; invoice: string; codAmount: number; deliveryCharge: number }[] = [];
+    let n = 0;
+    for (const o of sendable) {
+      n++;
+      const sentAt = new Date(new Date(o.createdAt).getTime() + 5 * 3600_000);
+      const ageDays = (Date.now() - sentAt.getTime()) / 86400_000;
+      const status =
+        ageDays < 1 ? 'in_review' : ageDays < 3 ? 'pending' : n % 13 === 0 ? 'cancelled' : n % 7 === 0 ? 'delivered_approval_pending' : 'delivered';
+      const delivered = status.startsWith('delivered');
+      const cod = Number(o.total) || 0;
+      const consignmentId = String(300000000 + n);
+      const isPaid = delivered && ageDays > 9 && n % 3 !== 0;
+      if (isPaid) paid.push({ consignmentId, invoice: o.orderNumber, codAmount: cod, deliveryCharge: 110 });
+      await Order.updateOne(
+        { _id: o._id },
+        {
+          $set: {
+            courier: {
+              provider: 'steadfast', consignmentId, trackingCode: `SFRDEMO${String(n).padStart(6, '0')}AB`,
+              status, statusUpdatedAt: new Date(), lastMessage: '', codAmount: cod,
+              collectedAmount: delivered ? cod : 0, deliveryCharge: status === 'cancelled' || delivered ? 110 : null,
+              sentAt, paymentId: isPaid ? 'DEMO-PAY-1' : null, paidOutAt: isPaid ? new Date() : null,
+              history: [{ status: 'in_review', message: 'পার্সেল Steadfast কুরিয়ারে দেওয়া হয়েছে', at: sentAt }],
+            },
+          },
+        }
+      );
+    }
+    if (paid.length) {
+      await CourierPayment.create({
+        provider: 'steadfast', paymentId: 'DEMO-PAY-1', amount: paid.reduce((a, p) => a + p.codAmount - p.deliveryCharge, 0),
+        status: 'Paid', paidAt: new Date(Date.now() - 2 * 86400_000), consignments: paid,
+        codTotal: paid.reduce((a, p) => a + p.codAmount, 0), chargeTotal: paid.length * 110,
+      });
+    }
+    console.log(`  ${n} parcels handed to the demo courier, ${paid.length} paid out`);
+  }
+
   const { default: app } = await import('../app');
 
   // One code from each side of the paywall, printed so the open/closed pair can

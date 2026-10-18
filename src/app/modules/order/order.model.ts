@@ -104,6 +104,18 @@ const orderCourierSchema = new Schema(
     sentBy: { type: Schema.Types.ObjectId, ref: 'User' },
     paymentId: { type: String, default: null },
     paidOutAt: { type: Date, default: null },
+    // Every update the courier sent for this parcel, newest last (18 Oct 2026):
+    // the buyer's tracking page (/t/CODE) is built from it, because Steadfast's
+    // public tracking needs a token its API never hands out.
+    history: {
+      type: [
+        new Schema(
+          { status: { type: String, default: '' }, message: { type: String, default: '' }, at: { type: Date, default: Date.now } },
+          { _id: false }
+        ),
+      ],
+      default: [],
+    },
   },
   { _id: false }
 );
