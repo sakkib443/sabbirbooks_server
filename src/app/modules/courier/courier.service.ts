@@ -233,13 +233,67 @@ const applyStatus = async (
   if (g === 'returned') set['courier.collectedAmount'] = 0;
   await Order.updateOne({ _id: order._id }, { $set: set });
 
-  if ((s === 'delivered' || s === 'partial_delivered') && order.status !== 'delivered' && order.status !== 'cancelled') {
+  // Delivered on the courier's side is delivered on ours — including
+  // "delivered_approval_pending" (the rider has handed it over; Steadfast's
+  // own approval is paperwork). Until 18 Oct 2026 only the bare word counted,
+  // so parcels showing "Delivered (approval)" left their orders on Shipped.
+  if ((g === 'delivered' || g === 'partial') && order.status !== 'delivered' && order.status !== 'cancelled') {
     try {
       await OrderService.updateOrderStatus(String(order._id), 'delivered');
     } catch (e) {
       console.error('[courier] could not mark delivered:', order.orderNumber, e);
     }
   }
+};
+
+/**
+ * Bring every order in line with its parcel, whatever was missed:
+ *   • a parcel delivered (or partly) → the order is Delivered;
+ *   • a parcel with the courier but the order still Pending/Paid/Confirmed
+ *     → the order is Shipped (sending normally does this; a failure there
+ *     must not leave the two disagreeing).
+ * A cancelled order is left alone — that was somebody's decision. Returned
+ * parcels are recorded on the parcel only; cancelling the order stays the
+ * admin's call. Idempotent; runs after every status sync, on the courier
+ * tick and at boot.
+ */
+const reconcileOrders = async () => {
+  const deliveredStatuses = [...STATUSES_BY_GROUP.delivered, ...STATUSES_BY_GROUP.partial];
+  const toDeliver: any[] = await Order.find({
+    'courier.status': { $in: deliveredStatuses },
+    status: { $nin: ['delivered', 'cancelled'] },
+  })
+    .select('_id orderNumber')
+    .limit(1000)
+    .lean();
+  let delivered = 0;
+  for (const o of toDeliver) {
+    try {
+      await OrderService.updateOrderStatus(String(o._id), 'delivered');
+      delivered++;
+    } catch (e) {
+      console.error('[courier] reconcile: could not mark delivered:', o.orderNumber, e);
+    }
+  }
+
+  const toShip: any[] = await Order.find({
+    'courier.consignmentId': { $exists: true, $nin: [null, ''] },
+    'courier.status': { $nin: [...deliveredStatuses, ...STATUSES_BY_GROUP.returned] },
+    status: { $in: ['pending', 'paid', 'processing'] },
+  })
+    .select('_id orderNumber')
+    .limit(1000)
+    .lean();
+  let shipped = 0;
+  for (const o of toShip) {
+    try {
+      await OrderService.updateOrderStatus(String(o._id), 'shipped');
+      shipped++;
+    } catch (e) {
+      console.error('[courier] reconcile: could not mark shipped:', o.orderNumber, e);
+    }
+  }
+  return { delivered, shipped };
 };
 
 /** Ask the courier about parcels still on the way. */
@@ -277,7 +331,8 @@ const syncStatuses = async (opts: { ids?: string[]; limit?: number } = {}) => {
       })
     );
   }
-  return { checked, changed, failed, remaining: orders.length - checked - failed };
+  const reconciled = await reconcileOrders();
+  return { checked, changed, failed, remaining: orders.length - checked - failed, reconciled };
 };
 
 /** Steadfast's webhook: a delivery status or a tracking message for one parcel. */
@@ -603,6 +658,7 @@ const publicTrack = async (code: string) => {
 };
 
 export const CourierService = {
+  reconcileOrders,
   publicTrack,
   sendOrders,
   syncStatuses,

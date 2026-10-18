@@ -234,6 +234,8 @@ async function startServer() {
         const { CourierService } = await import('./app/modules/courier/courier.service');
         const st = await CourierService.syncStatuses({ limit: 300 });
         if (st.changed) console.log(`📦 Courier: ${st.changed} parcel status update(s).`);
+        const r = st.reconciled;
+        if (r && (r.delivered || r.shipped)) console.log(`📦 Courier: ${r.delivered} order(s) marked delivered, ${r.shipped} shipped, to match their parcels.`);
         await CourierService.syncPayments();
       } catch (error) {
         console.error('⚠️  Courier sync failed (server unaffected):', error);

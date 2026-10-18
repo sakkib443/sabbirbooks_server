@@ -229,6 +229,37 @@ async function main() {
   const future = (await api().get('/api/courier/consignments?from=2099-01-01T00:00:00Z').set(AUTH)).body?.data;
   check(future.total === 0, 'date filter');
 
+  console.log('── Delivered (approval) and orders kept in step ──');
+  // Confirm, send, and read back the parcel.
+  const sendOne = async (phone: string) => {
+    const o = await place(phone);
+    await api().patch(`/api/orders/${o._id}/status`).set(AUTH).send({ status: 'processing' });
+    await api().post('/api/courier/send').set(AUTH).send({ orderIds: [o._id] });
+    return (await Order.findById(o._id).lean()) as any;
+  };
+  const p6 = await sendOne('01755555555');
+  check(p6.courier?.consignmentId && p6.status === 'shipped', 'sent → order shipped', p6.status);
+  fake.status.set(p6.courier.consignmentId, 'delivered_approval_pending');
+  await api().post('/api/courier/sync').set(AUTH).send({ orderIds: [String(p6._id)] });
+  const p6b: any = await Order.findById(p6._id).lean();
+  check(p6b.status === 'delivered', '"Delivered (approval)" on the courier → order delivered', p6b.status);
+
+  // A parcel already showing delivered whose order was left behind (the old bug).
+  const p7 = await sendOne('01766666666');
+  fake.status.set(p7.courier.consignmentId, 'delivered_approval_pending');
+  await Order.collection.updateOne({ _id: p7._id }, { $set: { 'courier.status': 'delivered_approval_pending', status: 'shipped' } });
+  const s7 = await api().post('/api/courier/sync').set(AUTH).send({ orderIds: [String(p7._id)] });
+  const p7b: any = await Order.findById(p7._id).lean();
+  check(p7b.status === 'delivered', 'a stuck order is caught up on the next sync', { status: p7b.status, sync: s7.body?.data });
+
+  // An order sent to the courier but left on Confirmed.
+  const p8 = await sendOne('01777777777');
+  await Order.collection.updateOne({ _id: p8._id }, { $set: { status: 'processing' } });
+  const { CourierService } = await import('../app/modules/courier/courier.service');
+  const rec = await CourierService.reconcileOrders();
+  const p8b: any = await Order.findById(p8._id).lean();
+  check(p8b.status === 'shipped' && rec.shipped >= 1, 'a sent order left on Confirmed is moved to Shipped', { status: p8b.status, rec });
+
   console.log(`\n${passed} passed, ${failed} failed\n`);
   fakeServer.close();
   process.exit(failed === 0 ? 0 : 1);
