@@ -870,7 +870,14 @@ const updateOrderStatus = async (
     /** The courier's tracking page — what the shipped SMS links to. */
     trackingUrl?: string;
     adminNote?: string;
-  }
+  },
+  /**
+   * The admin's "send the buyer an SMS" tick (19 Oct 2026). Left out, the
+   * usual rule: a text when shipped, none when confirmed or delivered. true:
+   * the text that matches the new status (confirmed / shipped / delivered).
+   * false: no text at all.
+   */
+  opts: { sms?: boolean } = {}
 ): Promise<IOrder> => {
   if (!isValidObjectId(id)) throw new Error('Invalid order id');
   const order: any = await Order.findById(id);
@@ -998,15 +1005,24 @@ const updateOrderStatus = async (
   // timestamp would fire this and the delivered text in the same second — two
   // messages, one of them telling a buyer holding the book to expect a call.
   // Only an order sitting AT 'shipped' has something to say.
-  if (order.status === 'shipped') {
-    void OrderSmsService.send(order, 'shipped');
-  }
+  if (opts.sms !== false) {
+    if (order.status === 'shipped') {
+      void OrderSmsService.send(order, 'shipped');
+    }
 
-  // The parcel arrived. Sent on the transition, not on every save of a
-  // delivered order — the guard on the order document is what makes that true
-  // even for an admin who clicks through shipped and delivered twice.
-  if (order.status === 'delivered') {
-    void OrderSmsService.send(order, 'delivered');
+    // The parcel arrived. Sent on the transition, not on every save of a
+    // delivered order — the guard on the order document is what makes that true
+    // even for an admin who clicks through shipped and delivered twice. Off
+    // unless the admin asked for it (OrderSmsService.shouldSend).
+    if (order.status === 'delivered') {
+      void OrderSmsService.send(order, 'delivered', { force: opts.sms === true });
+    }
+
+    // Confirmed: only when the admin asked (the shop stopped the automatic one
+    // on 20 Sep 2026). COD gets "received / confirmed", prepaid gets "paid".
+    if (opts.sms === true && order.status === 'processing') {
+      void OrderSmsService.send(order, order.payment?.method === 'cod' ? 'placed' : 'paid');
+    }
   }
 
   return order;
@@ -1052,13 +1068,14 @@ const updateOrdersStatus = async (
   status: string,
   // One courier, one consignment, one tracking link: marking a college's whole
   // batch shipped is exactly when the same link belongs on all of them.
-  extra?: { courierName?: string; trackingCode?: string; trackingUrl?: string }
+  extra?: { courierName?: string; trackingCode?: string; trackingUrl?: string },
+  opts: { sms?: boolean } = {}
 ): Promise<{ updated: number; failed: number }> => {
   let updated = 0;
   let failed = 0;
   for (const id of ids || []) {
     try {
-      await updateOrderStatus(id, status, extra);
+      await updateOrderStatus(id, status, extra, opts);
       updated += 1;
     } catch {
       failed += 1;
@@ -1983,6 +2000,8 @@ const getBookOrderStats = async (opts?: {
 
 export const OrderService = {
   createOrder,
+  // For orders added by hand or from a sheet (manualOrder.service).
+  applyStockOnce,
   getBookOrderStats,
   getCheckoutOptions,
   setOrderNote,

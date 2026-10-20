@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { Request, Response } from 'express';
 import { OrderService } from './order.service';
+import { ManualOrderService } from './manualOrder.service';
 import {
   clampWindow,
   dashboardRangeFor,
@@ -100,7 +101,9 @@ const updateOrdersStatus = async (req: Request, res: Response) => {
       trackingUrl: req.body?.trackingUrl === undefined ? undefined : String(req.body.trackingUrl),
     };
     if (await refusedOutsideScope(req, res, ids)) return;
-    const result = await OrderService.updateOrdersStatus(ids, status, extra);
+    const result = await OrderService.updateOrdersStatus(ids, status, extra, {
+      sms: typeof req.body?.sms === 'boolean' ? req.body.sms : undefined,
+    });
     res.status(200).json({
       success: true,
       message: `${result.updated} order(s) updated${result.failed ? `, ${result.failed} failed` : ''}`,
@@ -240,7 +243,7 @@ const updateOrderStatus = async (req: Request, res: Response) => {
       courierName: req.body.courierName,
       trackingCode: req.body.trackingCode,
       adminNote: req.body.adminNote,
-    });
+    }, { sms: typeof req.body?.sms === 'boolean' ? req.body.sms : undefined });
     res.status(200).json({ success: true, message: 'Order status updated', data: order });
   } catch (error: any) {
     res.status(400).json({ success: false, message: error.message });
@@ -372,8 +375,24 @@ const getStats = async (req: Request, res: Response) => {
     res.status(500).json({ success: false, message: error.message });
   }
 };
+// Orders added by hand or from a sheet. { orders: [...], dryRun?, source? }
+const addManualOrders = async (req: Request, res: Response) => {
+  try {
+    const { orders, dryRun, source, sms } = req.body || {};
+    const data = await ManualOrderService.addOrders(Array.isArray(orders) ? orders : [], {
+      dryRun: dryRun === true,
+      source: source === 'import' ? 'import' : 'manual',
+      sms: sms === true,
+    });
+    res.status(200).json({ success: true, data });
+  } catch (error: any) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+};
+
 export const OrderController = {
   createOrder,
+  addManualOrders,
   getStats,
   getCheckoutOptions,
   setOrderNote,

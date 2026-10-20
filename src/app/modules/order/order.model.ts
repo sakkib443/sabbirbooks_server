@@ -218,6 +218,11 @@ const orderSchema = new Schema<IOrder>(
     // up. Stored exactly as the courier hands it over.
     trackingUrl: { type: String, trim: true },
     adminNote: { type: String, trim: true },
+    // Where the order came from: the website, the Add order form, or a sheet
+    // upload (manualOrder.service). externalRef is the sheet's own order
+    // number, so uploading the same sheet twice adds nothing twice.
+    source: { type: String, enum: ['web', 'manual', 'import', 'campus'], default: 'web' },
+    externalRef: { type: String, trim: true, index: true, sparse: true },
 
     // The day this order counts as going out, when that is NOT the day it was
     // placed.

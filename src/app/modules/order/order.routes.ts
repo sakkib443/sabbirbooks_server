@@ -85,6 +85,11 @@ router.get('/', authMiddleware, authorize('admin', 'manager'), requireCapability
 // not read as an order id.
 router.get('/stats', authMiddleware, authorize('admin', 'manager'), requireCapability('orders.read'), OrderController.getStats);
 
+// Orders that did not come through the website — the Add order form (one) or a
+// sheet upload (many). dryRun checks every row and saves nothing. Admin (and the
+// Super Admin): it sets prices and statuses. See manualOrder.service.
+router.post('/manual', authMiddleware, authorize('admin'), requireCapability('orders.write'), OrderController.addManualOrders);
+
 // ─── Payment (owner, or the order's access key) ──────────────
 // A guest has no token; they send the access key their order was created with
 // in an x-order-key header. Anyone with neither gets "order not found".

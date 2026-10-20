@@ -64,6 +64,8 @@ export const updateOrderStatusValidationSchema = z.object({
     // nobody. The SMS builder is what makes it pressable.
     trackingUrl: z.string().optional(),
     adminNote: z.string().optional(),
+    // The admin's "send the buyer an SMS" tick; left out = the usual rule.
+    sms: z.boolean().optional(),
   }),
 });
 
