@@ -184,6 +184,10 @@ export interface IOrder {
   /** The courier's tracking page for this parcel — what the shipped SMS links to. */
   trackingUrl?: string;
   adminNote?: string;
+  /** web, or added by hand / from a sheet (manualOrder.service). */
+  source?: 'web' | 'manual' | 'import' | 'campus';
+  /** A sheet's own order number for an imported order. */
+  externalRef?: string;
   /** The parcel at the courier, once handed over through its API. */
   courier?: {
     provider?: string;

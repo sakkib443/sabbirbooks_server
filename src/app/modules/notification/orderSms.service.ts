@@ -99,7 +99,7 @@ const TEXT: Record<OrderSmsEvent, (i: OrderSmsInput) => string> = {
  * Kept separate from sending so the decision is readable on its own and can be
  * tested without a gateway.
  */
-const shouldSend = (event: OrderSmsEvent, order: any): boolean => {
+const shouldSend = (event: OrderSmsEvent, order: any, force = false): boolean => {
   // Cash on delivery is the one path where the order is real before any money
   // moves, so it is the one that gets told "received" and later "confirmed".
   // Everything else — a hosted gateway, a bank transfer an admin approves —
@@ -117,8 +117,9 @@ const shouldSend = (event: OrderSmsEvent, order: any): boolean => {
   if (order?.status === 'cancelled') return false;
 
   // No text once the book is delivered — whether the admin marks it or the
-  // courier reports it (the shop's decision, 18 Oct 2026).
-  if (event === 'delivered') return false;
+  // courier reports it (the shop's decision, 18 Oct 2026) — unless the admin
+  // ticked "send SMS" for this change (19 Oct 2026: it is their choice).
+  if (event === 'delivered') return force;
 
   // The two paths are exclusive on purpose: a prepaid buyer's 'paid' text
   // already says "your order is confirmed", so sending them 'placed' as well
@@ -186,10 +187,10 @@ const release = async (order: any, event: OrderSmsEvent): Promise<void> => {
  *
  *   void OrderSmsService.send(order, 'delivered');
  */
-const send = async (order: any, event: OrderSmsEvent): Promise<boolean> => {
+const send = async (order: any, event: OrderSmsEvent, opts: { force?: boolean } = {}): Promise<boolean> => {
   try {
     if (!order?._id) return false;
-    if (!shouldSend(event, order)) return false;
+    if (!shouldSend(event, order, opts.force === true)) return false;
     if (!(await claim(order, event))) return false;
 
     const phone = await resolvePhone(order);
