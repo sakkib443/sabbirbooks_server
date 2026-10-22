@@ -48,6 +48,7 @@ import { BookAccessRoutes } from './app/modules/bookAccess/bookAccess.routes';
 import { MedicalCollegeRoutes } from './app/modules/medicalCollege/medicalCollege.routes';
 import { CampusRoutes } from './app/modules/campus/campus.routes';
 import { LedgerRoutes } from './app/modules/ledger/ledger.routes';
+import { IncompleteOrderRoutes } from './app/modules/incompleteOrder/incompleteOrder.routes';
 import { AmbassadorRoutes } from './app/modules/ambassador/ambassador.routes';
 
 const app: Application = express();
@@ -138,6 +139,7 @@ app.use('/api/orders', OrderRoutes);
 app.use('/api/courier', CourierRoutes);
 app.use('/api/campus', CampusRoutes);
 app.use('/api/ledger', LedgerRoutes);
+app.use('/api/incomplete-orders', IncompleteOrderRoutes);
 app.use('/api/security', SecurityRoutes);
 app.use('/api/attendance', AttendanceRoutes);
 app.use('/api/exams', ExamRoutes);
