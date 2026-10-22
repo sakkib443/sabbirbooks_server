@@ -179,7 +179,8 @@ async function main() {
   check(d1b.status === 'delivered' && d1b.payment?.status === 'paid', 'delivered parcel → order delivered + COD paid');
   check(d1b.courier.collectedAmount === o1.total, 'collected = COD amount on delivery');
   const d2b: any = await Order.findById(o2._id).lean();
-  check(d2b.courier.status === 'cancelled' && d2b.status === 'shipped', 'returned parcel recorded, order left for the admin to decide');
+  // Since 23 Oct 2026 a parcel Steadfast reports cancelled (returned to us) marks the order Returned.
+  check(d2b.courier.status === 'cancelled' && d2b.status === 'returned', 'returned parcel → order Returned', d2b.status);
 
   console.log('── Webhook ──');
   const o5 = await place('01733333333');

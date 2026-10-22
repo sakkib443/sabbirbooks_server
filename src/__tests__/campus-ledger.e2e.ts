@@ -112,19 +112,43 @@ async function main() {
   check((await api().delete(`/api/campus/orders/${spare.body.data._id}`).set(S)).status === 200, 'the Super Admin can');
 
   console.log('── Ledger ──');
-  const today = shopDayOf(new Date());
+  // An Accounts day starts at 5 AM (Settings.ledgerDayStartHour) — ask the server which day "today" is.
+  const today = (await api().get('/api/ledger').set(S)).body?.data?.today;
+  check(/^\d{4}-\d{2}-\d{2}$/.test(String(today)), 'the server names today', today);
   const e1 = await api().post('/api/ledger').set(S).send({ day: today, type: 'expense', category: 'ছাপা', amount: '৫০০০', method: 'bank' });
   check(e1.status === 200 && e1.body?.data?.amount === 5000, 'an expense, Bengali digits read', e1.body);
   await api().post('/api/ledger').set(S).send({ day: today, type: 'income', category: 'বাইরের বিক্রি', amount: 1200 });
   check((await api().post('/api/ledger').set(S).send({ day: today, type: 'expense', amount: 0 })).status === 400, 'zero refused');
+
+  // An admin writes their own entries and sees only those — no sales, nobody else's.
+  const ea = await api().post('/api/ledger').set(A).send({ day: today, type: 'expense', category: 'যাতায়াত', amount: 300 });
+  await api().post('/api/ledger').set(A).send({ day: today, type: 'income', category: 'হাতে বই বিক্রি', amount: 650, book: 'personal' });
+  const mine = await api().get('/api/ledger').set(A).query({ from: today, to: today });
+  check(mine.status === 200 && mine.body?.data?.mine === true && mine.body?.data?.sales === false, 'admin gets their own view');
+  check(mine.body?.data?.entries?.length === 2 && mine.body.data.days[0].expense === 300 && mine.body.data.days[0].income === 650, 'admin sees only their two entries', mine.body?.data?.entries);
+  check(mine.body.data.days[0].orders === 0 && mine.body.data.days[0].sales === 0, 'and no sales');
+  check((await api().get('/api/ledger').set(A).query({ book: 'personal' })).body?.data?.book === 'shop', 'an admin cannot open a personal book');
+  check((await api().patch(`/api/ledger/${e1.body.data._id}`).set(A).send({ amount: 1 })).status === 400, "an admin cannot change the Super Admin's entry");
+  check((await api().patch(`/api/ledger/${ea.body.data._id}`).set(A).send({ amount: 350 })).body?.data?.amount === 350, 'an admin corrects their own');
+  check((await api().delete(`/api/ledger/${ea.body.data._id}`).set(A)).status === 403, 'an admin cannot delete');
+
   const rep = await api().get('/api/ledger').set(S).query({ from: today, to: today });
   const row = rep.body?.data?.days?.[0];
-  check(row?.day === today && row?.expense === 5000 && row?.income === 1200, 'the day adds up the entries', row);
-  check(row?.orders === 1 && row?.sales === o.total && row?.delivery === 120, 'and the day\'s orders', row);
+  check(row?.day === today && row?.expense === 5350 && row?.income === 1850, "the Super Admin's shop day includes the admin's entries", row);
+  check(row?.orders === 1 && row?.sales === o.total && row?.delivery === 120, "and the day's orders", row);
+  check(rep.body?.data?.entries?.some((e: any) => e.createdBy?.firstName === 'admin'), 'with who wrote each');
   check(rep.body?.data?.categories?.expense?.includes('কুরিয়ার'), 'category suggestions');
+
+  // The Super Admin's personal book: separate, never in the shop's figures.
+  await api().post('/api/ledger').set(S).send({ book: 'personal', day: today, type: 'income', category: 'দোকান থেকে নেওয়া', amount: 10000 });
+  const per = await api().get('/api/ledger').set(S).query({ book: 'personal', from: today, to: today });
+  check(per.body?.data?.book === 'personal' && per.body.data.days[0].income === 10000 && per.body.data.days[0].sales === 0, 'personal book on its own');
+  const rep2 = await api().get('/api/ledger').set(S).query({ from: today, to: today });
+  check(rep2.body?.data?.days?.[0]?.income === 1850, 'personal money not in the shop book');
+
   const upd = await api().patch(`/api/ledger/${e1.body.data._id}`).set(S).send({ amount: 4500 });
   check(upd.body?.data?.amount === 4500, 'an entry can be corrected');
-  check((await api().get('/api/ledger').set(A)).status === 403, 'an admin cannot open the accounts');
+  check((await api().get('/api/ledger').set(M)).status === 403, 'a manager cannot open the accounts');
   check((await api().delete(`/api/ledger/${e1.body.data._id}`).set(S)).status === 200, 'the Super Admin can remove an entry');
 
   console.log(`\n${passed} passed, ${failed} failed\n`);

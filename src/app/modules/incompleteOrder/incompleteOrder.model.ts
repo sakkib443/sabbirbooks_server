@@ -35,6 +35,10 @@ const incompleteOrderSchema = new Schema(
     order: { type: Types.ObjectId, ref: 'Order', default: null },
     orderNumber: { type: String, default: '' },
     orderedAt: { type: Date, default: null },
+    // Ordered AFTER being a real incomplete order (another visit, or long
+    // after the first) — stays on the list with an "ordered" badge. A buyer
+    // who simply filled the form and ordered in one go is not (23 Oct 2026).
+    recovered: { type: Boolean, default: false },
 
     // The shop's follow-up.
     contacted: { type: Boolean, default: false },

@@ -152,7 +152,7 @@ export const evaluateBookCoupon = async (
     const used = await Order.countDocuments({
       ...buyerFilter,
       couponCode: coupon.code,
-      status: { $ne: 'cancelled' },
+      status: { $nin: ['cancelled', 'returned'] },
     });
     if (used >= perBuyer) {
       throw new Error(
@@ -494,7 +494,7 @@ export const getPayouts = async (req: Request, res: Response) => {
       .lean();
     const agg: any[] = await Order.aggregate([
       // An admin's figures cover their last fifteen days; a superAdmin's, all time.
-      { $match: { couponCode: { $nin: [null, ''] }, status: { $ne: 'cancelled' }, ...scopeCreatedAt((req as any).user) } },
+      { $match: { couponCode: { $nin: [null, ''] }, status: { $nin: ['cancelled', 'returned'] }, ...scopeCreatedAt((req as any).user) } },
       {
         $group: {
           _id: '$couponCode',
@@ -569,7 +569,7 @@ export const getMyCouponStats = async (req: Request, res: Response) => {
     }
 
     const codes = coupons.map((c) => String(c.code).toUpperCase());
-    const match = { couponCode: { $in: codes }, status: { $ne: 'cancelled' } };
+    const match = { couponCode: { $in: codes }, status: { $nin: ['cancelled', 'returned'] } };
 
     const [agg, recent]: [any[], any[]] = await Promise.all([
       Order.aggregate([

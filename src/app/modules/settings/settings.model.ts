@@ -74,6 +74,9 @@ const settingsSchema = new Schema<ISiteSettings>(
         // The hour (0–23, Bangladesh time) a shop day closes — noon by
         // default; 0 = midnight. Set from the Book Orders screen. See utils/shopDay.
         shopDayCutoffHour: { type: Number, default: 12, min: 0, max: 23 },
+        // When an Accounts (income/expense) day starts — 5 AM by default, to
+        // the same hour the next day (23 Oct 2026). Separate from the order day.
+        ledgerDayStartHour: { type: Number, default: 5, min: 0, max: 23 },
         onlinePaymentEnabled: { type: Boolean, default: true },
 
         // Flat delivery charge for printed books, in taka — one rate everywhere.

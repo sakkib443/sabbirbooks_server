@@ -84,7 +84,7 @@ const STATUS_STAGE: Record<string, number> = {
 };
 
 const stageOf = (order: any): number => {
-  if (order?.status === 'cancelled') return -1;
+  if (order?.status === 'cancelled' || order?.status === 'returned') return -1;
   const byStatus = STATUS_STAGE[order?.status] ?? 0;
   const byStamp = order?.deliveredAt ? 3 : order?.shippedAt ? 2 : order?.confirmedAt ? 1 : 0;
   // Whichever says "further along" wins: a status of delivered on an order

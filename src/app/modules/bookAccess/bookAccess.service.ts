@@ -50,7 +50,7 @@ const hasBookAccess = async (
     // A refunded order keeps payment.status 'paid' (updateOrderStatus only
     // downgrades an UNpaid payment to 'failed'), so without this the branch
     // below would keep serving content after the money went back.
-    status: { $ne: 'cancelled' },
+    status: { $nin: ['cancelled', 'returned'] },
     'payment.status': 'paid',
     items: { $elemMatch: { book: bookId, format: 'digital' } },
   })
@@ -203,7 +203,7 @@ const accessReport = async (query: {
     Order.find({
       user: { $in: userIds },
       'items.book': { $in: bookIds },
-      status: { $ne: 'cancelled' },
+      status: { $nin: ['cancelled', 'returned'] },
     })
       .select('orderNumber user items.book items.quantity status createdAt deliveredAt total')
       .lean(),
