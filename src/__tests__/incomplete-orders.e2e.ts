@@ -97,14 +97,21 @@ async function main() {
 
   console.log('── Admin list ──');
   const all = await api().get('/api/incomplete-orders').set(A);
-  check(all.status === 200 && all.body?.data?.counts?.total === 2 && all.body?.data?.counts?.ordered === 1, 'admin sees both with counts', all.body?.data?.counts);
-  const open = await api().get('/api/incomplete-orders').set(A).query({ status: 'open' });
-  check(open.body?.data?.rows?.length === 1 && open.body.data.rows[0].phone === '01822000002', 'filter: not ordered');
-  const s = await api().get('/api/incomplete-orders').set(A).query({ q: '1711' });
-  check(s.body?.data?.rows?.length === 1 && s.body.data.rows[0].attempts === 3, 'search by part of the number', s.body?.data?.rows);
+  check(all.status === 200 && all.body?.data?.counts?.total === 1 && all.body.data.rows.length === 1, 'the one who ordered is not on the list at all', all.body?.data?.counts);
+  const open = all;
+  check(open.body.data.rows[0].phone === '01822000002', 'only the one who did not order');
+  const s = await api().get('/api/incomplete-orders').set(A).query({ q: '1822' });
+  check(s.body?.data?.rows?.length === 1, 'search by part of the number', s.body?.data?.rows);
+  check((await api().get('/api/incomplete-orders').set(A).query({ q: '1711' })).body?.data?.rows?.length === 0, 'search does not find the one who ordered');
+
+  // A visit that saved only a name, then ordered: the checkout says "done".
+  await track({ sessionId: 'visit-eeee-5', name: 'Only Name' });
+  check((await api().get('/api/incomplete-orders').set(A)).body?.data?.counts?.total === 2, 'name-only visit listed');
+  await track({ sessionId: 'visit-eeee-5', done: true, orderNumber: 'ORD-X' });
+  check((await api().get('/api/incomplete-orders').set(A)).body?.data?.counts?.total === 1, 'after "done" it leaves the list');
   check(all.body?.data?.rows?.[0]?.sessions === undefined, 'visit ids are not sent to the page');
   const m = await api().get('/api/incomplete-orders').set(M);
-  check(m.status === 200 && m.body?.data?.counts?.total === 2, 'a manager sees it too (recent days)');
+  check(m.status === 200 && m.body?.data?.counts?.total === 1, 'a manager sees it too (recent days)');
   check((await api().get('/api/incomplete-orders').set(U)).status === 403, 'a student does not');
   check((await api().get('/api/incomplete-orders').set(A).query({ from: '2020-01-01T00:00:00Z', to: '2020-01-02T00:00:00Z' })).body?.data?.counts?.total === 0, 'date filter');
 
@@ -112,7 +119,7 @@ async function main() {
   const pa = await api().patch(`/api/incomplete-orders/${id}`).set(M).send({ contacted: true, note: 'কল দিয়েছি' });
   check(pa.body?.data?.contacted === true && pa.body?.data?.note === 'কল দিয়েছি', 'marked contacted with a note');
   const todo = await api().get('/api/incomplete-orders').set(A).query({ status: 'todo' });
-  check(todo.body?.data?.rows?.length === 0 && todo.body?.data?.counts?.contacted === 1, 'filter: still to call');
+  check(todo.body?.data?.rows?.length === 0 && todo.body?.data?.counts?.contacted === 1 && todo.body?.data?.counts?.todo === 0, 'filter: still to call');
   check((await api().delete(`/api/incomplete-orders/${id}`).set(A)).status === 403, 'an admin cannot delete');
   check((await api().delete(`/api/incomplete-orders/${id}`).set(S)).status === 200, 'the Super Admin can');
 
