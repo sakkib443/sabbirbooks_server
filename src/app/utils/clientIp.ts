@@ -42,6 +42,8 @@ const TRUSTED_PATHS = [
   /^\/api\/orders$/,
   /^\/api\/book-coupons\/validate$/,
   /^\/api\/user\/google-signin$/,
+  // The checkout's incomplete-order autosave (22 Oct 2026).
+  /^\/api\/incomplete-orders$/,
 ];
 
 const isInternalHop = (raw: string): boolean => {

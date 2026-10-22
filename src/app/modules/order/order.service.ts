@@ -32,6 +32,7 @@ import { MedicalCollege } from '../medicalCollege/medicalCollege.model';
 import { OrderAlertService } from '../notification/orderAlert.service';
 import { OrderEmailService } from '../notification/orderEmail.service';
 import { OrderSmsService } from '../notification/orderSms.service';
+import { IncompleteOrderService } from '../incompleteOrder/incompleteOrder.service';
 
 // Resolve a book by slug / numeric id / Mongo _id — same tolerant lookup the
 // book module exposes publicly (client may send either a slug or an _id).
@@ -642,6 +643,9 @@ const createOrder = async (
   // is never persisted or serialised, so the plain key cannot leak into a save
   // or a later read of this document.
   (order as any).$locals.accessKey = accessKey;
+
+  // The buyer's half-filled checkout, if they left one, is now an order.
+  void IncompleteOrderService.markOrdered(order);
 
   return order;
 };
