@@ -40,6 +40,17 @@ const track = async (body: any) => {
   const sid = clean(body?.sessionId, 64);
   if (!SESSION_ID.test(sid)) throw new Error('Bad session');
 
+  // The checkout says this visit just ordered: whatever it saved is not an
+  // incomplete order (covers a row saved before the phone was typed, which
+  // the phone match in markOrdered cannot find).
+  if (body?.done === true) {
+    await IncompleteOrder.updateMany(
+      { sessions: sid, status: 'open' },
+      { $set: { status: 'ordered', orderNumber: clean(body?.orderNumber, 40), orderedAt: new Date() } }
+    );
+    return { saved: false, done: true };
+  }
+
   const phone = phone11(body?.phone);
   const email = emailOf(body?.email);
   const fields: Record<string, any> = {
@@ -80,8 +91,11 @@ const track = async (body: any) => {
 
   if (!doc.sessions.includes(sid)) {
     doc.sessions.push(sid);
-    // Back at the checkout after ordering: an open attempt again.
-    if (doc.status === 'ordered') doc.status = 'open';
+    // Back at the checkout a day or more after ordering: an open attempt
+    // again. Sooner than that it is the same buyer looking at their order.
+    if (doc.status === 'ordered' && (!doc.orderedAt || Date.now() - new Date(doc.orderedAt).getTime() > 24 * 3600 * 1000)) {
+      doc.status = 'open';
+    }
   }
   if (doc.sessions.length > MAX_SESSIONS) doc.sessions = doc.sessions.slice(-MAX_SESSIONS);
   doc.attempts = Math.max(doc.attempts || 0, Math.min(doc.sessions.length, MAX_SESSIONS));
@@ -118,7 +132,9 @@ const markOrdered = async (order: any) => {
  * the caller has already narrowed them for a manager.
  */
 const list = async (q: any = {}) => {
-  const filter: any = {};
+  // Only people who did not order: anyone who ordered (or paid) is not an
+  // incomplete order and never shows here (22 Oct 2026, the shop).
+  const filter: any = { status: 'open' };
   const range: any = {};
   if (q.from && !Number.isNaN(new Date(q.from).getTime())) range.$gte = new Date(q.from);
   if (q.to && !Number.isNaN(new Date(q.to).getTime())) range.$lt = new Date(q.to);
@@ -133,18 +149,16 @@ const list = async (q: any = {}) => {
     filter.$and = [{ $or: [{ name: re }, { email: re }, { collegeName: re }, { address: re }, { typedPhone: re }, ...(digits.length >= 3 ? [{ phone: new RegExp(escapeRegex(digits)) }] : [])] }];
   }
 
-  const counts = {
-    total: await IncompleteOrder.countDocuments(filter),
-    open: await IncompleteOrder.countDocuments({ ...filter, status: 'open' }),
-    ordered: await IncompleteOrder.countDocuments({ ...filter, status: 'ordered' }),
-    contacted: await IncompleteOrder.countDocuments({ ...filter, status: 'open', contacted: true }),
-  };
+  const [total, contacted, withPhone] = await Promise.all([
+    IncompleteOrder.countDocuments(filter),
+    IncompleteOrder.countDocuments({ ...filter, contacted: true }),
+    IncompleteOrder.countDocuments({ ...filter, phone: { $ne: null } }),
+  ]);
+  const counts = { total, contacted, todo: total - contacted, withPhone };
 
   const view: any = { ...filter };
-  if (q.status === 'open') Object.assign(view, { status: 'open' });
-  if (q.status === 'ordered') view.status = 'ordered';
-  if (q.status === 'todo') Object.assign(view, { status: 'open', contacted: false });
-  if (q.status === 'contacted') Object.assign(view, { status: 'open', contacted: true });
+  if (q.status === 'todo') view.contacted = false;
+  if (q.status === 'contacted') view.contacted = true;
 
   const rows = await IncompleteOrder.find(view)
     .select('-sessions')
@@ -152,7 +166,7 @@ const list = async (q: any = {}) => {
     .limit(1000)
     .populate('order', 'orderNumber orderSeq status')
     .lean();
-  const colleges = (await IncompleteOrder.distinct('collegeName', { collegeName: { $ne: '' } })).sort();
+  const colleges = (await IncompleteOrder.distinct('collegeName', { status: 'open', collegeName: { $ne: '' } })).sort();
   return { rows, counts, colleges };
 };
 
