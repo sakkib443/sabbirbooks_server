@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import crypto from 'crypto';
+import { deliveryOfExpr } from '../../utils/courierCost';
 import { isValidObjectId } from 'mongoose';
 import config from '../../config';
 import { Order } from './order.model';
@@ -448,7 +449,7 @@ const createOrder = async (
     const thisOrder = lines(items);
     const recent = await Order.find({
       'payment.method': 'cod',
-      status: { $ne: 'cancelled' },
+      status: { $nin: ['cancelled', 'returned'] },
       createdAt: { $gte: since },
       'shippingAddress.phone': { $regex: new RegExp(`${shipping.phone.slice(-10)}$`) },
     })
@@ -796,7 +797,12 @@ const getAllOrders = async (query?: {
 }): Promise<{ orders: IOrder[]; total: number; page: number; totalPages: number }> => {
   const { status, page = 1, limit = 20, from, to } = query || {};
   const filter: any = {};
-  if (status && status !== 'all') filter.status = status;
+  // "Paid" means the money arrived — such an order's status has long moved
+  // on (processing, shipped…), so it is the payment that is asked about.
+  if (status === 'paid') {
+    filter['payment.status'] = 'paid';
+    filter.status = { $nin: ['cancelled', 'returned'] };
+  } else if (status && status !== 'all') filter.status = status;
 
   // Which day the order belongs to: from (inclusive) up to `to` (exclusive), as
   // exact instants. The caller decides what a "day" is — the Book Orders screen
@@ -962,8 +968,10 @@ const updateOrderStatus = async (
       break;
     }
 
+    case 'returned':
     case 'cancelled': {
-      // Put reserved copies back, but only if we actually took them.
+      // Put reserved copies back, but only if we actually took them. A
+      // returned parcel's books are back in the shop too.
       if (order.stockAdjusted === true) {
         for (const item of order.items) {
           if (item.format === 'printed') {
@@ -976,8 +984,13 @@ const updateOrderStatus = async (
         }
         order.stockAdjusted = false;
       }
-      order.cancelledAt = now;
-      order.status = 'cancelled';
+      if (status === 'returned') {
+        order.returnedAt = now;
+        order.status = 'returned';
+      } else {
+        order.cancelledAt = now;
+        order.status = 'cancelled';
+      }
       if (order.payment.status !== 'paid') {
         order.payment.status = 'failed';
         order.markModified('payment');
@@ -1742,7 +1755,8 @@ const getBookOrderStats = async (opts?: {
   // is their fifteen days whatever the chart beside it is showing.
   const lifetime = opts?.scope ? { createdAt: dayWindow(opts.scope.fromDay, opts.scope.toDay) } : {};
 
-  const live = { status: { $ne: 'cancelled' } };
+  // A cancelled order, and a parcel the courier brought back, sold nothing.
+  const live = { status: { $nin: ['cancelled', 'returned'] } };
   // Money in hand: delivered, or already paid (which is every successful
   // online payment, and a COD order once it was handed over).
   const isEarned = { $or: [{ $eq: ['$status', 'delivered'] }, { $eq: ['$payment.status', 'paid'] }] };
@@ -1750,7 +1764,9 @@ const getBookOrderStats = async (opts?: {
   // the delivery charge, and the delivery charge is the courier's money passing
   // through — so every figure below is also kept with the delivery charge taken
   // out. Orders from before the field existed count as no delivery charge.
-  const deliveryOf = { $ifNull: ['$deliveryCharge', 0] };
+  // At least the courier's ৳120 per printed parcel, even when the buyer got
+  // delivery free (utils/courierCost).
+  const deliveryOf = deliveryOfExpr;
   // Copies, not lines: one line of three books is three books.
   const copiesOf = {
     $reduce: {

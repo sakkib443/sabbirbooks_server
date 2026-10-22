@@ -101,22 +101,24 @@ async function main() {
     check(t?.orders === 4, `4 live orders — the cancelled one is out (${t?.orders})`);
     check(t?.copies === 8, `8 books: 2 + (1 + 1) + 3 + 1 (${t?.copies})`);
     check(t?.value === 3795 && t?.earned === 2765 && t?.upcoming === 1030, 'with delivery: value 3795, earned 2765, upcoming 1030 — unchanged', t);
-    check(t?.delivery?.value === 250 && t?.delivery?.earned === 120 && t?.delivery?.upcoming === 130, 'delivery charge: 250 in all, 120 collected, 130 to come', t?.delivery);
-    check(t?.books?.value === 3545 && t?.books?.earned === 2645 && t?.books?.upcoming === 900, 'books alone: 3545 sold, 2645 earned, 900 to come', t?.books);
+    // At least ৳120 a printed parcel, free delivery or not (23 Oct 2026, utils/courierCost):
+    // A 120 + B (free) 120 + C 130 + E (no field) 120.
+    check(t?.delivery?.value === 490 && t?.delivery?.earned === 360 && t?.delivery?.upcoming === 130, 'delivery: 490 in all (৳120 floor), 360 collected, 130 to come', t?.delivery);
+    check(t?.books?.value === 3305 && t?.books?.earned === 2405 && t?.books?.upcoming === 900, 'books alone: 3305 sold, 2405 earned, 900 to come', t?.books);
   }
 
   console.log('\n── The date range, day by day ──');
   {
     const r = s?.range;
-    check(r?.copies === 8 && r?.books?.value === 3545 && r?.delivery?.value === 250, 'this month carries the same split', { copies: r?.copies, books: r?.books, delivery: r?.delivery });
+    check(r?.copies === 8 && r?.books?.value === 3305 && r?.delivery?.value === 490, 'this month carries the same split', { copies: r?.copies, books: r?.books, delivery: r?.delivery });
     const day = (r?.daily || []).find((d: any) => d.orders > 0);
-    check(!!day && day.copies === 8 && day.delivery === 250 && day.earnedDelivery === 120, "today's chart row has copies and delivery for the no-delivery line", day);
+    check(!!day && day.copies === 8 && day.delivery === 490 && day.earnedDelivery === 360, "today's chart row has copies and delivery for the no-delivery line", day);
   }
 
   console.log('\n── Breakdowns ──');
   {
     const cod = s?.byMethod?.cod;
-    check(cod?.orders === 3 && cod?.value === 2940 && cod?.delivery === 250 && cod?.copies === 6, 'by method: COD 3 orders, 2940 with 250 delivery, 6 books', cod);
+    check(cod?.orders === 3 && cod?.value === 2940 && cod?.delivery === 370 && cod?.copies === 6, 'by method: COD 3 orders, 2940 with 370 delivery, 6 books', cod);
     const cancelled = s?.byStatus?.cancelled;
     check(cancelled?.copies === 5 && cancelled?.delivery === 120, 'by status keeps the cancelled row, with its split', cancelled);
 
@@ -124,9 +126,9 @@ async function main() {
     const a = byBook.find((b: any) => b.title === 'MAGIC VIVA ANATOMY');
     const p = byBook.find((b: any) => b.title === 'MAGIC VIVA PHYSIOLOGY');
     // Anatomy: order A 1140 + B's share 855 × 650/950 = 585 + legacy 650 = 2375.
-    check(a?.copies === 4 && a?.orders === 3 && a?.sales === 2375, 'Anatomy: 4 copies in 3 orders, ৳2375 of book sales', a);
+    check(a?.copies === 4 && a?.orders === 3 && a?.sales === 2173, 'Anatomy: 4 copies in 3 orders, ৳2173 of book sales', a);
     // Physiology: B's share 855 × 300/950 = 270 + order C 900 = 1170.
-    check(p?.copies === 4 && p?.orders === 2 && p?.sales === 1170, 'Physiology: 4 copies in 2 orders, ৳1170', p);
+    check(p?.copies === 4 && p?.orders === 2 && p?.sales === 1132, 'Physiology: 4 copies in 2 orders, ৳1132', p);
     check(byBook.reduce((sum: number, b: any) => sum + b.sales, 0) === s?.range?.books?.value, 'the titles add up to the book sales');
     check(!byBook.some((b: any) => b.copies >= 9), 'the cancelled order adds no copies to a title');
   }

@@ -165,6 +165,8 @@ const orderSchema = new Schema<IOrder>(
     deliveryCharge: { type: Number, default: 0, min: 0 },
     total: { type: Number, required: true, min: 0 },
     payment: { type: orderPaymentSchema, required: true, default: () => ({ status: 'pending' }) },
+    // When the parcel came back (status 'returned').
+    returnedAt: { type: Date },
     status: {
       type: String,
       enum: [
@@ -175,6 +177,9 @@ const orderSchema = new Schema<IOrder>(
         'delivered',
         'access-granted',
         'cancelled',
+        // The courier brought the parcel back (22 Oct 2026). Set by itself when
+        // Steadfast reports the parcel cancelled/returned, or by an admin.
+        'returned',
       ],
       default: 'pending',
     },

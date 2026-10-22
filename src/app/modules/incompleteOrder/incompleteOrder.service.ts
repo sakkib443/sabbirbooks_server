@@ -35,6 +35,30 @@ const emailOf = (v: unknown): string => {
 
 const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+// Ordered this long after first typing, or on a later visit, it was a real
+// incomplete order that the shop got back: it stays listed, badged "ordered".
+const RECOVERED_AFTER_MS = 20 * 60 * 1000;
+
+/** The update that closes rows as ordered, deciding "recovered" per row. */
+const orderedUpdate = (set: Record<string, unknown>) => {
+  const now = new Date();
+  return [
+    {
+      $set: {
+        ...set,
+        status: 'ordered',
+        orderedAt: now,
+        recovered: {
+          $or: [
+            { $gt: ['$attempts', 1] },
+            { $gt: [{ $subtract: [now, { $ifNull: ['$firstSeenAt', now] }] }, RECOVERED_AFTER_MS] },
+          ],
+        },
+      },
+    },
+  ];
+};
+
 /** The checkout's autosave. Returns { saved } and never throws for an empty form. */
 const track = async (body: any) => {
   const sid = clean(body?.sessionId, 64);
@@ -46,7 +70,7 @@ const track = async (body: any) => {
   if (body?.done === true) {
     await IncompleteOrder.updateMany(
       { sessions: sid, status: 'open' },
-      { $set: { status: 'ordered', orderNumber: clean(body?.orderNumber, 40), orderedAt: new Date() } }
+      orderedUpdate({ orderNumber: clean(body?.orderNumber, 40) })
     );
     return { saved: false, done: true };
   }
@@ -120,7 +144,7 @@ const markOrdered = async (order: any) => {
     if (!or.length) return;
     await IncompleteOrder.updateMany(
       { $or: or, status: 'open' },
-      { $set: { status: 'ordered', order: order._id, orderNumber: order.orderNumber || '', orderedAt: new Date() } }
+      orderedUpdate({ order: order._id, orderNumber: order.orderNumber || '' })
     );
   } catch (e) {
     console.error('[incomplete-orders] could not mark ordered:', e);
@@ -132,33 +156,41 @@ const markOrdered = async (order: any) => {
  * the caller has already narrowed them for a manager.
  */
 const list = async (q: any = {}) => {
-  // Only people who did not order: anyone who ordered (or paid) is not an
-  // incomplete order and never shows here (22 Oct 2026, the shop).
-  const filter: any = { status: 'open' };
+  // Who is on the list: everyone who has not ordered, and those who ordered
+  // LATER (badged) — not a buyer who filled the form and ordered in one go
+  // (23 Oct 2026, the shop).
+  const listed = { $or: [{ status: 'open' }, { status: 'ordered', recovered: true }] };
+  const and: any[] = [listed];
   const range: any = {};
   if (q.from && !Number.isNaN(new Date(q.from).getTime())) range.$gte = new Date(q.from);
   if (q.to && !Number.isNaN(new Date(q.to).getTime())) range.$lt = new Date(q.to);
-  if (Object.keys(range).length) filter.lastSeenAt = range;
-  if (q.college) filter.collegeName = clean(q.college, 160);
-  if (q.contact === 'yes') filter.$or = [{ phone: { $ne: null } }, { email: { $ne: null } }];
-  if (q.contact === 'no') Object.assign(filter, { phone: null, email: null });
+  if (Object.keys(range).length) and.push({ lastSeenAt: range });
+  if (q.college) and.push({ collegeName: clean(q.college, 160) });
+  if (q.contact === 'yes') and.push({ $or: [{ phone: { $ne: null } }, { email: { $ne: null } }] });
+  if (q.contact === 'no') and.push({ phone: null, email: null });
   const search = clean(q.q, 80);
   if (search) {
     const re = new RegExp(escapeRegex(search), 'i');
     const digits = phone11(search) || search.replace(/\D/g, '');
-    filter.$and = [{ $or: [{ name: re }, { email: re }, { collegeName: re }, { address: re }, { typedPhone: re }, ...(digits.length >= 3 ? [{ phone: new RegExp(escapeRegex(digits)) }] : [])] }];
+    and.push({ $or: [{ name: re }, { email: re }, { collegeName: re }, { address: re }, { typedPhone: re }, ...(digits.length >= 3 ? [{ phone: new RegExp(escapeRegex(digits)) }] : [])] });
   }
+  const filter = { $and: and };
+  const open = { $and: [...and, { status: 'open' }] };
 
-  const [total, contacted, withPhone] = await Promise.all([
+  const [total, openCount, contacted, ordered, withPhone] = await Promise.all([
     IncompleteOrder.countDocuments(filter),
-    IncompleteOrder.countDocuments({ ...filter, contacted: true }),
-    IncompleteOrder.countDocuments({ ...filter, phone: { $ne: null } }),
+    IncompleteOrder.countDocuments(open),
+    IncompleteOrder.countDocuments({ $and: [...and, { status: 'open', contacted: true }] }),
+    IncompleteOrder.countDocuments({ $and: [...and, { status: 'ordered' }] }),
+    IncompleteOrder.countDocuments({ $and: [...and, { phone: { $ne: null } }] }),
   ]);
-  const counts = { total, contacted, todo: total - contacted, withPhone };
+  const counts = { total, open: openCount, contacted, todo: openCount - contacted, ordered, withPhone };
 
-  const view: any = { ...filter };
-  if (q.status === 'todo') view.contacted = false;
-  if (q.status === 'contacted') view.contacted = true;
+  const view: any = { $and: [...and] };
+  if (q.status === 'open') view.$and.push({ status: 'open' });
+  if (q.status === 'todo') view.$and.push({ status: 'open', contacted: false });
+  if (q.status === 'contacted') view.$and.push({ status: 'open', contacted: true });
+  if (q.status === 'ordered') view.$and.push({ status: 'ordered' });
 
   const rows = await IncompleteOrder.find(view)
     .select('-sessions')
@@ -166,7 +198,7 @@ const list = async (q: any = {}) => {
     .limit(1000)
     .populate('order', 'orderNumber orderSeq status')
     .lean();
-  const colleges = (await IncompleteOrder.distinct('collegeName', { status: 'open', collegeName: { $ne: '' } })).sort();
+  const colleges = (await IncompleteOrder.distinct('collegeName', { $and: [listed, { collegeName: { $ne: '' } }] })).sort();
   return { rows, counts, colleges };
 };
 

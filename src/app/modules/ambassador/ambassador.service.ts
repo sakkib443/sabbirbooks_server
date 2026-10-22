@@ -667,7 +667,7 @@ const earningsByCode = async (
     {
       $match: {
         couponCode: { $in: codes.map((c) => String(c).toUpperCase()) },
-        status: { $ne: 'cancelled' },
+        status: { $nin: ['cancelled', 'returned'] },
         $or: [{ status: 'delivered' }, { 'payment.status': 'paid' }],
         ...(Object.keys(createdAt).length ? { createdAt } : {}),
       },
@@ -729,7 +729,7 @@ const getById = async (id: string, range?: { from: string; to: string }) => {
         Order.find({
           couponCode: code,
           ...within,
-          status: { $ne: 'cancelled' },
+          status: { $nin: ['cancelled', 'returned'] },
           $or: [{ status: 'delivered' }, { 'payment.status': 'paid' }],
         })
           .select(ORDER_FIELDS)
@@ -740,7 +740,7 @@ const getById = async (id: string, range?: { from: string; to: string }) => {
           couponCode: code,
           ...within,
           $nor: [
-            { status: { $ne: 'cancelled' }, $or: [{ status: 'delivered' }, { 'payment.status': 'paid' }] },
+            { status: { $nin: ['cancelled', 'returned'] }, $or: [{ status: 'delivered' }, { 'payment.status': 'paid' }] },
           ],
         })
           .select(ORDER_FIELDS)

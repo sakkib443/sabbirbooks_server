@@ -29,7 +29,8 @@ export type TOrderStatus =
   | 'shipped'
   | 'delivered'
   | 'access-granted'
-  | 'cancelled';
+  | 'cancelled'
+  | 'returned';
 
 // Embedded payment record — mirrors enrollment's IPayment shape. `method` is
 // optional because an order is created pending, before the buyer picks a gateway.
@@ -162,6 +163,7 @@ export interface IOrder {
   total: number;
   payment: IOrderPayment;
   status: TOrderStatus;
+  returnedAt?: Date;
   // True when any line was a pre-order at checkout time. Snapshotted rather than
   // re-derived from the books, because the book stops being a pre-order the day
   // it is printed and this order's discount must still be explicable afterwards.

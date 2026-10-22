@@ -212,9 +212,10 @@ const sendOrders = async (ids: string[], userId?: string | null): Promise<SendRe
  *
  * Delivered (fully or partly) moves the order to delivered — on a COD order
  * that is also when the money is recorded as paid, exactly as the admin's
- * Delivered button does. A return is recorded but NOT turned into a
- * cancellation on its own: the books come back to the shop, and whether the
- * order is cancelled, re-sent or kept is the admin's call.
+ * Delivered button does. A parcel the courier has brought back (Steadfast's
+ * "cancelled") marks the order Returned and puts its books back in stock
+ * (22 Oct 2026, the shop asked for it). Still waiting on Steadfast's approval
+ * ("cancelled_approval_pending") it is only recorded.
  */
 const applyStatus = async (
   orderId: string,
@@ -252,6 +253,14 @@ const applyStatus = async (
       await OrderService.updateOrderStatus(String(order._id), 'delivered');
     } catch (e) {
       console.error('[courier] could not mark delivered:', order.orderNumber, e);
+    }
+  }
+
+  if (s === 'cancelled' && !['returned', 'cancelled', 'delivered'].includes(order.status)) {
+    try {
+      await OrderService.updateOrderStatus(String(order._id), 'returned');
+    } catch (e) {
+      console.error('[courier] could not mark returned:', order.orderNumber, e);
     }
   }
 };
@@ -303,7 +312,24 @@ const reconcileOrders = async () => {
       console.error('[courier] reconcile: could not mark shipped:', o.orderNumber, e);
     }
   }
-  return { delivered, shipped };
+  // Back to the shop: Steadfast's cancelled = returned to us.
+  const toReturn: any[] = await Order.find({
+    'courier.status': 'cancelled',
+    status: { $nin: ['returned', 'cancelled', 'delivered'] },
+  })
+    .select('_id orderNumber')
+    .limit(1000)
+    .lean();
+  let returned = 0;
+  for (const o of toReturn) {
+    try {
+      await OrderService.updateOrderStatus(String(o._id), 'returned');
+      returned++;
+    } catch (e) {
+      console.error('[courier] reconcile: could not mark returned:', o.orderNumber, e);
+    }
+  }
+  return { delivered, shipped, returned };
 };
 
 /** Ask the courier about parcels still on the way. */

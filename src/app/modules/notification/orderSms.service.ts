@@ -114,7 +114,7 @@ const shouldSend = (event: OrderSmsEvent, order: any, force = false): boolean =>
 
   // A cancelled order says nothing cheerful. If it was cancelled between the
   // trigger and here, stay quiet.
-  if (order?.status === 'cancelled') return false;
+  if (order?.status === 'cancelled' || order?.status === 'returned') return false;
 
   // No text once the book is delivered — whether the admin marks it or the
   // courier reports it (the shop's decision, 18 Oct 2026) — unless the admin

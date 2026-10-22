@@ -73,6 +73,7 @@ export interface ISiteSettings {
     // Dhaka split is retired; these two are kept only so old documents type.
     deliveryCharge: number;
     shopDayCutoffHour?: number;
+    ledgerDayStartHour?: number;
     /** Added for every printed copy after the first. See the model. */
     deliveryPerExtraBook: number;
     deliveryChargeInsideDhaka: number;

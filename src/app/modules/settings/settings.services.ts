@@ -23,6 +23,11 @@ const updateSettingsService = async (
         if (!Number.isInteger(h) || h < 0 || h > 23) throw new Error('The day cutoff must be an hour from 0 to 23');
         (payload as any).shopDayCutoffHour = h;
     }
+    if (payload && "ledgerDayStartHour" in payload) {
+        const h = Number((payload as any).ledgerDayStartHour);
+        if (!Number.isInteger(h) || h < 0 || h > 23) throw new Error("The accounts day must start at an hour from 0 to 23");
+        (payload as any).ledgerDayStartHour = h;
+    }
     let settings = await Settings.findOne({});
 
     // If no settings exist, create with payload
