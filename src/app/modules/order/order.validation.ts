@@ -48,6 +48,8 @@ export const createOrderValidationSchema = z.object({
     // neither falls back to the college on their profile.
     medicalCollege: z.string().optional(),
     medicalCollegeName: z.string().optional(),
+    // '24-25' style (24 Oct 2026); checked again in createOrder.
+    session: z.string().max(10).optional(),
   }),
 });
 
