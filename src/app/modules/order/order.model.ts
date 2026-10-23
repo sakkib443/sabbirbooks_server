@@ -136,6 +136,9 @@ const orderSchema = new Schema<IOrder>(
     // Not required: a guest order has no account. See IOrder.user.
     user: { type: Schema.Types.ObjectId, ref: 'User' },
     college: { type: orderCollegeSchema, required: false },
+    // The buyer's academic session, e.g. '24-25' (1st year) — picked at
+    // checkout (24 Oct 2026) and shown on every order screen.
+    session: { type: String, trim: true, default: '' },
     deliveryRule: { type: String, enum: ['digital', 'free-above', 'college', 'standard'] },
     accessKeyHash: { type: String, select: false },
     items: { type: [orderItemSchema], required: true, validate: (v: unknown[]) => v.length > 0 },

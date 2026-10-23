@@ -124,7 +124,7 @@ const dealFields = async (b: any, existing: any | null) => {
   if (!existing || has('contact')) {
     const c = b.contact || {};
     const name = clean(c.name);
-    if (!name) throw new Error('সিনিয়রের (বা যার কাছে যাবে তার) নাম লিখুন');
+    if (!name) throw new Error('CR-এর (বা যার কাছে যাবে তার) নাম লিখুন');
     const role = CONTACT_ROLES.includes(c.role) ? c.role : 'senior';
     out.contact = { name, phone: clean(c.phone), role };
   }
@@ -217,8 +217,8 @@ const placeOrder = async (id: string, opts: { sms?: boolean } = {}) => {
 
   const note = [
     `ক্যাম্পাস: ${d.collegeName}${d.batch ? ` (${d.batch})` : ''}`,
-    d.contact.role === 'senior' ? 'সিনিয়রের কাছে' : d.contact.role === 'student' ? 'সাধারণ স্টুডেন্টের কাছে' : '',
-    d.freeBooks ? `${d.freeBooks}টা ফ্রি বই (সিনিয়রের)` : '',
+    d.contact.role === 'senior' ? 'CR-এর কাছে' : d.contact.role === 'student' ? 'সাধারণ স্টুডেন্টের কাছে' : '',
+    d.freeBooks ? `${d.freeBooks}টা ফ্রি বই (CR-এর)` : '',
     d.extraDiscount ? `প্রতি বইয়ে ৳${d.extraDiscount} ছাড়` : '',
     d.freeDelivery ? 'ডেলিভারি ফ্রি' : '',
   ].filter(Boolean).join(' · ');

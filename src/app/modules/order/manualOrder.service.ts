@@ -46,6 +46,8 @@ export interface ManualOrderRow {
   payment?: string;
   status?: string;
   note?: string;
+  // Academic session, e.g. "24-25" (1st year).
+  session?: string;
 }
 
 export interface ManualRowResult {
@@ -247,6 +249,7 @@ const addOrders = async (
         ...(status === 'cancelled' ? { cancelledAt: placedAt } : {}),
         adminNote: [clean(r.note), opts.source === 'import' ? 'শিট থেকে যোগ করা' : opts.source === 'campus' ? 'ক্যাম্পাস অর্ডার' : 'হাতে যোগ করা'].filter(Boolean).join(' · '),
         source: opts.source || 'manual',
+        ...(/^\d{2}-\d{2}$/.test(clean(r.session)) ? { session: clean(r.session) } : {}),
         ...(ref ? { externalRef: ref } : {}),
         // Nothing is sent to these buyers — they did not order on the site.
         alertsSentAt: now,

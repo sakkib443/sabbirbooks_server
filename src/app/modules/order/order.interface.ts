@@ -164,6 +164,7 @@ export interface IOrder {
   payment: IOrderPayment;
   status: TOrderStatus;
   returnedAt?: Date;
+  session?: string;
   // True when any line was a pre-order at checkout time. Snapshotted rather than
   // re-derived from the books, because the book stops being a pre-order the day
   // it is printed and this order's discount must still be explicable afterwards.

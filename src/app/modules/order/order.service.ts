@@ -299,6 +299,9 @@ const getEnabledPaymentMethods = async (): Promise<{ cod: boolean; online: boole
 // `userId` is absent for a guest. Everything an order needs from a buyer — the
 // name, the numbers, the address, the college — arrives in the payload, so the
 // account is only a link for the buyer's own order list, never a requirement.
+/** An academic session as the checkout sends it: '24-25'. */
+const SESSION_RE = /^\d{2}-\d{2}$/;
+
 const createOrder = async (
   userId: string | undefined,
   payload: {
@@ -308,6 +311,7 @@ const createOrder = async (
     couponCode?: string;
     medicalCollege?: string;
     medicalCollegeName?: string;
+    session?: string;
   }
 ): Promise<IOrder> => {
   const items: IOrder['items'] = [];
@@ -584,6 +588,8 @@ const createOrder = async (
       upazila: college.upazila || '',
     },
     deliveryRule,
+    // '24-25' style only; anything else is dropped rather than refusing the order.
+    session: SESSION_RE.test(String(payload.session || '').trim()) ? String(payload.session).trim() : '',
     accessKeyHash: hashAccessKey(accessKey),
     subtotal,
     discount,
