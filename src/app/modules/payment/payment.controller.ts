@@ -546,22 +546,25 @@ const submitManualPayment = async (req: Request, res: Response) => {
     } = req.body;
     const paymentType = req.body.paymentType || req.body.bankName;
 
-    if (!courseId || !amount || !transactionId) {
+    if (!courseId || !transactionId) {
       return res.status(400).json({
         success: false,
-        message: 'courseId, amount, and transactionId are required',
+        message: 'courseId and transactionId are required',
       });
     }
+    // The price is the server's (25 Oct 2026): the amount, total and coupon the
+    // browser sends are ignored.
+    void amount; void totalFee; void couponDiscount;
+    const priced = await resolveCoursePrice(courseId, couponCode);
 
     const enrollment = await EnrollmentService.createEnrollment({
       studentId: user._id,
       courseId,
-      // partial checkout: student এখন `amount` দিচ্ছে, চূড়ান্ত মোট ফি = totalFee
-      customFee: totalFee ? Number(totalFee) : undefined,
-      couponCode: couponCode || undefined,
-      couponDiscount: couponDiscount != null ? Number(couponDiscount) : undefined,
+      customFee: priced.listPrice,
+      couponCode: priced.couponCode,
+      couponDiscount: priced.couponDiscount || undefined,
       payment: {
-        amount: Number(amount),
+        amount: priced.amount,
         method: 'manual',
         transactionId: transactionId,
       },

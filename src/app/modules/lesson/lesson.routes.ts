@@ -1,7 +1,7 @@
 import express from 'express';
 import { LessonController } from './lesson.controller';
 import { uploadFile, uploadVideo } from '../../config/cloudinary';
-import { authMiddleware, authorize, requireCapability } from '../../middlewares/auth';
+import { authMiddleware, authorize, requireCapability, optionalAuth } from '../../middlewares/auth';
 
 const router = express.Router();
 
@@ -22,9 +22,11 @@ const contentWrite = [
 const contentWriteDelete = [...contentWrite, requireCapability('records.delete')];
 
 // ── Public: Get lessons (limited info for non-enrolled) ─────
-router.get('/module/:moduleId', LessonController.getLessonsByModule);
-router.get('/course/:courseId', LessonController.getLessonsByCourse);
-router.get('/:id', LessonController.getSingleLesson);
+// optionalAuth: the list is public, the video and text only for staff, an
+// enrolled student, or a lesson marked free (lessonAccess.ts).
+router.get('/module/:moduleId', optionalAuth, LessonController.getLessonsByModule);
+router.get('/course/:courseId', optionalAuth, LessonController.getLessonsByCourse);
+router.get('/:id', optionalAuth, LessonController.getSingleLesson);
 
 // ── Admin/Mentor: Lesson CRUD ───────────────────────────────
 router.post(

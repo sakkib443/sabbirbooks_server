@@ -8,7 +8,7 @@ const courseModuleSchema = new Schema<ICourseModule>(
     titleBn: { type: String, trim: true },
     description: { type: String },
     order: { type: Number, required: true, default: 1 },
-    isPublished: { type: Boolean, default: false },
+    isPublished: { type: Boolean, default: true },
     isDeleted: { type: Boolean, default: false },
   },
   { timestamps: true }

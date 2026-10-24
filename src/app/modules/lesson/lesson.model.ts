@@ -31,7 +31,7 @@ const lessonSchema = new Schema<ILesson>(
     order: { type: Number, required: true, default: 1 },
     isFree: { type: Boolean, default: false },
     isLocked: { type: Boolean, default: true },
-    isPublished: { type: Boolean, default: false },
+    isPublished: { type: Boolean, default: true },
     isDeleted: { type: Boolean, default: false },
   },
   { timestamps: true }
