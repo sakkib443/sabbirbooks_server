@@ -61,11 +61,17 @@ async function main() {
   const pub = await api().get(`/api/lessons/course/${courseId}`);
   const lessons = pub.body?.data || [];
   check(lessons.length === 7, 'the public sees all 7 lesson titles', lessons.length);
-  const free = lessons.find((l: any) => l.isFree);
-  check(!!free?.videoUrl && free.locked === false, 'the free preview has its video');
-  check(lessons.filter((l: any) => !l.isFree).every((l: any) => !l.videoUrl && l.locked === true), 'the rest are locked, no video');
+  // The demo is paid with nothing free (the shop, 25 Oct 2026).
+  check(lessons.every((l: any) => !l.isFree && !l.videoUrl && l.locked === true), 'every class is locked — no free class, no video');
   const asStudent = (await api().get(`/api/lessons/course/${courseId}`).set(st.h)).body?.data || [];
-  check(asStudent.filter((l: any) => l.videoUrl).length === 1, 'a student who has not bought it: still only the preview');
+  check(asStudent.every((l: any) => !l.videoUrl), 'a student who has not bought it: nothing opens');
+  // The live demo first went in with a free class; the boot step takes it off.
+  const { Lesson } = await import('../app/modules/lesson/lesson.model');
+  const { makeDemoCoursePaidOnly } = await import('../app/modules/courses/demoCourse');
+  await Lesson.updateOne({ _id: lessons[0]._id }, { $set: { isFree: true, title: 'How this course works (free preview)' } });
+  check((await makeDemoCoursePaidOnly()) === 1, 'the paid-only fix takes the free mark off');
+  const fixed: any = await Lesson.findById(lessons[0]._id).lean();
+  check(fixed.isFree === false && fixed.title === 'How this course works', 'and the "free preview" words');
   const asAdmin = (await api().get(`/api/lessons/course/${courseId}`).set(A.h)).body?.data || [];
   check(asAdmin.every((l: any) => l.videoUrl), 'staff see every video');
   const one = await api().get(`/api/lessons/${lessons.find((l: any) => !l.isFree)._id}`);
