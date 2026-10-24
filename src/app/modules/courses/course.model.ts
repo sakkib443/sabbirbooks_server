@@ -7,6 +7,9 @@ import { ICourse } from './course.interface';
 const courseSchema = new Schema<ICourse>({
   id: { type: Number, required: true, unique: true },
   title: { type: String, required: true },
+  // Bengali copy (25 Oct 2026), like a module's and a lesson's titleBn: the
+  // site shows it in Bengali mode and `title` / `details` in English mode.
+  titleBn: { type: String, required: false },
   slug: { type: String, required: false },
 
   category: { type: Schema.Types.ObjectId, ref: 'Category', required: false },
@@ -32,11 +35,13 @@ const courseSchema = new Schema<ICourse>({
   lectures: { type: Number, required: false, default: 0 },
   totalExam: { type: Number, default: 0 },
   details: { type: String, required: false },
+  detailsBn: { type: String, required: false },
   courseOverview: { type: String, required: false },
   courseIncludes: [
     {
       icon: { type: String, required: false },
       text: { type: String, required: false },
+      textBn: { type: String, required: false },
     },
   ],
 }, { timestamps: true });

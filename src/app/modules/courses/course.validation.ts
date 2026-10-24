@@ -7,6 +7,8 @@ import { z } from "zod";
 const courseBodySchema = z.object({
   id: z.number().optional(),
   title: z.string().min(1, "Title is required"),
+  titleBn: z.string().optional(),
+  detailsBn: z.string().optional(),
   slug: z.string().optional(),
 
   // category / mentor — optional ObjectId references
@@ -36,6 +38,7 @@ const courseBodySchema = z.object({
       z.object({
         icon: z.string().optional(),
         text: z.string().optional(),
+        textBn: z.string().optional(),
       })
     )
     .optional(),

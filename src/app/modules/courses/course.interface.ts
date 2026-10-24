@@ -6,6 +6,7 @@ import { Types } from 'mongoose';
 export interface ICourse {
   id: number;
   title: string;
+  titleBn?: string;
   slug?: string;
 
   // শুধু category এর রেফারেন্স (ObjectId)
@@ -33,8 +34,9 @@ export interface ICourse {
   lectures?: number;
   totalExam?: number;
   details?: string;
+  detailsBn?: string;
   courseOverview?: string;
-  courseIncludes?: { icon: string; text: string }[];
+  courseIncludes?: { icon: string; text: string; textBn?: string }[];
 
   createdAt?: Date;
   updatedAt?: Date;

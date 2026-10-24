@@ -5,6 +5,9 @@
  * The Super Admin creates it with one button on All Courses; running it again
  * returns the same course instead of making a second.
  *
+ * Written in both languages: `title` / `details` / `text` are English, the
+ * `…Bn` fields Bengali — the site picks by the language switch.
+ *
  * The videos are public sample videos on YouTube; replace them with the
  * shop's own unlisted lesson videos from the course editor.
  */
@@ -23,25 +26,28 @@ const SAMPLE = {
 
 const MODULES = [
   {
-    title: 'শুরু করার আগে',
+    title: 'Before you start',
+    titleBn: 'শুরু করার আগে',
     lessons: [
-      { title: 'কোর্সটা কীভাবে সাজানো (ফ্রি প্রিভিউ)', videoUrl: SAMPLE.a, videoDuration: 300, isFree: true },
-      { title: 'ভাইভা বোর্ডে কী জিজ্ঞেস করে', videoUrl: SAMPLE.b, videoDuration: 600 },
+      { title: 'How this course works (free preview)', titleBn: 'কোর্সটা কীভাবে সাজানো (ফ্রি প্রিভিউ)', videoUrl: SAMPLE.a, videoDuration: 300, isFree: true },
+      { title: 'What the viva board asks', titleBn: 'ভাইভা বোর্ডে কী জিজ্ঞেস করে', videoUrl: SAMPLE.b, videoDuration: 600 },
     ],
   },
   {
-    title: 'Upper Limb — ভাইভা প্রস্তুতি',
+    title: 'Upper Limb — viva preparation',
+    titleBn: 'Upper Limb — ভাইভা প্রস্তুতি',
     lessons: [
-      { title: 'Brachial plexus — যে প্রশ্নগুলো আসবেই', videoUrl: SAMPLE.a, videoDuration: 720 },
-      { title: 'Shoulder joint — card-by-card রিভিশন', videoUrl: SAMPLE.b, videoDuration: 900 },
-      { title: 'Practical: Bones of upper limb', videoUrl: SAMPLE.a, videoDuration: 540 },
+      { title: 'Brachial plexus — the questions that always come', titleBn: 'Brachial plexus — যে প্রশ্নগুলো আসবেই', videoUrl: SAMPLE.a, videoDuration: 720 },
+      { title: 'Shoulder joint — card-by-card revision', titleBn: 'Shoulder joint — কার্ড ধরে ধরে রিভিশন', videoUrl: SAMPLE.b, videoDuration: 900 },
+      { title: 'Practical: Bones of the upper limb', titleBn: 'প্র্যাকটিক্যাল: Upper limb-এর হাড়', videoUrl: SAMPLE.a, videoDuration: 540 },
     ],
   },
   {
-    title: 'Thorax — ভাইভা প্রস্তুতি',
+    title: 'Thorax — viva preparation',
+    titleBn: 'Thorax — ভাইভা প্রস্তুতি',
     lessons: [
-      { title: 'Heart — surface marking ও প্রশ্ন', videoUrl: SAMPLE.b, videoDuration: 840 },
-      { title: 'Lungs ও pleura — দ্রুত রিভিশন', videoUrl: SAMPLE.a, videoDuration: 660 },
+      { title: 'Heart — surface marking and questions', titleBn: 'Heart — surface marking ও প্রশ্ন', videoUrl: SAMPLE.b, videoDuration: 840 },
+      { title: 'Lungs and pleura — quick revision', titleBn: 'Lungs ও pleura — দ্রুত রিভিশন', videoUrl: SAMPLE.a, videoDuration: 660 },
     ],
   },
 ];
@@ -52,7 +58,8 @@ export const createDemoCourse = async () => {
 
   const lessonCount = MODULES.reduce((n, m) => n + m.lessons.length, 0);
   const course: any = await CourseService.createCourseServices({
-    title: 'ডেমো: অ্যানাটমি ভাইভা — রেকর্ডেড কোর্স',
+    title: 'Demo: Anatomy Viva — Recorded Course',
+    titleBn: 'ডেমো: অ্যানাটমি ভাইভা — রেকর্ডেড কোর্স',
     slug: DEMO_COURSE_SLUG,
     type: 'Recorded',
     status: 'published',
@@ -60,20 +67,23 @@ export const createDemoCourse = async () => {
     offerPrice: '499',
     lectures: lessonCount,
     details:
+      'Recorded classes for the 1st Prof anatomy viva — watch any time, as often as you like. This is a demo course: the videos are samples, the real classes come later.',
+    detailsBn:
       '১ম প্রফের অ্যানাটমি ভাইভার জন্য রেকর্ড করা ক্লাস — যেকোনো সময়, যতবার খুশি দেখুন। এটি একটি ডেমো কোর্স: ভিডিওগুলো নমুনা, আসল ক্লাস পরে বসানো হবে।',
     courseIncludes: [
-      { icon: 'video', text: `${lessonCount}টি রেকর্ড করা ভিডিও` },
-      { icon: 'clock', text: 'যেকোনো সময় দেখা যায়' },
-      { icon: 'device', text: 'মোবাইল ও কম্পিউটারে' },
+      { icon: 'video', text: `${lessonCount} recorded classes`, textBn: `${lessonCount}টি রেকর্ড করা ক্লাস` },
+      { icon: 'clock', text: 'Watch any time', textBn: 'যেকোনো সময় দেখা যায়' },
+      { icon: 'device', text: 'On mobile and computer', textBn: 'মোবাইল ও কম্পিউটারে' },
     ],
   } as any);
 
   for (const m of MODULES) {
-    const mod: any = await CourseModuleService.createModule({ courseId: course._id, title: m.title, isPublished: true } as any);
+    const mod: any = await CourseModuleService.createModule({ courseId: course._id, title: m.title, titleBn: m.titleBn, isPublished: true } as any);
     for (const l of m.lessons) {
       await LessonService.createLesson({
         moduleId: mod._id,
         title: l.title,
+        titleBn: l.titleBn,
         type: 'video',
         videoUrl: l.videoUrl,
         videoDuration: l.videoDuration,
