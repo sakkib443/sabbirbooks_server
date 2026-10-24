@@ -79,6 +79,26 @@ async function startServer() {
     }
   }
 
+  // ─── The demo recorded course, once ─────────────────────────────
+  //
+  // The shop asked for a demo course in the live database (25 Oct 2026). Put
+  // in on the first boot that has this code and never again: the date in
+  // Settings remembers it, so deleting the demo later keeps it deleted.
+  if (dbReady) {
+    try {
+      const { Settings } = await import('./app/modules/settings/settings.model');
+      const s: any = await Settings.findOne({}).select('demoCourseSeededAt').lean();
+      if (!s?.demoCourseSeededAt) {
+        const { createDemoCourse } = await import('./app/modules/courses/demoCourse');
+        const { created } = await createDemoCourse();
+        await Settings.updateOne({}, { $set: { demoCourseSeededAt: new Date() } }, { upsert: true });
+        if (created) console.log('🎬 Demo recorded course added.');
+      }
+    } catch (error) {
+      console.error('⚠️  Demo course step failed (server still starting):', error);
+    }
+  }
+
   // ─── Seed the medical-college directory, once ──────────────────
   //
   // Students pick their college from this list at signup, so it has to exist

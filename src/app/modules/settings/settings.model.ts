@@ -180,6 +180,9 @@ const settingsSchema = new Schema<ISiteSettings>(
         // marketing line and the catalogue description should differ.
         landingHeadline: { type: String, default: '' },
         landingSubheadline: { type: String, default: '' },
+        // When the demo recorded course was put in (25 Oct 2026, server.ts) —
+        // set once, so a demo the shop deletes is not brought back by a deploy.
+        demoCourseSeededAt: { type: Date },
     },
     { timestamps: true }
 );

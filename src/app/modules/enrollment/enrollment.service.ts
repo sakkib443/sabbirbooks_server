@@ -249,7 +249,7 @@ const getAllEnrollments = async (query: {
   const total = await Enrollment.countDocuments(filter);
   const enrollments = await Enrollment.find(filter)
     .populate('studentId', 'firstName lastName name email phoneNumber location gender')
-    .populate('courseId', 'title image slug fee offerPrice type')
+    .populate('courseId', 'title titleBn image slug fee offerPrice type')
     .populate('batchId', 'name id')
     .sort({ createdAt: -1 })
     .skip((page - 1) * limit)
@@ -376,7 +376,7 @@ const approveEnrollment = async (enrollmentId: string) => {
 // ─── Get Student Payment History ────────────────────────────
 const getStudentPayments = async (studentId: string) => {
   const enrollments = await Enrollment.find({ studentId, isDeleted: false })
-    .populate('courseId', 'title image slug fee type')
+    .populate('courseId', 'title titleBn image slug fee type')
     .sort({ createdAt: -1 });
 
   // Also fetch installments
