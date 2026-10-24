@@ -99,6 +99,26 @@ async function startServer() {
     }
   }
 
+  // ─── The demo course is paid: no free class ─────────────────────
+  //
+  // Its first class was a free preview; the shop wants nothing free (25 Oct
+  // 2026). Once, remembered in Settings, so a class the shop marks free later
+  // in the editor stays free.
+  if (dbReady) {
+    try {
+      const { Settings } = await import('./app/modules/settings/settings.model');
+      const s: any = await Settings.findOne({}).select('demoCoursePaidOnlyAt').lean();
+      if (!s?.demoCoursePaidOnlyAt) {
+        const { makeDemoCoursePaidOnly } = await import('./app/modules/courses/demoCourse');
+        const n = await makeDemoCoursePaidOnly();
+        await Settings.updateOne({}, { $set: { demoCoursePaidOnlyAt: new Date() } }, { upsert: true });
+        if (n) console.log(`🔒 Demo course: ${n} free class(es) now paid.`);
+      }
+    } catch (error) {
+      console.error('⚠️  Demo course paid-only step failed (server still starting):', error);
+    }
+  }
+
   // ─── Seed the medical-college directory, once ──────────────────
   //
   // Students pick their college from this list at signup, so it has to exist

@@ -112,6 +112,7 @@ export interface ISiteSettings {
     landingSubheadline: string;
     /** Set once when the demo recorded course was put in (server.ts). */
     demoCourseSeededAt?: Date;
+    demoCoursePaidOnlyAt?: Date;
 
     createdAt?: Date;
     updatedAt?: Date;
