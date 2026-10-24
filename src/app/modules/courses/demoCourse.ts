@@ -8,6 +8,9 @@
  * Written in both languages: `title` / `details` / `text` are English, the
  * `…Bn` fields Bengali — the site picks by the language switch.
  *
+ * Paid, with no free class (the shop, 25 Oct 2026): every class opens only
+ * after the order is approved.
+ *
  * The videos are public sample videos on YouTube; replace them with the
  * shop's own unlisted lesson videos from the course editor.
  */
@@ -15,6 +18,7 @@ import { Course } from './course.model';
 import { CourseService } from './course.services';
 import { CourseModuleService } from '../courseModule/courseModule.service';
 import { LessonService } from '../lesson/lesson.service';
+import { Lesson } from '../lesson/lesson.model';
 
 export const DEMO_COURSE_SLUG = 'demo-anatomy-viva-recorded';
 
@@ -29,7 +33,7 @@ const MODULES = [
     title: 'Before you start',
     titleBn: 'শুরু করার আগে',
     lessons: [
-      { title: 'How this course works (free preview)', titleBn: 'কোর্সটা কীভাবে সাজানো (ফ্রি প্রিভিউ)', videoUrl: SAMPLE.a, videoDuration: 300, isFree: true },
+      { title: 'How this course works', titleBn: 'কোর্সটা কীভাবে সাজানো', videoUrl: SAMPLE.a, videoDuration: 300 },
       { title: 'What the viva board asks', titleBn: 'ভাইভা বোর্ডে কী জিজ্ঞেস করে', videoUrl: SAMPLE.b, videoDuration: 600 },
     ],
   },
@@ -51,6 +55,22 @@ const MODULES = [
     ],
   },
 ];
+
+/**
+ * The demo first went in with its first class free to watch; the shop wants
+ * every class paid. Takes the free mark (and the "free preview" words) off the
+ * demo's classes. Safe to run again.
+ */
+export const makeDemoCoursePaidOnly = async (): Promise<number> => {
+  const course: any = await Course.findOne({ slug: DEMO_COURSE_SLUG }).select('_id').lean();
+  if (!course) return 0;
+  const r = await Lesson.updateMany({ courseId: course._id, isFree: true }, { $set: { isFree: false } });
+  await Lesson.updateMany(
+    { courseId: course._id, title: 'How this course works (free preview)' },
+    { $set: { title: 'How this course works', titleBn: 'কোর্সটা কীভাবে সাজানো' } }
+  );
+  return r.modifiedCount;
+};
 
 export const createDemoCourse = async () => {
   const existing: any = await Course.findOne({ slug: DEMO_COURSE_SLUG }).lean();
@@ -87,7 +107,7 @@ export const createDemoCourse = async () => {
         type: 'video',
         videoUrl: l.videoUrl,
         videoDuration: l.videoDuration,
-        isFree: !!(l as any).isFree,
+        isFree: false,
         isPublished: true,
       } as any);
     }

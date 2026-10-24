@@ -1,13 +1,13 @@
 {
   "name": "sabbir-book-server",
   "version": "1.0.0",
-  "description": "Sabbir Book — medical course + book platform server",
+  "description": "Sabbir Book \u2014 medical course + book platform server",
   "main": "dist/server.js",
   "scripts": {
-    "start": "node ./dist/server.js",
+    "start": "node api.js && node ./dist/server.js",
     "start:prod": "node ./dist/server.js",
     "start:dev": "ts-node-dev --respawn --transpile-only src/server.ts",
-    "build": "tsc",
+    "build": "node api.js && tsc",
     "lint": "eslint src --ignore-path .eslintignore --ext .ts",
     "lint:fix": "npx eslint src --fix",
     "prettier": "prettier --ignore-path .gitignore --write \"./src/**/*.+(js|ts|json)\"",
