@@ -183,6 +183,8 @@ const settingsSchema = new Schema<ISiteSettings>(
         // When the demo recorded course was put in (25 Oct 2026, server.ts) —
         // set once, so a demo the shop deletes is not brought back by a deploy.
         demoCourseSeededAt: { type: Date },
+        // When the demo course's free class was made paid (server.ts), once.
+        demoCoursePaidOnlyAt: { type: Date },
     },
     { timestamps: true }
 );
