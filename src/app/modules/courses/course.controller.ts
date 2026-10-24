@@ -16,7 +16,10 @@ export const createCourseController = async (req: Request, res: Response) => {
 // GET All Courses (supports ?search=&category=&type=&sort=&page=&limit=&status=)
 export const getAllCoursesController = async (req: Request, res: Response) => {
   try {
-    const { search, category, type, sort, page, limit, status } = req.query;
+    const { search, category, type, sort, page, limit } = req.query;
+    const role = String((req as any).user?.role || '');
+    const staff = ['superAdmin', 'admin', 'manager', 'contentManager', 'trainingManager', 'mentor'].includes(role);
+    const status = staff ? req.query.status : undefined;
     const result = await CourseService.getAllCoursesServices({
       search: search as string,
       category: category as string,
@@ -39,6 +42,11 @@ export const getSingleCourseController = async (req: Request, res: Response) => 
     const { id } = req.params; // Number() করা যাবে না, কারণ এটি মঙ্গোডিবি ObjectId
     const course = await CourseService.getSingleCourseServices(id);
     if (!course) return res.status(404).json({ success: false, message: "Course not found" });
+    const role = String((req as any).user?.role || '');
+    const staff = ['superAdmin', 'admin', 'manager', 'contentManager', 'trainingManager', 'mentor'].includes(role);
+    if (!staff && (course as any).status && (course as any).status !== 'published') {
+      return res.status(404).json({ success: false, message: "Course not found" });
+    }
     res.status(200).json({ success: true, data: course });
   } catch (error: any) {
     res.status(500).json({ success: false, message: error.message });

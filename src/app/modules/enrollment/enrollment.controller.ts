@@ -32,7 +32,10 @@ const createEnrollment = async (req: Request, res: Response) => {
 const verifyPayment = async (req: Request, res: Response) => {
   try {
     const { enrollmentId, transactionId } = req.body;
-    const result = await EnrollmentService.verifyPayment(enrollmentId, transactionId);
+    // A student can only settle their own enrollment; staff any.
+    const user = (req as any).user;
+    const staff = ['superAdmin', 'admin', 'manager', 'trainingManager'].includes(String(user?.role || ''));
+    const result = await EnrollmentService.verifyPayment(enrollmentId, transactionId, staff ? undefined : String(user?._id));
 
     res.status(200).json({
       success: true,
@@ -71,7 +74,9 @@ const checkAccess = async (req: Request, res: Response) => {
   try {
     const user = (req as any).user;
     const { courseId } = req.params;
-    const result = await EnrollmentService.checkAccess(user._id, courseId);
+    // Staff can open any course (to build and check it).
+    const staff = ['superAdmin', 'admin', 'manager', 'contentManager', 'trainingManager', 'mentor'].includes(String(user?.role || ''));
+    const result = staff ? { hasAccess: true, staff: true } : await EnrollmentService.checkAccess(user._id, courseId);
 
     res.status(200).json({
       success: true,

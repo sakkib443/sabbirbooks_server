@@ -3,6 +3,7 @@ import { Enrollment } from './enrollment.model';
 import { Course } from '../courses/course.model';
 import { User } from '../user/user.model';
 import { NotificationService } from '../notification/notification.service';
+import { effectiveCoursePrice } from '../payment/coursePricing';
 // Money-receipt emails are switched OFF here deliberately — the email service
 // exists and works (notification/email.service.ts, demo-logs until SMTP is
 // configured); the call-site at approveEnrollment is left commented pending a
@@ -26,6 +27,14 @@ const createEnrollment = async (payload: {
     transactionId?: string;
   };
 }) => {
+  // "Free" is only true of a course whose price is 0 — otherwise any student
+  // could take any paid course by calling the free route (25 Oct 2026).
+  if (payload.payment.method === 'free') {
+    const c: any = await Course.findById(payload.courseId).select('fee offerPrice').lean();
+    if (!c) throw new Error('Course not found');
+    if (effectiveCoursePrice(c) > 0) throw new Error('This course is not free');
+  }
+
   // Check if already enrolled (include soft-deleted so we revive it, not create a duplicate)
   const existing = await Enrollment.findOne({
     studentId: payload.studentId,
@@ -65,7 +74,7 @@ const createEnrollment = async (payload: {
 
   // If there's an existing cancelled/expired enrollment, update it
   if (existing) {
-    existing.status = 'pending';
+    existing.status = payload.payment.method === 'free' ? 'active' : 'pending';
     existing.isDeleted = false;   // revive if it was soft-deleted
     existing.payment = {
       ...payload.payment,
@@ -215,7 +224,12 @@ const checkAccess = async (studentId: string, courseId: string) => {
     status: 'active',
     isDeleted: false,
   });
-  return { hasAccess: !!enrollment, enrollment };
+  // An order waiting for the admin — the course page says so instead of
+  // offering to buy again.
+  const pending = enrollment
+    ? false
+    : !!(await Enrollment.exists({ studentId, courseId, status: 'pending', isDeleted: false }));
+  return { hasAccess: !!enrollment, pending, enrollment };
 };
 
 // ─── Get All Enrollments (Admin) ────────────────────────────
