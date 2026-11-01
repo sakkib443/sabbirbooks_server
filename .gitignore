@@ -1,7 +1,10 @@
 node_modules
 dist
-.env
 .vercel
 
 # Locally-uploaded files (class materials / recordings) — not versioned
 uploads/
+branch_structure.json
+temp_auto_push.bat
+temp_interactive_push.bat
+config.bat
