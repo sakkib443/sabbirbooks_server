@@ -25,6 +25,18 @@ import {
   SteadfastParcel,
   trackingPage,
 } from './steadfast.client';
+import { createOrder as pathaoCreate, mapPathaoStatus, pathaoConfigured, pathaoPing, pathaoStatus } from './pathao.client';
+
+export type CourierProvider = 'steadfast' | 'pathao';
+export const COURIER_NAME: Record<CourierProvider, string> = { steadfast: 'Steadfast', pathao: 'Pathao' };
+
+/** "order.in-transit" / "In_Transit" → "In Transit", for the parcel's timeline. */
+const pathaoLabel = (raw: string) =>
+  String(raw || '')
+    .replace(/^order\./, '')
+    .replace(/[-_]+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
 
 // ─── Status groups ──────────────────────────────────────────
 
@@ -101,7 +113,9 @@ export interface SendResult {
 }
 
 /**
- * Hand orders to Steadfast in one bulk request (chunks of 500).
+ * Hand orders to the courier: Steadfast in one bulk request (chunks of 500),
+ * Pathao one parcel at a time (three at once) — its bulk call does not hand
+ * back consignment ids.
  *
  * Each order is checked first and refused with a reason rather than sent with
  * bad data: no phone, already sent, cancelled, digital. A parcel the courier
@@ -109,7 +123,9 @@ export interface SendResult {
  * the same path as the admin's Shipped button — so the buyer gets the shipped
  * SMS carrying the courier's tracking link.
  */
-const sendOrders = async (ids: string[], userId?: string | null): Promise<SendResult[]> => {
+const sendOrders = async (ids: string[], userId?: string | null, provider: CourierProvider = 'steadfast'): Promise<SendResult[]> => {
+  if (provider === 'pathao' && !pathaoConfigured()) throw new Error('Pathao is not set up yet (credentials missing on the server)');
+  if (provider === 'steadfast' && !steadfastConfigured()) throw new Error('Steadfast is not set up (API key missing)');
   const valid = ids.filter((id) => Types.ObjectId.isValid(id));
   const orders: any[] = await Order.find({ _id: { $in: valid } }).lean();
   const results: SendResult[] = [];
@@ -147,6 +163,49 @@ const sendOrders = async (ids: string[], userId?: string | null): Promise<SendRe
     });
   }
 
+  if (provider === 'pathao') {
+    for (let i = 0; i < parcels.length; i += 3) {
+      await Promise.all(
+        parcels.slice(i, i + 3).map(async ({ order: o, parcel }) => {
+          const base = { orderId: String(o._id), orderNumber: o.orderNumber };
+          const a = o.shippingAddress || {};
+          let address = parcel.recipient_address;
+          if (address.length < 10) address = clip([address, a.district, 'Bangladesh'].filter(Boolean).join(', '), 220);
+          const qty = (o.items || []).reduce((n: number, it: any) => n + (Number(it.quantity) || 1), 0) || 1;
+          try {
+            const r = await pathaoCreate({
+              merchant_order_id: o.orderNumber,
+              recipient_name: parcel.recipient_name.length >= 3 ? parcel.recipient_name : `${parcel.recipient_name} (Customer)`,
+              recipient_phone: parcel.recipient_phone,
+              ...(parcel.alternative_phone ? { recipient_secondary_phone: parcel.alternative_phone } : {}),
+              recipient_address: clip(address, 220),
+              amount_to_collect: parcel.cod_amount,
+              item_quantity: qty,
+              // About half a kilo a book; Pathao takes 0.5–10 kg.
+              item_weight: Math.min(10, Math.max(0.5, qty * 0.5)),
+              item_description: parcel.item_description,
+              ...(parcel.note ? { special_instruction: parcel.note } : {}),
+              district: a.district,
+              upazila: a.upazila || a.city,
+            });
+            await stampSent(o, 'pathao', {
+              consignmentId: r.consignmentId,
+              trackingCode: r.consignmentId,
+              codAmount: parcel.cod_amount,
+              deliveryCharge: r.deliveryFee,
+              providerStatus: r.status,
+              userId,
+            });
+            results.push({ ...base, ok: true, consignmentId: r.consignmentId, trackingCode: r.consignmentId });
+          } catch (e: any) {
+            results.push({ ...base, ok: false, error: e?.message || 'Pathao did not accept this parcel' });
+          }
+        })
+      );
+    }
+    return results;
+  }
+
   for (let i = 0; i < parcels.length; i += 500) {
     const chunk = parcels.slice(i, i + 500);
     let rows;
@@ -166,43 +225,90 @@ const sendOrders = async (ids: string[], userId?: string | null): Promise<SendRe
       }
       const consignmentId = String(r.consignment_id);
       const trackingCode = String(r.tracking_code || '');
-      const now = new Date();
-      await Order.updateOne(
-        { _id: c.order._id },
-        {
-          $set: {
-            courier: {
-              provider: 'steadfast',
-              consignmentId,
-              trackingCode,
-              status: 'in_review',
-              statusUpdatedAt: now,
-              lastMessage: '',
-              codAmount: c.parcel.cod_amount,
-              collectedAmount: 0,
-              deliveryCharge: null,
-              sentAt: now,
-              sentBy: userId && Types.ObjectId.isValid(userId) ? userId : undefined,
-              paymentId: null,
-              paidOutAt: null,
-              history: [{ status: 'in_review', message: 'পার্সেল Steadfast কুরিয়ারে দেওয়া হয়েছে', at: now }],
-            },
-            courierName: 'Steadfast',
-            trackingCode,
-            ...(trackingCode ? { trackingUrl: trackingPage(trackingCode) } : {}),
-          },
-        }
-      );
-      // Stamps shippedAt, takes stock if not yet taken, sends the shipped SMS.
-      try {
-        await OrderService.updateOrderStatus(String(c.order._id), 'shipped');
-      } catch (e) {
-        console.error('[courier] sent, but could not mark shipped:', c.order.orderNumber, e);
-      }
+      await stampSent(c.order, 'steadfast', { consignmentId, trackingCode, codAmount: c.parcel.cod_amount, userId });
       results.push({ ...base, ok: true, consignmentId, trackingCode });
     }
   }
   return results;
+};
+
+/**
+ * A parcel the courier accepted: stamped on the order, and the order moves to
+ * "shipped" through the same path as the admin's Shipped button — so the buyer
+ * gets the shipped SMS carrying the tracking link (our own /t/CODE page).
+ */
+const stampSent = async (
+  order: any,
+  provider: CourierProvider,
+  p: { consignmentId: string; trackingCode: string; codAmount: number; deliveryCharge?: number | null; providerStatus?: string; userId?: string | null }
+) => {
+  const now = new Date();
+  const name = COURIER_NAME[provider];
+  await Order.updateOne(
+    { _id: order._id },
+    {
+      $set: {
+        courier: {
+          provider,
+          consignmentId: p.consignmentId,
+          trackingCode: p.trackingCode,
+          status: 'in_review',
+          providerStatus: p.providerStatus || '',
+          statusUpdatedAt: now,
+          lastMessage: '',
+          codAmount: p.codAmount,
+          collectedAmount: 0,
+          deliveryCharge: p.deliveryCharge ?? null,
+          sentAt: now,
+          sentBy: p.userId && Types.ObjectId.isValid(p.userId) ? p.userId : undefined,
+          paymentId: null,
+          paidOutAt: null,
+          history: [{ status: 'in_review', message: `পার্সেল ${name} কুরিয়ারে দেওয়া হয়েছে`, at: now }],
+        },
+        courierName: name,
+        trackingCode: p.trackingCode,
+        ...(p.trackingCode ? { trackingUrl: trackingPage(p.trackingCode) } : {}),
+      },
+    }
+  );
+  // Stamps shippedAt, takes stock if not yet taken, sends the shipped SMS.
+  try {
+    await OrderService.updateOrderStatus(String(order._id), 'shipped');
+  } catch (e) {
+    console.error('[courier] sent, but could not mark shipped:', order.orderNumber, e);
+  }
+};
+
+/**
+ * Where a parcel is, asked of its own courier, in the shared words
+ * (Steadfast's). `label` is Pathao's own word, for the timeline.
+ */
+const askCourier = async (c: any): Promise<{ status: string; label: string }> => {
+  if (c?.provider === 'pathao') {
+    const label = pathaoLabel(await pathaoStatus(String(c.consignmentId)));
+    return { status: mapPathaoStatus(label), label };
+  }
+  return { status: await statusByConsignment(String(c.consignmentId)), label: '' };
+};
+
+const providerReady = (c: any) => (c?.provider === 'pathao' ? pathaoConfigured() : steadfastConfigured());
+
+/**
+ * Record what the courier said. Pathao has many more steps than our groups
+ * ("At the Sorting HUB", "Assigned for Delivery"…): each new one goes on the
+ * timeline even when the group stays the same.
+ */
+const recordAnswer = async (o: any, ans: { status: string; label: string }, extra: { collected?: number; charge?: number } = {}) => {
+  const c = o.courier || {};
+  const status = ans.status || c.status;
+  const labelChanged = Boolean(ans.label) && ans.label !== String(c.providerStatus || '');
+  if (status !== c.status || labelChanged || extra.collected != null || extra.charge != null) {
+    if (labelChanged) await Order.updateOne({ _id: o._id }, { $set: { 'courier.providerStatus': ans.label } });
+    await applyStatus(String(o._id), status, { ...extra, ...(labelChanged ? { message: `${COURIER_NAME.pathao}: ${ans.label}` } : {}) });
+    return true;
+  }
+  await Order.updateOne({ _id: o._id }, { $set: { 'courier.statusUpdatedAt': new Date() } });
+  return false;
 };
 
 // ─── Status ─────────────────────────────────────────────────
@@ -353,14 +459,10 @@ const syncStatuses = async (opts: { ids?: string[]; limit?: number } = {}) => {
     await Promise.all(
       orders.slice(i, i + 5).map(async (o) => {
         try {
-          const st = await statusByConsignment(o.courier.consignmentId);
+          if (!providerReady(o.courier)) return;
+          const ans = await askCourier(o.courier);
           checked++;
-          if (st && st !== o.courier.status) {
-            await applyStatus(String(o._id), st);
-            changed++;
-          } else {
-            await Order.updateOne({ _id: o._id }, { $set: { 'courier.statusUpdatedAt': new Date() } });
-          }
+          if (await recordAnswer(o, ans)) changed++;
         } catch {
           failed++;
         }
@@ -399,6 +501,38 @@ const handleWebhook = async (payload: any) => {
     collected: payload?.cod_amount != null ? Number(payload.cod_amount) : undefined,
     charge: payload?.delivery_charge != null ? Number(payload.delivery_charge) : undefined,
     message: payload?.tracking_message ? String(payload.tracking_message) : undefined,
+  });
+  return { found: true };
+};
+
+/**
+ * Pathao's webhook: one event about one parcel ("order.in-transit",
+ * "order.delivered", "order.returned", "order.paid"…), by consignment id or
+ * our order number. Unknown parcels are ignored.
+ */
+const handlePathaoWebhook = async (payload: any) => {
+  const cid = String(payload?.consignment_id || '');
+  const ref = String(payload?.merchant_order_id || '');
+  if (!cid && !ref) return { found: false };
+  const order: any = await Order.findOne(
+    cid ? { 'courier.provider': 'pathao', 'courier.consignmentId': cid } : { orderNumber: ref, 'courier.provider': 'pathao' }
+  )
+    .select('_id orderNumber courier')
+    .lean();
+  if (!order) return { found: false };
+  const word = String(payload?.order_status || payload?.event || '');
+  const event = String(payload?.event || '').toLowerCase();
+  // A payout: the parcel's money has reached the shop.
+  if (event === 'order.paid' || /payment invoice/i.test(word)) {
+    await Order.updateOne(
+      { _id: order._id },
+      { $set: { 'courier.paymentId': String(payload?.invoice_id || payload?.payment_id || `pathao-${cid || ref}`), 'courier.paidOutAt': new Date() } }
+    );
+  }
+  const label = pathaoLabel(word);
+  await recordAnswer(order, { status: mapPathaoStatus(word), label }, {
+    collected: payload?.collected_amount != null ? Number(payload.collected_amount) : undefined,
+    charge: payload?.delivery_fee != null ? Number(payload.delivery_fee) : undefined,
   });
   return { found: true };
 };
@@ -723,12 +857,21 @@ const listPaymentsLocal = async (q: { from?: string; to?: string }) => {
 // The balance is money, so only the Super Admin is told it; everyone else
 // still learns whether the connection works.
 const status = async (withBalance = false) => {
-  if (!steadfastConfigured()) return { configured: false, balance: null, error: null };
+  // Pathao: does the login work? (No balance call in its merchant API.)
+  let pathao: { configured: boolean; error: string | null } = { configured: pathaoConfigured(), error: null };
+  if (pathao.configured) {
+    try {
+      await pathaoPing();
+    } catch (e: any) {
+      pathao = { configured: true, error: e.message };
+    }
+  }
+  if (!steadfastConfigured()) return { configured: false, balance: null, error: null, pathao };
   try {
     const balance = await getBalance();
-    return { configured: true, balance: withBalance ? balance : null, error: null };
+    return { configured: true, balance: withBalance ? balance : null, error: null, pathao };
   } catch (e: any) {
-    return { configured: true, balance: null, error: e.message };
+    return { configured: true, balance: null, error: e.message, pathao };
   }
 };
 
@@ -754,18 +897,16 @@ const publicTrack = async (code: string) => {
   if (!/^[A-Za-z0-9_-]{4,64}$/.test(trackingCode)) return null;
   const find = () =>
     Order.findOne({ 'courier.trackingCode': trackingCode })
-      .select('orderSeq orderNumber status items.title items.quantity courier.status courier.statusUpdatedAt courier.lastMessage courier.sentAt courier.consignmentId courier.trackingCode courier.history createdAt')
+      .select('orderSeq orderNumber status items.title items.quantity courier.provider courier.status courier.providerStatus courier.statusUpdatedAt courier.lastMessage courier.sentAt courier.consignmentId courier.trackingCode courier.history createdAt')
       .lean();
   let order: any = await find();
   if (!order) return null;
 
   const c = order.courier || {};
   const stale = !c.statusUpdatedAt || Date.now() - new Date(c.statusUpdatedAt).getTime() > 5 * 60_000;
-  if (stale && !FINAL.has(String(c.status)) && c.consignmentId && steadfastConfigured()) {
+  if (stale && !FINAL.has(String(c.status)) && c.consignmentId && providerReady(c)) {
     try {
-      const s = await statusByConsignment(String(c.consignmentId));
-      if (s) await applyStatus(String(order._id), s);
-      else await Order.updateOne({ _id: order._id }, { $set: { 'courier.statusUpdatedAt': new Date() } });
+      await recordAnswer(order, await askCourier(c));
       order = (await find()) || order;
     } catch (e) {
       console.error('[courier] tracking refresh failed:', (e as Error)?.message);
@@ -787,6 +928,8 @@ const publicTrack = async (code: string) => {
     items: (order.items || []).map((i: any) => ({ title: i.title, quantity: i.quantity })),
     orderedAt: order.createdAt,
     courier: {
+      provider: oc.provider || 'steadfast',
+      name: COURIER_NAME[(oc.provider as CourierProvider) || 'steadfast'] || 'Steadfast',
       status: oc.status || 'in_review',
       group: groupOf(oc.status),
       updatedAt: oc.statusUpdatedAt || null,
@@ -806,6 +949,7 @@ export const CourierService = {
   sendOrders,
   syncStatuses,
   handleWebhook,
+  handlePathaoWebhook,
   syncPayments,
   listConsignments,
   listReady,

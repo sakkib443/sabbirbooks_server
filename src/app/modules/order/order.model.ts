@@ -78,7 +78,7 @@ const orderCollegeSchema = new Schema(
 );
 
 /**
- * The parcel at the courier (Steadfast), once the order has been handed over
+ * The parcel at the courier (Steadfast or Pathao — `provider`), once the order has been handed over
  * through the API. Absent on every order sent by hand or not sent at all.
  *
  * `status` is the courier's own word (in_review, pending, delivered,
@@ -93,6 +93,10 @@ const orderCourierSchema = new Schema(
     consignmentId: { type: String, trim: true },
     trackingCode: { type: String, trim: true },
     status: { type: String, trim: true, default: 'in_review' },
+    // The courier's own word when it differs from `status` (Pathao's "In
+    // Transit", "At the Sorting HUB"…; `status` is kept in Steadfast's words
+    // so both couriers share the same groups and pages).
+    providerStatus: { type: String, trim: true, default: '' },
     statusUpdatedAt: { type: Date },
     lastMessage: { type: String, trim: true, default: '' },
     codAmount: { type: Number, default: 0 },
