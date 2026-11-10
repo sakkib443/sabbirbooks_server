@@ -86,6 +86,8 @@ export const createDemoCourse = async () => {
     fee: '999',
     offerPrice: '499',
     lectures: lessonCount,
+    summary: '1st Prof anatomy viva, class by class — recorded, watch any time.',
+    summaryBn: '১ম প্রফের অ্যানাটমি ভাইভা, ক্লাস ধরে ধরে — রেকর্ড করা, যেকোনো সময় দেখুন।',
     details:
       'Recorded classes for the 1st Prof anatomy viva — watch any time, as often as you like. This is a demo course: the videos are samples, the real classes come later.',
     detailsBn:
