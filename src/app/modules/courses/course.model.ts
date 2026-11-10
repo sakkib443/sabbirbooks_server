@@ -46,6 +46,20 @@ const courseSchema = new Schema<ICourse>({
   promoVideo: { type: String, required: false },
   benefits: [{ text: { type: String }, textBn: { type: String } }],
   faqs: [{ q: { type: String }, qBn: { type: String }, a: { type: String }, aBn: { type: String } }],
+  // Which parts of the course page show (11 Nov 2026) — the admin's on/off
+  // switches. Unset = the shop's default (components/recorded/courseSections).
+  display: {
+    time: { type: Boolean },
+    modules: { type: Boolean },
+    classes: { type: Boolean },
+    access: { type: Boolean },
+    contact: { type: Boolean },
+    curriculum: { type: Boolean },
+    includes: { type: Boolean },
+    benefits: { type: Boolean },
+    how: { type: Boolean },
+    faq: { type: Boolean },
+  },
   courseOverview: { type: String, required: false },
   courseIncludes: [
     {
