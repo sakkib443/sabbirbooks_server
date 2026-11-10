@@ -177,6 +177,29 @@ async function main() {
   const pd: any = await Order.findById(o1._id).lean();
   check(paid.status === 202 && pd.courier.paymentId === 'INV-77' && pd.courier.status === 'delivered', 'order.paid → marked paid out, status unchanged', pd.courier);
 
+  console.log('── Money: each courier on its own ──');
+  const o5 = await place('01755555555', 2);
+  await api().post('/api/courier/send').set(AUTH).send({ orderIds: [o5._id], provider: 'pathao' });
+  const d5: any = await Order.findById(o5._id).lean();
+  fake.status.set(d5.courier.consignmentId, 'Delivered');
+  await api().post('/api/courier/sync').set(AUTH).send({ orderIds: [o5._id] });
+  const owed = o5.total - 60;
+  const dash = (await api().get('/api/courier/dashboard').set(AUTH).query({ provider: 'pathao' })).body?.data || {};
+  check(dash.provider === 'pathao' && dash.byCourier?.pathao?.receivable === owed && dash.byCourier?.pathao?.receivableParcels === 1, 'dashboard: Pathao owes this parcel (COD − its fee)', dash.byCourier);
+  check(dash.byCourier?.steadfast?.parcels === 0 && dash.balance === null && (dash.payments || []).length === 0, 'Pathao view: no Steadfast balance or payouts mixed in');
+  check(dash.pathaoPaidOut === o1.total * 0 + (s1.courier.collectedAmount - 60), "Pathao's paid-out money = the parcel the webhook marked paid", dash.pathaoPaidOut);
+  const listP = (await api().get('/api/courier/consignments').set(AUTH).query({ provider: 'pathao' })).body?.data;
+  const listS = (await api().get('/api/courier/consignments').set(AUTH).query({ provider: 'steadfast' })).body?.data;
+  check(listP?.total === 3 && listS?.total === 0, 'parcel list filters by courier', { p: listP?.total, s: listS?.total });
+  const mk = await api().post('/api/courier/pathao/mark-paid').set(AUTH).send({ orderIds: [o5._id, o3._id], reference: 'PINV-9' });
+  const m5: any = await Order.findById(o5._id).lean();
+  check(mk.body?.data?.marked === 1 && mk.body?.data?.skipped === 1 && m5.courier.paymentId === 'pathao:PINV-9', 'mark paid by hand: the delivered one only (a returned one is skipped)', mk.body);
+  const dash2 = (await api().get('/api/courier/dashboard').set(AUTH).query({ provider: 'pathao' })).body?.data || {};
+  check(dash2.byCourier?.pathao?.receivable === 0, 'after marking, Pathao owes nothing');
+  const sum = (await api().get('/api/courier/summary').set(AUTH).query({ provider: 'pathao' })).body?.data || {};
+  check(sum.receivable === 0 && sum.payoutsReceived === dash2.pathaoPaidOut && sum.payoutCount === 2, 'accounts by date: Pathao payouts counted', sum);
+  check((await api().post('/api/courier/pathao/mark-paid').set('Authorization', `Bearer ${buyer}`).send({ orderIds: [o5._id] })).status === 403, 'only the Super Admin can mark money paid');
+
   console.log('── Steadfast is not touched ──');
   const o4 = await place('01744444444');
   const sf = await api().post('/api/courier/send').set(AUTH).send({ orderIds: [o4._id] });
