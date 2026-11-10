@@ -9,6 +9,8 @@ const courseBodySchema = z.object({
   title: z.string().min(1, "Title is required"),
   titleBn: z.string().optional(),
   detailsBn: z.string().optional(),
+  summary: z.string().max(400).optional(),
+  summaryBn: z.string().max(400).optional(),
   slug: z.string().optional(),
 
   // category / mentor — optional ObjectId references

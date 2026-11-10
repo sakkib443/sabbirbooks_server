@@ -36,6 +36,10 @@ const courseSchema = new Schema<ICourse>({
   totalExam: { type: Number, default: 0 },
   details: { type: String, required: false },
   detailsBn: { type: String, required: false },
+  // The one or two lines at the top of the course page (11 Nov 2026); the
+  // full text (details) is the overview lower down — not the same words twice.
+  summary: { type: String, required: false },
+  summaryBn: { type: String, required: false },
   courseOverview: { type: String, required: false },
   courseIncludes: [
     {

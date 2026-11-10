@@ -35,6 +35,8 @@ export interface ICourse {
   totalExam?: number;
   details?: string;
   detailsBn?: string;
+  summary?: string;
+  summaryBn?: string;
   courseOverview?: string;
   courseIncludes?: { icon: string; text: string; textBn?: string }[];
 
