@@ -37,6 +37,9 @@ export interface ICourse {
   detailsBn?: string;
   summary?: string;
   summaryBn?: string;
+  promoVideo?: string;
+  benefits?: { text?: string; textBn?: string }[];
+  faqs?: { q?: string; qBn?: string; a?: string; aBn?: string }[];
   courseOverview?: string;
   courseIncludes?: { icon: string; text: string; textBn?: string }[];
 

@@ -40,6 +40,12 @@ const courseSchema = new Schema<ICourse>({
   // full text (details) is the overview lower down — not the same words twice.
   summary: { type: String, required: false },
   summaryBn: { type: String, required: false },
+  // The course page's own parts the shop fills in (11 Nov 2026): the hero's
+  // intro video (YouTube), the Benefits list and the FAQ. Empty = the site's
+  // standard wording.
+  promoVideo: { type: String, required: false },
+  benefits: [{ text: { type: String }, textBn: { type: String } }],
+  faqs: [{ q: { type: String }, qBn: { type: String }, a: { type: String }, aBn: { type: String } }],
   courseOverview: { type: String, required: false },
   courseIncludes: [
     {
