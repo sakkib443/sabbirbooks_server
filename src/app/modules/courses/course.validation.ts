@@ -11,6 +11,9 @@ const courseBodySchema = z.object({
   detailsBn: z.string().optional(),
   summary: z.string().max(400).optional(),
   summaryBn: z.string().max(400).optional(),
+  promoVideo: z.string().optional(),
+  benefits: z.array(z.object({ text: z.string().optional(), textBn: z.string().optional() })).optional(),
+  faqs: z.array(z.object({ q: z.string().optional(), qBn: z.string().optional(), a: z.string().optional(), aBn: z.string().optional() })).optional(),
   slug: z.string().optional(),
 
   // category / mentor — optional ObjectId references
