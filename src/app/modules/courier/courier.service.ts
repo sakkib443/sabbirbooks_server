@@ -604,6 +604,7 @@ export interface CourierListQuery {
   district?: string;
   settled?: string; // 'yes' | 'no'
   payment?: string; // 'cod' | 'prepaid'
+  provider?: string; // 'steadfast' | 'pathao' (11 Nov 2026); empty = both
   q?: string;
   page?: string | number;
   limit?: string | number;
@@ -622,6 +623,9 @@ const baseFilter = (q: CourierListQuery, dateField: string) => {
   if (q.district) f.$or = [{ 'college.district': q.district }, { 'shippingAddress.district': q.district }];
   if (q.payment === 'cod') f['payment.method'] = 'cod';
   if (q.payment === 'prepaid') f['payment.method'] = { $ne: 'cod' };
+  // Which courier. Parcels sent before Pathao have provider 'steadfast' (or none).
+  if (q.provider === 'pathao') f['courier.provider'] = 'pathao';
+  if (q.provider === 'steadfast') f['courier.provider'] = { $ne: 'pathao' };
   if (q.settled === 'yes') f['courier.paymentId'] = { $nin: [null, ''] };
   if (q.settled === 'no') f['courier.paymentId'] = { $in: [null, ''] };
   const text = String(q.q || '').trim();
@@ -684,6 +688,40 @@ const listReady = async (q: CourierListQuery) => {
   return { rows: rows.map((r: any) => ({ ...r, codAmount: codFor(r) })), total };
 };
 
+/** Pathao money marked paid to the shop (net of its charge), by when it was marked. */
+const pathaoPaidOut = async (paidRange: Record<string, Date> = {}) => {
+  const rows: any[] = await Order.find({
+    'courier.provider': 'pathao',
+    'courier.paymentId': { $nin: [null, ''] },
+    ...(Object.keys(paidRange).length ? { 'courier.paidOutAt': paidRange } : {}),
+  })
+    .select('courier.collectedAmount courier.deliveryCharge courier.paymentId')
+    .lean();
+  const ids = new Set(rows.map((r) => String(r.courier.paymentId)));
+  const amount = rows.reduce((a, r) => a + (Number(r.courier.collectedAmount) || 0) - (Number(r.courier.deliveryCharge) || 0), 0);
+  return { amount, count: ids.size };
+};
+
+/**
+ * Pathao paid the shop for these parcels (11 Nov 2026) — by hand, from the
+ * Payouts page, when its webhook is not set up or missed one. Only Pathao
+ * parcels that are delivered (fully or partly) and not marked paid yet.
+ */
+const markPathaoPaid = async (ids: string[], reference?: string) => {
+  const valid = ids.filter((id) => Types.ObjectId.isValid(id));
+  const ref = String(reference || '').trim().slice(0, 60) || `manual-${bdDate()}`;
+  const r = await Order.updateMany(
+    {
+      _id: { $in: valid },
+      'courier.provider': 'pathao',
+      'courier.status': { $in: [...STATUSES_BY_GROUP.delivered, ...STATUSES_BY_GROUP.partial] },
+      'courier.paymentId': { $in: [null, ''] },
+    },
+    { $set: { 'courier.paymentId': `pathao:${ref}`, 'courier.paidOutAt': new Date() } }
+  );
+  return { marked: r.modifiedCount, skipped: valid.length - r.modifiedCount };
+};
+
 /** The money, over parcels sent in the window (or all time). */
 const summary = async (q: CourierListQuery) => {
   const match = { ...baseFilter(q, 'courier.sentAt'), 'courier.consignmentId': { $exists: true, $ne: null } };
@@ -728,17 +766,21 @@ const summary = async (q: CourierListQuery) => {
     else if (g === 'delivered' || g === 'partial') s.receivable += net;
   }
 
+  // Payouts received: Steadfast's are copied from its API (CourierPayment);
+  // Pathao has no payouts API, so its parcels marked paid (webhook
+  // "order.paid", or by hand on the Payouts page) are summed instead.
   const payRange: Record<string, Date> = {};
   if (q.from) payRange.$gte = new Date(q.from);
   if (q.to) payRange.$lt = new Date(q.to);
-  const payAgg = await CourierPayment.aggregate([
+  const payAgg = q.provider === 'pathao' ? [] : await CourierPayment.aggregate([
     ...(Object.keys(payRange).length ? [{ $match: { paidAt: payRange } }] : []),
     { $group: { _id: null, amount: { $sum: '$amount' }, count: { $sum: 1 } } },
   ]);
+  const pathaoPaid = q.provider === 'steadfast' ? { amount: 0, count: 0 } : await pathaoPaidOut(payRange);
   return {
     ...s,
-    payoutsReceived: payAgg[0]?.amount || 0,
-    payoutCount: payAgg[0]?.count || 0,
+    payoutsReceived: (payAgg[0]?.amount || 0) + pathaoPaid.amount,
+    payoutCount: (payAgg[0]?.count || 0) + pathaoPaid.count,
   };
 };
 
@@ -749,12 +791,29 @@ const summary = async (q: CourierListQuery) => {
  * parcels, the last payout and what the courier still owes. Calendar days in
  * Bangladesh time. Super Admin only (the route).
  */
-const dashboard = async () => {
+const dashboard = async (provider?: string) => {
   const today = bdDate();
   const firstDay = addDays(today, -29);
-  const rows: any[] = await Order.find({ 'courier.consignmentId': { $exists: true, $nin: [null, ''] } })
-    .select('orderSeq orderNumber shippingAddress.name courier.status courier.sentAt courier.codAmount courier.collectedAmount courier.deliveryCharge courier.paymentId courier.consignmentId')
+  const allRows: any[] = await Order.find({ 'courier.consignmentId': { $exists: true, $nin: [null, ''] } })
+    .select('orderSeq orderNumber shippingAddress.name courier.provider courier.status courier.sentAt courier.codAmount courier.collectedAmount courier.deliveryCharge courier.paymentId courier.consignmentId')
     .lean();
+  const isPathao = (r: any) => r.courier?.provider === 'pathao';
+  const rows = provider === 'pathao' ? allRows.filter(isPathao) : provider === 'steadfast' ? allRows.filter((r) => !isPathao(r)) : allRows;
+
+  // Each courier's own money (11 Nov 2026), whatever the filter: what it
+  // still owes (delivered, not paid) and what it has paid, net of its charge.
+  const byCourier = { steadfast: { parcels: 0, transit: 0, receivable: 0, receivableParcels: 0 }, pathao: { parcels: 0, transit: 0, receivable: 0, receivableParcels: 0 } };
+  for (const r of allRows) {
+    const b = byCourier[isPathao(r) ? 'pathao' : 'steadfast'];
+    const c = r.courier || {};
+    const g = groupOf(c.status);
+    b.parcels++;
+    if (g === 'transit') b.transit++;
+    if ((g === 'delivered' || g === 'partial') && !c.paymentId) {
+      b.receivable += (Number(c.collectedAmount) || 0) - (Number(c.deliveryCharge) || 0);
+      b.receivableParcels++;
+    }
+  }
 
   const days = Array.from({ length: 30 }, (_, i) => addDays(firstDay, i));
   const daily = new Map(days.map((d) => [d, { day: d, delivered: 0, transit: 0, partial: 0, returned: 0 }]));
@@ -815,13 +874,16 @@ const dashboard = async () => {
       cod: Number(r.courier.codAmount) || 0,
       status: r.courier.status,
       group: groupOf(r.courier.status),
+      provider: r.courier.provider || 'steadfast',
     }));
 
-  const payments: any[] = await CourierPayment.find().sort({ paidAt: -1 }).limit(8).lean();
-  const paidAgg = await CourierPayment.aggregate([{ $group: { _id: null, amount: { $sum: '$amount' }, count: { $sum: 1 } } }]);
+  // Steadfast's payouts come from its API; none when only Pathao is shown.
+  const payments: any[] = provider === 'pathao' ? [] : await CourierPayment.find().sort({ paidAt: -1 }).limit(8).lean();
+  const paidAgg = provider === 'pathao' ? [] : await CourierPayment.aggregate([{ $group: { _id: null, amount: { $sum: '$amount' }, count: { $sum: 1 } } }]);
+  const pathaoPaid = provider === 'steadfast' ? { amount: 0, count: 0 } : await pathaoPaidOut();
 
   let balance: number | null = null;
-  if (steadfastConfigured()) {
+  if (provider !== 'pathao' && steadfastConfigured()) {
     try {
       balance = await getBalance();
     } catch {
@@ -838,9 +900,12 @@ const dashboard = async () => {
       ? { paymentId: payments[0].paymentId, amount: payments[0].amount, paidAt: payments[0].paidAt, status: payments[0].status, parcels: payments[0].consignments?.length || 0 }
       : null,
     payments: payments.map((p) => ({ paymentId: p.paymentId, amount: p.amount, paidAt: p.paidAt, status: p.status, parcels: p.consignments?.length || 0 })),
-    paidOutAllTime: paidAgg[0]?.amount || 0,
-    payoutCount: paidAgg[0]?.count || 0,
+    paidOutAllTime: (paidAgg[0]?.amount || 0) + pathaoPaid.amount,
+    payoutCount: (paidAgg[0]?.count || 0) + pathaoPaid.count,
+    pathaoPaidOut: pathaoPaid.amount,
     balance,
+    provider: provider || '',
+    byCourier,
   };
 };
 
@@ -950,6 +1015,7 @@ export const CourierService = {
   syncStatuses,
   handleWebhook,
   handlePathaoWebhook,
+  markPathaoPaid,
   syncPayments,
   listConsignments,
   listReady,

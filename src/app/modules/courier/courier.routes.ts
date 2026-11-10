@@ -66,7 +66,7 @@ router.get('/ready', ...read, wrap((req) => CourierService.listReady(scoped(req)
 router.get('/consignments', ...read, wrap((req) => CourierService.listConsignments(scoped(req))));
 router.get('/summary', ...owner, wrap((req) => CourierService.summary(scoped(req))));
 // The courier money dashboard — Super Admin only (owner).
-router.get('/dashboard', ...owner, wrap(() => CourierService.dashboard()));
+router.get('/dashboard', ...owner, wrap((req) => CourierService.dashboard(String(req.query.provider || '') || undefined)));
 router.get('/payments', ...owner, wrap((req) => CourierService.listPayments(scoped(req))));
 
 router.post(
@@ -98,6 +98,19 @@ router.post(
 );
 
 router.post('/payments/sync', ...owner, wrap(() => CourierService.syncPayments()));
+
+// Pathao paid the shop for these parcels — by hand (11 Nov 2026). Money, so
+// the Super Admin's alone, like the other payout screens.
+router.post(
+  '/pathao/mark-paid',
+  ...owner,
+  wrap(async (req) => {
+    const ids = Array.isArray(req.body?.orderIds) ? req.body.orderIds.map(String) : [];
+    if (!ids.length) throw new Error('No parcels selected');
+    if (ids.length > 2000) throw new Error('Too many parcels at once (max 2000)');
+    return CourierService.markPathaoPaid(ids, req.body?.reference);
+  })
+);
 
 /**
  * Steadfast's webhook. Public, so it is guarded by the Bearer token set in the
