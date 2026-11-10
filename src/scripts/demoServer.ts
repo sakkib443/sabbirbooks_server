@@ -396,8 +396,14 @@ async function main() {
     }
   }
 
+  // The demo recorded course (11 Nov 2026), so /courses has something to show
+  // on every local start — the same course the live site has.
+  const { createDemoCourse } = await import('../app/modules/courses/demoCourse');
+  const demoCourse: any = (await createDemoCourse()).course;
+
   const port = Number(process.env.DEMO_PORT || 5000);
   app.listen(port, () => {
+    console.log(`  demo course: http://localhost:3002/courses/${demoCourse.slug}`);
     console.log(`\nDemo API on http://localhost:${port}`);
     console.log(`  ${outline.parts.length} parts · ${topicsMade} topics · ${questionsMade} questions`);
     console.log(`  ${inserted} medical colleges seeded`);
