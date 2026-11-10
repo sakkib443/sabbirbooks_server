@@ -248,7 +248,7 @@ const getAllEnrollments = async (query: {
 
   const total = await Enrollment.countDocuments(filter);
   const enrollments = await Enrollment.find(filter)
-    .populate('studentId', 'firstName lastName name email phoneNumber location gender')
+    .populate('studentId', 'firstName lastName name email phoneNumber location gender medicalCollegeName')
     .populate('courseId', 'title titleBn image slug fee offerPrice type')
     .populate('batchId', 'name id')
     .sort({ createdAt: -1 })
