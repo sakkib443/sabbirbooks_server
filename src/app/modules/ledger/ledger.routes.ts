@@ -14,7 +14,7 @@ const owner = [authMiddleware, authorize('superAdmin')];
 
 const viewerOf = (req: Request): Viewer => {
   const u: any = (req as any).user;
-  return { id: u?._id ? String(u._id) : u?.id ? String(u.id) : null, role: String(u?.role || '') };
+  return { id: u?._id ? String(u._id) : u?.id ? String(u.id) : null, role: String(u?.role || ''), viewAs: Boolean(u?.viewAs) };
 };
 
 const wrap = (fn: (req: Request) => Promise<unknown>) => async (req: Request, res: Response) => {

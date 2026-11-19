@@ -148,6 +148,13 @@ async function main() {
 
   const upd = await api().patch(`/api/ledger/${e1.body.data._id}`).set(S).send({ amount: 4500 });
   check(upd.body?.data?.amount === 4500, 'an entry can be corrected');
+  // "View as admin" (20 Nov 2026): the Super Admin's own entries must not show
+  // as an admin's, and nothing is written from that view.
+  const asAdmin = { ...S, 'x-view-as': 'admin' };
+  const va = (await api().get('/api/ledger').set(asAdmin).query({ from: today, to: today })).body?.data || {};
+  const vaCreators = (va.entries || []).map((e: any) => e.createdBy?.role);
+  check(va.mine === true && vaCreators.length > 0 && vaCreators.every((r: string) => r !== 'superAdmin'), 'viewed as admin: only what admins wrote, none of the Super Admin\'s', vaCreators);
+  check((await api().post('/api/ledger').set(asAdmin).send({ day: today, type: 'expense', category: 'ছাপা', amount: 10 })).status === 400, 'viewed as admin: writing is refused');
   check((await api().get('/api/ledger').set(M)).status === 403, 'a manager cannot open the accounts');
   check((await api().delete(`/api/ledger/${e1.body.data._id}`).set(S)).status === 200, 'the Super Admin can remove an entry');
 

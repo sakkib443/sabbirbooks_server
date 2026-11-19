@@ -40,7 +40,19 @@ export const DEFAULT_CATEGORIES = {
   },
 };
 
-export type Viewer = { id: string | null; role: string };
+/** viewAs: the Super Admin looking through an admin's eyes ("View as"). */
+export type Viewer = { id: string | null; role: string; viewAs?: boolean };
+
+/**
+ * The Super Admin's own entries never show on an admin's screen (the shop,
+ * 20 Nov 2026) — including when the Super Admin uses "View as admin", which
+ * keeps their own id and so used to show them their own shop entries as if an
+ * admin had them. Viewed as an admin, the book shows what admins wrote.
+ */
+const superAdminIds = async () => {
+  const { User } = await import('../user/user.model');
+  return (await User.find({ role: 'superAdmin' }).select('_id').lean()).map((u: any) => u._id);
+};
 
 /** The hour an Accounts day starts (0–23). */
 const startHour = async (): Promise<number> => {
@@ -68,12 +80,16 @@ const range = (q: any, today: string) => {
 };
 
 /** Which book and whose entries a viewer may see. */
-const scopeOf = (viewer: Viewer, q: any) => {
+const scopeOf = async (viewer: Viewer, q: any) => {
   if (viewer.role === 'superAdmin') {
     const book = q?.book === 'personal' ? 'personal' : 'shop';
     // Entries written before the two books existed have no `book`: they are the shop's.
     const filter = book === 'personal' ? { book: 'personal' } : { book: { $ne: 'personal' } };
     return { book, filter, sales: book === 'shop', mine: false };
+  }
+  // The Super Admin "viewing as" an admin: what admins wrote, none of their own.
+  if (viewer.viewAs) {
+    return { book: 'shop', filter: { book: { $ne: 'personal' }, createdBy: { $nin: await superAdminIds() } }, sales: false, mine: true };
   }
   // An admin: the shop book, and only what they wrote.
   return { book: 'shop', filter: { book: { $ne: 'personal' }, createdBy: isValidObjectId(viewer.id) ? new Types.ObjectId(String(viewer.id)) : null }, sales: false, mine: true };
@@ -83,7 +99,7 @@ const report = async (q: any = {}, viewer: Viewer) => {
   const h = await startHour();
   const today = dayOf(new Date(), h);
   const { from, to } = range(q, today);
-  const scope = scopeOf(viewer, q);
+  const scope = await scopeOf(viewer, q);
 
   const isEarned = { $or: [{ $eq: ['$status', 'delivered'] }, { $eq: ['$payment.status', 'paid'] }] };
   const deliveryOf = deliveryOfExpr;
@@ -152,13 +168,20 @@ const fields = (b: any, partial: boolean) => {
   return out;
 };
 
+/** "View as" is for looking: an entry written there would land in the wrong book under the wrong name. */
+const noWritesViewingAs = (viewer: Viewer) => {
+  if (viewer.viewAs) throw new Error('"View as" মোডে হিসাব লেখা যায় না — নিজের (Super Admin) প্যানেলে ফিরে লিখুন');
+};
+
 const add = async (b: any, viewer: Viewer) => {
+  noWritesViewingAs(viewer);
   // Only the Super Admin has a personal book; an admin always writes to the shop's.
   const book = viewer.role === 'superAdmin' && b?.book === 'personal' ? 'personal' : 'shop';
   return LedgerEntry.create({ ...fields(b || {}, false), book, createdBy: viewer.id });
 };
 
 const update = async (id: string, b: any, viewer: Viewer) => {
+  noWritesViewingAs(viewer);
   if (!isValidObjectId(id)) throw new Error('Not found');
   // An admin may correct their own shop entries, nothing else.
   const filter: any = viewer.role === 'superAdmin' ? { _id: id } : { _id: id, book: { $ne: 'personal' }, createdBy: viewer.id };
