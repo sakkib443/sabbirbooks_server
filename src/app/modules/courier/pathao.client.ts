@@ -15,6 +15,8 @@
  *   GET  /aladdin/api/v1/orders/:id/info       its status
  *   GET  /aladdin/api/v1/city-list, /cities/:id/zone-list   only if Pathao
  *        insists on city/zone for an address (see resolveCityZone)
+ *   POST /aladdin/api/v1/merchant/price-plan   what a parcel would cost, by
+ *        item type (see pricePlan) — asked, never booked
  */
 
 const BASE_URL = (process.env.PATHAO_BASE_URL || 'https://api-hermes.pathao.com').replace(/\/+$/, '');
@@ -159,6 +161,11 @@ export interface PathaoParcel {
   item_weight: number;
   item_description?: string;
   special_instruction?: string;
+  /**
+   * Pathao prices a parcel by its item type. 2 = Parcel unless the shop has
+   * chosen another (Settings.pathaoItemType — see itemTypePrices).
+   */
+  item_type?: number;
   /** Only sent when Pathao insists (see createOrder). */
   district?: string;
   upazila?: string;
@@ -176,11 +183,13 @@ export interface PathaoCreated {
  * upazila and the parcel is sent once more.
  */
 export const createOrder = async (p: PathaoParcel): Promise<PathaoCreated> => {
-  const { district, upazila, ...fields } = p;
+  const { district, upazila, item_type, ...fields } = p;
   const body: Record<string, unknown> = {
     store_id: Number(process.env.PATHAO_STORE_ID),
     delivery_type: 48, // normal delivery
-    item_type: 2, // parcel
+    // 2 = Parcel unless the shop chose another (an undefined here would drop
+    // the field from the JSON, and Pathao refuses an order without it).
+    item_type: Number.isInteger(item_type) && (item_type as number) > 0 ? item_type : 2,
     ...fields,
   };
   let res: any;
@@ -201,6 +210,62 @@ export const createOrder = async (p: PathaoParcel): Promise<PathaoCreated> => {
     status: String(d.order_status || 'Pending'),
     deliveryFee: d.delivery_fee != null ? Number(d.delivery_fee) : null,
   };
+};
+
+// ─── Prices by item type ─────────────────────────────────────
+
+/**
+ * Pathao's item types as its public docs name them. Anything else Pathao
+ * accepts is shown by number: which number is the book rate is Pathao's to
+ * say, and its price list (below) is how the shop finds out.
+ */
+export const PATHAO_ITEM_TYPE_NAMES: Record<number, string> = { 1: 'Document', 2: 'Parcel' };
+
+/** The numbers asked about on the courier page. */
+export const PATHAO_ITEM_TYPES_TO_TRY = [1, 2, 3, 4, 5, 6];
+
+export interface PathaoPrice {
+  ok: boolean;
+  /** What Pathao charges for the delivery, after its discounts. */
+  price: number | null;
+  /** Pathao's refusal, when it does not take this item type. */
+  error: string | null;
+}
+
+/**
+ * What Pathao would charge for one parcel (POST /merchant/price-plan) — a
+ * question only: nothing is booked.
+ *
+ * Asked in Nov 2026 when Pathao told the shop that parcels sent as "Parcel"
+ * bill ৳120 while books have a lower rate. Pathao's public docs list only
+ * 1 = Document and 2 = Parcel, so the shop asks Pathao's own price list for
+ * each number and picks the cheaper one for books.
+ */
+export const pricePlan = async (p: {
+  itemType: number;
+  city: number;
+  zone: number;
+  weight?: number;
+}): Promise<PathaoPrice> => {
+  try {
+    const res = await call('POST', '/aladdin/api/v1/merchant/price-plan', {
+      store_id: Number(process.env.PATHAO_STORE_ID),
+      item_type: p.itemType,
+      delivery_type: 48, // normal delivery, as every parcel is sent
+      item_weight: p.weight ?? 0.5,
+      recipient_city: p.city,
+      recipient_zone: p.zone,
+    });
+    const d = res?.data || {};
+    const value = d.final_price ?? d.price;
+    return value == null
+      ? { ok: false, price: null, error: `unexpected answer ${JSON.stringify(res).slice(0, 160)}` }
+      : { ok: true, price: Number(value), error: null };
+  } catch (e: any) {
+    // A wrong login is not "this item type is refused" — let that surface.
+    if (e instanceof PathaoError && (e.httpStatus === 401 || !e.httpStatus)) throw e;
+    return { ok: false, price: null, error: String(e?.message || e).replace(/^Pathao:\s*/, '') };
+  }
 };
 
 /** The parcel's status as Pathao words it ("Pending", "In Transit", "Delivered"…). */

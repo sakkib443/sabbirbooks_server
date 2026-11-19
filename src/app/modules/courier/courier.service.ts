@@ -25,7 +25,19 @@ import {
   SteadfastParcel,
   trackingPage,
 } from './steadfast.client';
-import { createOrder as pathaoCreate, mapPathaoStatus, pathaoConfigured, pathaoPing, pathaoStatus } from './pathao.client';
+import {
+  createOrder as pathaoCreate,
+  mapPathaoStatus,
+  pathaoConfigured,
+  pathaoPing,
+  pathaoStatus,
+  pricePlan as pathaoPricePlan,
+  resolveCityZone,
+  PATHAO_ITEM_TYPE_NAMES,
+  PATHAO_ITEM_TYPES_TO_TRY,
+} from './pathao.client';
+import { Settings } from '../settings/settings.model';
+import { SettingsService } from '../settings/settings.services';
 
 export type CourierProvider = 'steadfast' | 'pathao';
 export const COURIER_NAME: Record<CourierProvider, string> = { steadfast: 'Steadfast', pathao: 'Pathao' };
@@ -123,6 +135,60 @@ export interface SendResult {
  * the same path as the admin's Shipped button — so the buyer gets the shipped
  * SMS carrying the courier's tracking link.
  */
+/** The item type Pathao parcels are booked as — the shop's choice, 2 (Parcel) by default. */
+const pathaoItemType = async (): Promise<number> => {
+  const s = await Settings.findOne({}).select('pathaoItemType').lean<{ pathaoItemType?: number }>();
+  const n = Number(s?.pathaoItemType);
+  return Number.isInteger(n) && n > 0 ? n : 2;
+};
+
+/**
+ * What Pathao would charge for one book's parcel under each item type, to
+ * Dhaka and to Khulna — the table on the courier payouts page.
+ *
+ * Pathao told the shop (Nov 2026) that "Parcel" bills ৳120 and books have a
+ * lower rate, but its public docs name only 1 = Document and 2 = Parcel. So
+ * rather than guess the book's number, this asks Pathao's own price list
+ * about each, and the Super Admin picks the one Pathao names. Prices only:
+ * nothing is booked.
+ */
+const pathaoItemTypePrices = async () => {
+  if (!pathaoConfigured()) throw new Error('Pathao is not set up yet (credentials missing on the server)');
+  const [dhaka, khulna] = await Promise.all([
+    resolveCityZone('Dhaka', 'Dhanmondi'),
+    resolveCityZone('Khulna', 'Khulna Sadar'),
+  ]);
+  if (!dhaka.city || !dhaka.zone || !khulna.city || !khulna.zone) {
+    throw new Error("Could not find Pathao's Dhaka and Khulna areas to price against");
+  }
+  const rows = [];
+  for (const itemType of PATHAO_ITEM_TYPES_TO_TRY) {
+    const [inDhaka, inKhulna] = await Promise.all([
+      pathaoPricePlan({ itemType, city: dhaka.city, zone: dhaka.zone }),
+      pathaoPricePlan({ itemType, city: khulna.city, zone: khulna.zone }),
+    ]);
+    rows.push({ itemType, name: PATHAO_ITEM_TYPE_NAMES[itemType] || null, dhaka: inDhaka, khulna: inKhulna });
+  }
+  return { current: await pathaoItemType(), weightKg: 0.5, rows };
+};
+
+/**
+ * Book every Pathao parcel from now on as this item type. Checked with Pathao
+ * first: a number it refuses would make every send fail.
+ */
+const setPathaoItemType = async (value: unknown) => {
+  const itemType = Number(value);
+  if (!Number.isInteger(itemType) || itemType < 1 || itemType > 99) throw new Error('Pick an item type number');
+  if (!pathaoConfigured()) throw new Error('Pathao is not set up yet (credentials missing on the server)');
+  const dhaka = await resolveCityZone('Dhaka', 'Dhanmondi');
+  if (!dhaka.city || !dhaka.zone) throw new Error("Could not find Pathao's Dhaka area to check against");
+  const check = await pathaoPricePlan({ itemType, city: dhaka.city, zone: dhaka.zone });
+  if (!check.ok) throw new Error(`Pathao does not take item type ${itemType}: ${check.error}`);
+  await SettingsService.getSettingsService(); // makes the one settings document if there is none yet
+  await Settings.updateOne({}, { $set: { pathaoItemType: itemType } });
+  return { current: itemType, price: check.price };
+};
+
 const sendOrders = async (ids: string[], userId?: string | null, provider: CourierProvider = 'steadfast'): Promise<SendResult[]> => {
   if (provider === 'pathao' && !pathaoConfigured()) throw new Error('Pathao is not set up yet (credentials missing on the server)');
   if (provider === 'steadfast' && !steadfastConfigured()) throw new Error('Steadfast is not set up (API key missing)');
@@ -164,6 +230,8 @@ const sendOrders = async (ids: string[], userId?: string | null, provider: Couri
   }
 
   if (provider === 'pathao') {
+    // Read once for the whole batch: Pathao bills by it (see pathaoItemTypePrices).
+    const itemType = await pathaoItemType();
     for (let i = 0; i < parcels.length; i += 3) {
       await Promise.all(
         parcels.slice(i, i + 3).map(async ({ order: o, parcel }) => {
@@ -184,6 +252,7 @@ const sendOrders = async (ids: string[], userId?: string | null, provider: Couri
               // About half a kilo a book; Pathao takes 0.5–10 kg.
               item_weight: Math.min(10, Math.max(0.5, qty * 0.5)),
               item_description: parcel.item_description,
+              item_type: itemType,
               ...(parcel.note ? { special_instruction: parcel.note } : {}),
               district: a.district,
               upazila: a.upazila || a.city,
@@ -1016,6 +1085,8 @@ export const CourierService = {
   handleWebhook,
   handlePathaoWebhook,
   markPathaoPaid,
+  pathaoItemTypePrices,
+  setPathaoItemType,
   syncPayments,
   listConsignments,
   listReady,

@@ -103,6 +103,8 @@ export interface ISiteSettings {
      * add up.
      */
     quantityDiscounts: IQuantityDiscountTier[];
+    /** The item type Pathao parcels are booked as (2 = Parcel). See the model. */
+    pathaoItemType?: number;
     /** Landing-page slide photos, in order. Empty = the site's built-in ones. */
     handoverPhotos?: { url: string; bn?: string; en?: string; pos?: string }[];
 

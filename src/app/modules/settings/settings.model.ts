@@ -185,6 +185,15 @@ const settingsSchema = new Schema<ISiteSettings>(
         demoCourseSeededAt: { type: Date },
         // When the demo course's free class was made paid (server.ts), once.
         demoCoursePaidOnlyAt: { type: Date },
+
+        // ── Couriers ───────────────────────────────────────────────────────
+        // The item type every Pathao parcel is booked as. Pathao bills by it:
+        // in Nov 2026 Pathao told the shop that "Parcel" (2) charges ৳120 and
+        // that books have their own, lower rate. Which number that is is not
+        // in Pathao's public docs, so the Super Admin picks it from Pathao's
+        // own price list on the courier payouts page. 2 until then — what
+        // every parcel had been sent as.
+        pathaoItemType: { type: Number, default: 2, min: 1, max: 99 },
     },
     { timestamps: true }
 );

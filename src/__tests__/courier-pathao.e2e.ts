@@ -25,6 +25,14 @@ const fake = {
   nextToken: 'tok1',
   requireCity: false,
   n: 100,
+  pricePlans: [] as any[],
+};
+// The fake's price list: types 1–3 exist (3 standing in for the book rate,
+// whatever number Pathao really gives it); anything else is refused.
+const FAKE_PRICES: Record<number, { dhaka: number; khulna: number }> = {
+  1: { dhaka: 60, khulna: 50 },
+  2: { dhaka: 120, khulna: 110 },
+  3: { dhaka: 80, khulna: 70 },
 };
 const fakeServer = http.createServer((req, res) => {
   let body = '';
@@ -56,6 +64,14 @@ const fakeServer = http.createServer((req, res) => {
     if (info) return send(200, { type: 'success', data: { consignment_id: info[1], order_status: fake.status.get(info[1]) || 'Pending' } });
     if (url === '/aladdin/api/v1/city-list') return send(200, { data: { data: [{ city_id: 1, city_name: 'Dhaka' }, { city_id: 2, city_name: 'Khulna' }] } });
     if (url === '/aladdin/api/v1/cities/2/zone-list') return send(200, { data: { data: [{ zone_id: 51, zone_name: 'Khulna Sadar' }, { zone_id: 50, zone_name: 'Sonadanga' }] } });
+    if (url === '/aladdin/api/v1/cities/1/zone-list') return send(200, { data: { data: [{ zone_id: 11, zone_name: 'Mirpur' }, { zone_id: 12, zone_name: 'Dhanmondi' }] } });
+    if (req.method === 'POST' && url === '/aladdin/api/v1/merchant/price-plan') {
+      fake.pricePlans.push(json);
+      const plan = FAKE_PRICES[json.item_type];
+      if (!plan) return send(422, { message: 'Validation failed', errors: { item_type: ['The selected item type is invalid.'] } });
+      const price = json.recipient_city === 1 ? plan.dhaka : plan.khulna;
+      return send(200, { type: 'success', code: 200, data: { price, discount: 0, promo_discount: 0, final_price: price, cod_enabled: 1, cod_percentage: 0.01 } });
+    }
     send(404, { message: 'not found' });
   });
 });
@@ -199,6 +215,41 @@ async function main() {
   const sum = (await api().get('/api/courier/summary').set(AUTH).query({ provider: 'pathao' })).body?.data || {};
   check(sum.receivable === 0 && sum.payoutsReceived === dash2.pathaoPaidOut && sum.payoutCount === 2, 'accounts by date: Pathao payouts counted', sum);
   check((await api().post('/api/courier/pathao/mark-paid').set('Authorization', `Bearer ${buyer}`).send({ orderIds: [o5._id] })).status === 403, 'only the Super Admin can mark money paid');
+
+  console.log('── Item type: Pathao bills by it (15 Nov 2026) ──');
+  {
+    // A staff login needs its device approved first (staff-devices.e2e.ts).
+    await registerLogin('admin@test.com', 'a1', 'admin');
+    const { approveDevice } = await import('./_approveDevice');
+    await approveDevice('admin@test.com', 'a1');
+    const admin = (await api().post('/api/auth/login').set('x-device-id', 'a1').send({ email: 'admin@test.com', password: 'pass1234' })).body?.data?.accessToken;
+    check(Boolean(admin), 'an Admin is signed in for the next two checks');
+    check((await api().get('/api/courier/pathao/item-types').set('Authorization', `Bearer ${admin}`)).status === 403, 'price list: Super Admin only (it is money)');
+    const before = fake.orders.length;
+    const list = await api().get('/api/courier/pathao/item-types').set(AUTH);
+    const d = list.body?.data || {};
+    const row = (n: number) => (d.rows || []).find((r: any) => r.itemType === n) || {};
+    check(list.status === 200 && d.current === 2, 'today every parcel goes as 2 (Parcel)', d.current);
+    check(row(2).name === 'Parcel' && row(2).dhaka?.price === 120 && row(2).khulna?.price === 110, "Parcel's price, to Dhaka and to Khulna", row(2));
+    check(row(1).name === 'Document' && row(3).dhaka?.ok === true && row(3).dhaka?.price === 80 && row(3).name === null, 'every number Pathao takes is listed with its price', row(3));
+    check(row(4).dhaka?.ok === false && /item type is invalid/.test(row(4).dhaka?.error || ''), "a number Pathao refuses is shown with Pathao's reason", row(4));
+    const plan = fake.pricePlans.find((p) => p.item_type === 2 && p.recipient_city === 1) || {};
+    check(plan.store_id === 441295 && plan.delivery_type === 48 && plan.item_weight === 0.5 && plan.recipient_zone === 12, 'asked for our store, normal delivery, one book (0.5 kg), Dhanmondi', plan);
+    check(fake.orders.length === before, 'asking the price books nothing');
+
+    const bad = await api().post('/api/courier/pathao/item-type').set(AUTH).send({ itemType: 4 });
+    check(bad.status === 400 && /does not take item type 4/.test(bad.body?.message || ''), 'a number Pathao refuses cannot be saved', bad.body);
+    check((await api().post('/api/courier/pathao/item-type').set(AUTH).send({ itemType: 'book' })).status === 400, 'not a number → refused');
+    check((await api().post('/api/courier/pathao/item-type').set('Authorization', `Bearer ${admin}`).send({ itemType: 3 })).status === 403, 'only the Super Admin can change it');
+    const ok3 = await api().post('/api/courier/pathao/item-type').set(AUTH).send({ itemType: 3 });
+    check(ok3.status === 200 && ok3.body?.data?.current === 3 && ok3.body?.data?.price === 80, 'saved, with its Dhaka price', ok3.body);
+    check((await api().get('/api/courier/pathao/item-types').set(AUTH)).body?.data?.current === 3, 'the price list now shows 3 as current');
+
+    const o6 = await place('01766666666');
+    await api().post('/api/courier/send').set(AUTH).send({ orderIds: [o6._id], provider: 'pathao' });
+    const p6 = fake.orders.find((p) => p.merchant_order_id === o6.orderNumber) || {};
+    check(p6.item_type === 3 && p6.delivery_type === 48, 'the next parcel goes to Pathao as 3', p6);
+  }
 
   console.log('── Steadfast is not touched ──');
   const o4 = await place('01744444444');

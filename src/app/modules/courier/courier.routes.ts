@@ -112,6 +112,13 @@ router.post(
   })
 );
 
+// The item type Pathao parcels are booked as (15 Nov 2026). Pathao bills by it
+// — "Parcel" ৳120, books a lower rate — so it is money, and the Super Admin's:
+// the price list asks Pathao what each type would cost (nothing is booked),
+// and the choice is checked with Pathao before it is saved.
+router.get('/pathao/item-types', ...owner, wrap(() => CourierService.pathaoItemTypePrices()));
+router.post('/pathao/item-type', ...owner, wrap((req) => CourierService.setPathaoItemType(req.body?.itemType)));
+
 /**
  * Steadfast's webhook. Public, so it is guarded by the Bearer token set in the
  * Steadfast panel and in STEADFAST_WEBHOOK_TOKEN. No token configured = the
