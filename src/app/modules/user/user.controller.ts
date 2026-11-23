@@ -68,10 +68,12 @@ export const createStaffController = async (req: Request, res: Response) => {
 export const createStudentController = async (req: Request, res: Response) => {
   try {
     const result = await UserService.createStudentServices(req.body);
+    // The new document still carries the password hash; it has no business in a response.
+    const { password: _hash, ...user } = (result.user as any).toObject ? (result.user as any).toObject() : (result.user as any);
     res.status(201).json({
       success: true,
       message: 'Student account created',
-      data: result.user,
+      data: user,
       credentials: result.credentials, // { email, password, role } — show once
     });
   } catch (error: any) {
